@@ -552,6 +552,137 @@ Cada funcionalidade possui:
 
 O backend implementa os testes comportamentais relacionados às regras de negócio e API.
 
+Essas especificações compartilhadas descrevem comportamentos do produto na
+linguagem do domínio. O backend implementa seus steps em
+`tests/step_definitions/`; cada cliente possui sua própria implementação dos
+comportamentos aplicáveis ao seu contexto.
+
+Os cenários técnicos que verificam `/ready`, PostgreSQL e o isolamento dos testes
+ficam em `tests/features/`, com steps exclusivos em `tests/infrastructure_steps/`.
+Eles validam a infraestrutura do backend e são executados por um alvo separado.
+
+| Alvo Cargo | Cenários | Steps |
+|---|---|---|
+| `bdd` | `../features/` — comportamentos compartilhados do produto | `tests/step_definitions/` |
+| `bdd_infrastructure` | `tests/features/` — verificações técnicas do backend | `tests/infrastructure_steps/` |
+
+Para executar os testes BDD, é necessário ter Rust/Cargo instalados e um daemon
+Docker disponível para o usuário atual. Na primeira execução, o Docker precisa
+conseguir obter a imagem `postgres:17-alpine`.
+
+No diretório `backend`, verifique o Docker e execute os comportamentos do produto:
+
+```bash
+docker info
+cargo test --test bdd --locked
+```
+
+Para executar todos os cenários técnicos ou somente o de `/ready`:
+
+```bash
+cargo test --test bdd_infrastructure --locked
+cargo test --test bdd_infrastructure --locked -- --tags @ready
+```
+
+`cargo test --locked` inclui os dois alvos. O comando já existente na CI,
+`cargo test --all-features --locked`, também executa ambos uma vez; não é preciso
+duplicar a execução dos cenários técnicos em outro step do workflow.
+
+Os dois alvos reutilizam o código de `tests/support/`, mas registram seus steps e
+leem seus diretórios de cenários separadamente. Cada execução de um alvo cria um
+único container PostgreSQL, reutilizado por todos os cenários daquela suíte, com
+porta dinâmica. Executar os dois alvos cria dois containers independentes. A
+preparação aplica as migrations e a fixture `tests/fixtures/api_bdd.sql` a uma base-modelo.
+Cenários consultivos compartilham uma cópia dessa base com transações de leitura
+por padrão. Cenários que escrevem devem receber a tag `@isolated_database`, na
+feature, regra ou cenário, para obter uma base própria clonada do modelo.
+
+Os testes usam o router e o `AppState` reais em memória. Não é necessário iniciar
+o servidor HTTP nem o PostgreSQL do Compose; a suíte não lê `DATABASE_URL` e usa
+credenciais próprias no container descartável. Os hooks liberam os recursos dos
+cenários, e o encerramento da suíte remove o container.
+
+Os resultados de cada suíte aparecem na saída do comando, com a quantidade de
+cenários e steps executados e os detalhes de eventuais falhas. Na CI, essa saída
+fica disponível no job de testes do GitHub Actions.
+
+A aprovação dos testes técnicos não representa cobertura dos comportamentos do
+produto. Enquanto as especificações funcionais não tiverem cenários, o alvo
+`bdd` pode terminar com zero cenários executados, sem validar regras de negócio.
+
+---
+
+# Documentação Rust
+
+Os Rustdocs fazem parte da entrega de cada implementação. Devem acompanhar as
+alterações de comportamento no mesmo PR, incluindo o código de testes.
+
+- Use `//!` para explicar a responsabilidade de crates e módulos, suas relações
+  e o estado atual de implementação. Módulos reservados devem ser identificados
+  como tal, sem apresentar funcionalidades futuras como disponíveis.
+- Use `///` em tipos, campos, constantes e funções, inclusive itens internos
+  relevantes à manutenção. Em implementações de traits, aproveite o contrato do
+  trait e documente os detalhes específicos quando necessário.
+- Comece com um resumo curto. Explique contratos, invariantes, efeitos colaterais,
+  configuração, concorrência e ciclo de vida dos recursos quando forem relevantes.
+  Evite repetir a assinatura ou narrar cada linha da implementação.
+- Mantenha o texto em português. Use seções `Parâmetros`, `Retorno`, `Erros` e
+  `Exemplos` quando acrescentarem informação; use `Panics` para as condições que
+  interrompem a execução por panic, separadamente dos erros retornados em `Result`.
+  Funções `unsafe`, caso sejam introduzidas, devem explicar suas precondições em
+  uma seção `Safety`.
+- Prefira links Rustdoc para tipos e funções, como ``[`AppState`]``, e exemplos
+  pequenos que compilem. Use `no_run` quando o exemplo depender de serviços
+  externos; reserve `ignore` para casos que não possam ser compilados, explicando
+  o motivo. Comandos de terminal e Gherkin devem indicar sua linguagem no bloco.
+
+As convenções seguem o [Rustdoc Book](https://doc.rust-lang.org/rustdoc/how-to-write-documentation.html)
+e as [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/documentation.html).
+
+No diretório `backend`, gere a documentação da biblioteca, incluindo itens privados:
+
+```bash
+RUSTDOCFLAGS="-D warnings" cargo doc --lib --all-features --no-deps --document-private-items --locked
+```
+
+O índice fica em `target/doc/backend/index.html`. A documentação da biblioteca
+não inclui os módulos dos testes; para gerar também as duas suítes, usando o
+diretório `target/` padrão:
+
+```bash
+cargo build --lib --all-features --locked
+cargo rustdoc --test bdd --all-features --locked -- --document-private-items -D warnings --extern backend=target/debug/libbackend.rlib
+cargo rustdoc --test bdd_infrastructure --all-features --locked -- --document-private-items -D warnings --extern backend=target/debug/libbackend.rlib
+```
+
+O argumento `--extern` fornece a biblioteca do projeto que o Cargo não inclui
+automaticamente nesta geração de documentação dos testes. Os índices ficam em
+`target/doc/bdd/index.html` e `target/doc/bdd_infrastructure/index.html`.
+Esses comandos documentam os testes sem executá-los e não precisam de Docker.
+
+Para documentar somente a inicialização do executável, use:
+
+```bash
+cargo rustdoc --bin backend --all-features --locked -- --document-private-items -D warnings
+```
+
+O executável e a biblioteca têm o mesmo nome e usam o mesmo índice
+`target/doc/backend/index.html`. O Cargo pode avisar sobre essa colisão;
+execute novamente o comando da biblioteca para restaurar seu índice.
+
+Valide os exemplos compiláveis da biblioteca com:
+
+```bash
+cargo test --doc --all-features --locked
+```
+
+O manifesto habilita avisos para itens públicos sem documentação, links Rustdoc
+quebrados e HTML inválido. A CI existente usa Clippy com `-D warnings`, portanto
+itens públicos sem Rustdoc impedem sua aprovação. A revisão dos itens privados e
+da precisão dos contratos continua necessária; esses avisos não avaliam a
+qualidade do texto. Os comandos de documentação acima também tratam avisos como
+erros e devem ser executados ao alterar Rustdocs.
+
 ---
 
 # Tecnologias
