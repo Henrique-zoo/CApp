@@ -42,3 +42,10 @@ harness = false
 name = "bdd_infrastructure"
 path = "tests/bdd_infrastructure.rs"
 harness = false
+
+[lints.rust]
+missing_docs = "warn"
+
+[lints.rustdoc]
+broken_intra_doc_links = "warn"
+invalid_html_tags = "warn"
