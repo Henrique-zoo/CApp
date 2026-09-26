@@ -1,45 +1,33 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+//! Runner dos comportamentos funcionais compartilhados com os clientes do CApp.
+//!
+//! Lê `features/` na raiz do monorepo e registra somente os steps de
+//! `step_definitions`. A preparação do PostgreSQL, o World e os hooks são
+//! reutilizados de `support`. O caminho é resolvido a partir do manifesto,
+//! independentemente do diretório de trabalho do processo.
+//!
+//! # Execução
+//!
+//! Requer um daemon Docker acessível. Execute no diretório `backend`:
+//!
+//! ```sh
+//! cargo test --test bdd --locked
+//! ```
+//!
+//! Especificações sem cenários podem resultar em zero cenários executados;
+//! esse resultado não demonstra cobertura dos comportamentos do produto.
 
-use cucumber::World as _;
+mod step_definitions;
+#[allow(dead_code)]
+mod support;
 
-#[derive(cucumber::World, Debug, Default)]
-struct AppWorld;
-
+/// Resolve as features do produto e executa a suíte no runtime Tokio.
+///
+/// # Panics
+///
+/// Propaga as falhas de preparação, execução e encerramento descritas em
+/// [`support::run`], fazendo o alvo Cargo terminar com falha.
 #[tokio::main]
 async fn main() {
-    let features_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../features");
-
-    assert!(
-        features_dir.is_dir(),
-        "features directory not found: {}",
-        features_dir.display()
-    );
-    assert!(
-        contains_feature_file(&features_dir),
-        "no .feature files found in {}",
-        features_dir.display()
-    );
-
-    AppWorld::run(features_dir).await;
-}
-
-fn contains_feature_file(path: &Path) -> bool {
-    let Ok(entries) = fs::read_dir(path) else {
-        return false;
-    };
-
-    entries.filter_map(Result::ok).any(|entry| {
-        let path = entry.path();
-
-        if path.is_dir() {
-            return contains_feature_file(&path);
-        }
-
-        path.extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("feature"))
-    })
+    let features = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../features");
+    support::run(features).await;
 }
