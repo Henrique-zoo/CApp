@@ -20,6 +20,23 @@
       "problemMatcher": [
         "$rustc"
       ]
+    },
+    {
+      "label": "test: bdd infrastructure",
+      "type": "shell",
+      "command": "cargo",
+      "args": [
+        "test",
+        "--test",
+        "bdd_infrastructure"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
+      "group": "test",
+      "problemMatcher": [
+        "$rustc"
+      ]
     }
   ]
 }
