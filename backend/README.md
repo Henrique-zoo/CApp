@@ -584,9 +584,17 @@ cargo test --test bdd_infrastructure --locked
 cargo test --test bdd_infrastructure --locked -- --tags @ready
 ```
 
-`cargo test --locked` inclui os dois alvos. O comando já existente na CI,
-`cargo test --all-features --locked`, também executa ambos uma vez; não é preciso
-duplicar a execução dos cenários técnicos em outro step do workflow.
+Para executar todos os testes com o mesmo comando usado na CI:
+
+```bash
+cargo test --all-features --locked --no-fail-fast
+```
+
+O Cargo executa os alvos `bdd` e `bdd_infrastructure` uma única vez, além dos
+outros testes do backend. `--no-fail-fast` permite executar os demais alvos mesmo
+quando um deles falha; o comando continua retornando falha se qualquer alvo
+falhar. A opção controla a execução entre alvos, não a estratégia interna dos
+cenários do Cucumber.
 
 Os dois alvos reutilizam o código de `tests/support/`, mas registram seus steps e
 leem seus diretórios de cenários separadamente. Cada execução de um alvo cria um
@@ -603,8 +611,16 @@ credenciais próprias no container descartável. Os hooks liberam os recursos do
 cenários, e o encerramento da suíte remove o container.
 
 Os resultados de cada suíte aparecem na saída do comando, com a quantidade de
-cenários e steps executados e os detalhes de eventuais falhas. Na CI, essa saída
-fica disponível no job de testes do GitHub Actions.
+cenários e steps executados e os detalhes de eventuais falhas. O Cargo identifica
+cada alvo antes de executá-lo, e o Cucumber apresenta o resumo da respectiva suíte.
+
+No GitHub Actions, abra o workflow **Backend CI**, selecione a execução e consulte
+**Format, lint, and test → Run tests**. O runner Ubuntu fornece Docker para os
+containers criados pelo Testcontainers. O step executa diretamente o comando acima,
+preservando seu código de saída para que falhas nos testes reprovem o job.
+
+As instruções de organização e escrita dos cenários compartilhados estão na
+[seção BDD do README do projeto](../README.md#bdd).
 
 A aprovação dos testes técnicos não representa cobertura dos comportamentos do
 produto. Enquanto as especificações funcionais não tiverem cenários, o alvo

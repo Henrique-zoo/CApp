@@ -170,12 +170,31 @@ Os arquivos `.feature` descrevem comportamentos do produto.
 Exemplo:
 
 ``` gherkin
+# language: pt
+
 Funcionalidade: Gerenciamento de notícias
 
 Como usuário do CApp
 Quero visualizar notícias do CA ativo
 Para acompanhar informações relevantes
 ```
+
+As convenções para os cenários compartilhados são:
+
+- Declare `# language: pt` no início dos arquivos que usam palavras-chave em português.
+- Organize os arquivos por domínio funcional e use nomes descritivos em `snake_case`.
+- Descreva cada `Cenário` pelo comportamento ou resultado esperado, com atores e
+  termos do produto.
+- Use `Dado` para o contexto, `Quando` para a ação e `Então` para o resultado
+  observável; complemente com `E` quando necessário.
+- Mantenha os cenários independentes, sem depender da ordem de execução ou dos
+  dados deixados por outro cenário.
+- Deixe HTTP, SQL, containers e preparação dos dados nas step definitions de cada
+  componente. As verificações técnicas do backend permanecem em sua suíte própria.
+
+Os cenários concretos de cada funcionalidade serão adicionados nas milestones
+correspondentes. A configuração inicial das suítes não representa cobertura
+funcional dos arquivos que ainda contêm somente descrições de escopo.
 
 O backend implementa os comportamentos relacionados a:
 
