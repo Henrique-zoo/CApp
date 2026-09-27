@@ -7,31 +7,37 @@
 //! - Endereço HTTP: `0.0.0.0:3000`, fixo nesta implementação.
 //!
 //! As variáveis são lidas do ambiente do processo. O executável não carrega
-//! arquivos `.env` nem aplica migrations automaticamente.
+//! arquivos `.env`. As migrations embutidas são aplicadas após conectar ao banco
+//! e antes da abertura da porta HTTP; uma falha impede a inicialização da API.
 //!
 //! O subscriber encaminha os eventos de diagnóstico para a saída padrão.
-//! Após inicializá-lo, o processo conecta ao banco, abre o socket e serve o
+//! Após inicializá-lo, o processo conecta ao banco, aplica migrations e serve o
 //! router da biblioteca. Não há tratamento próprio de sinais ou configuração
 //! de encerramento gracioso nesta inicialização.
 
 use std::env::{self, VarError};
 
 use anyhow::Context;
-use backend::api::{self, state::AppState};
+use backend::{
+    api::{self, state::AppState},
+    infrastructure::database::MIGRATOR,
+};
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
 
-/// Inicializa logs, pool PostgreSQL e servidor HTTP no runtime Tokio.
+/// Inicializa logs, pool PostgreSQL, migrations e servidor HTTP no runtime Tokio.
 ///
 /// O pool usa as opções padrão de [`PgPoolOptions`]. A conexão inicial precisa
-/// funcionar antes da abertura da porta HTTP, inclusive para servir `/health`.
+/// funcionar e as migrations devem concluir antes da abertura da porta HTTP,
+/// inclusive para servir `/health`. O banco deve ter sido criado previamente.
 /// O servidor permanece aguardando requisições enquanto a operação `serve`
 /// estiver ativa.
 ///
 /// # Erros
 ///
 /// Propaga a ausência ou invalidade de `DATABASE_URL`, erros ao conectar ao
-/// PostgreSQL, ao abrir o socket TCP e os erros retornados por `axum::serve`.
+/// PostgreSQL, ao validar ou aplicar migrations, ao abrir o socket TCP e os
+/// erros retornados por `axum::serve`.
 ///
 /// # Panics
 ///
@@ -58,6 +64,13 @@ async fn main() -> anyhow::Result<()> {
         .connect(&db_url)
         .await
         .context("Failed to connect to DB.")?;
+
+    tracing::info!("Aplicando migrations do banco de dados");
+    MIGRATOR
+        .run(&pool)
+        .await
+        .context("Não foi possível aplicar as migrations do banco de dados")?;
+    tracing::info!("Migrations do banco de dados atualizadas");
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await

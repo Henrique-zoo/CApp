@@ -8,7 +8,7 @@
 //!
 //! - [`api`]: composição das rotas e recursos compartilhados pelas requisições.
 //! - [`modules`]: estrutura dos módulos de negócio e suas camadas.
-//! - [`infrastructure`]: espaços reservados para adaptadores externos comuns.
+//! - [`infrastructure`]: migrations compartilhadas e estrutura para integrações externas.
 //! - [`config`]: espaço reservado para centralizar configurações.
 //! - [`shared`]: espaço reservado para tipos comuns aos domínios.
 //!

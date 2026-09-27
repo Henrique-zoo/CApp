@@ -20,7 +20,10 @@ use std::sync::{
 };
 
 use axum::Router;
-use backend::api::{self, state::AppState};
+use backend::{
+    api::{self, state::AppState},
+    infrastructure::database::MIGRATOR,
+};
 use futures::lock::Mutex;
 use sqlx::{
     PgPool,
@@ -151,8 +154,8 @@ impl DatabaseServer {
     /// # Preparação
     ///
     /// 1. Inicia `postgres:17-alpine` com porta dinâmica e credenciais de teste.
-    /// 2. Aplica as migrations de `migrations/`, embutidas na compilação, e a
-    ///    fixture `tests/fixtures/api_bdd.sql` à base-modelo.
+    /// 2. Aplica o mesmo [`MIGRATOR`] do servidor e, em seguida, a fixture
+    ///    `tests/fixtures/api_bdd.sql` à base-modelo.
     /// 3. Fecha o pool do modelo, marca a base como template e cria sua cópia
     ///    compartilhada com `default_transaction_read_only = on`.
     /// 4. Bloqueia conexões ao modelo e constrói o router com o pool compartilhado.
@@ -194,7 +197,7 @@ impl DatabaseServer {
             .expect("PostgreSQL testcontainer should expose port");
         let template_pool = connect_pool(&host, port, POSTGRES_TEMPLATE_DB, 5).await;
 
-        sqlx::migrate!("./migrations")
+        MIGRATOR
             .run(&template_pool)
             .await
             .expect("Cucumber template migrations should run");

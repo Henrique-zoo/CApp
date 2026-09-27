@@ -1,7 +1,8 @@
-//! Espaços reservados para integrações técnicas compartilhadas entre domínios.
+//! Infraestrutura técnica compartilhada entre os domínios.
 //!
-//! Os submódulos delimitam acesso ao banco, provedores de identidade, dados
-//! acadêmicos, arquivos e notificações. Ainda não contêm adaptadores executáveis.
+//! [`database`] fornece as migrations usadas pelo servidor e pelos testes.
+//! Os demais submódulos reservam as integrações com provedores de identidade,
+//! dados acadêmicos, arquivos e notificações, ainda sem adaptadores executáveis.
 //! A conexão PostgreSQL atual é criada no executável e entregue à API pelo
 //! [`AppState`](crate::api::state::AppState).
 

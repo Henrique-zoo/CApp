@@ -532,10 +532,82 @@ Alterar essas variáveis no `.env` não modifica usuários, senhas ou bancos já
 existentes no volume. Esse comportamento de inicialização é descrito na
 [documentação da imagem PostgreSQL](https://hub.docker.com/_/postgres).
 
-O diretório `migrations/` contém atualmente apenas o marcador `.keep`.
-Ainda não há migrations SQL de domínio, e a inicialização do servidor não executa
-migrations automaticamente. A infraestrutura BDD já aplica as migrations
-disponíveis à sua base-modelo descartável; isso não altera o banco de desenvolvimento.
+## Migrations
+
+O versionamento do esquema usa o SQLx. Os arquivos SQL ficam em `migrations/`
+e são incorporados ao binário pelo `MIGRATOR` de
+[`src/infrastructure/database/mod.rs`](src/infrastructure/database/mod.rs).
+O servidor aplica as versões pendentes após conectar ao PostgreSQL e antes de
+abrir a porta HTTP. Uma falha de validação ou aplicação encerra a inicialização
+com erro; a API não começa a atender com migrations pendentes por essa falha.
+
+O SQLx mantém o histórico e os checksums na tabela `_sqlx_migrations` e coordena
+execuções concorrentes com seu lock de migrations. O usuário da conexão precisa
+poder criar essa tabela e executar as alterações SQL previstas. O banco deve
+existir previamente; no ambiente local, o Compose cuida de sua criação.
+
+Ainda não há modelo de dados nem migrations de domínio. O diretório contém
+somente `.keep`, e executar o migrador prepara apenas sua tabela de controle.
+As primeiras migrations serão adicionadas junto da implementação do modelo.
+
+### Criar uma migration quando houver uma alteração de esquema
+
+Instale a CLI na versão usada atualmente pelo projeto. Ela é uma ferramenta
+opcional de desenvolvimento: o servidor e os testes aplicam migrations sem
+precisar dela.
+
+```bash
+cargo install sqlx-cli --version 0.8.6 --locked --no-default-features --features rustls,postgres
+```
+
+Quando houver uma mudança real para versionar, execute no diretório `backend`,
+substituindo `descricao_da_alteracao` por um nome curto em inglês e `snake_case`:
+
+```bash
+sqlx migrate add descricao_da_alteracao
+```
+
+Edite o arquivo gerado em `migrations/<timestamp>_<descricao>.sql` com a alteração
+necessária e versione-o junto da implementação correspondente. O projeto usa
+migrations simples, aplicadas em ordem de versão. Depois que uma migration for
+integrada e aplicada em um ambiente compartilhado, preserve seu nome e conteúdo;
+correções devem ser feitas em uma nova versão. O fluxo padrão evolui o esquema
+para a frente, sem exigir um script de reversão para toda alteração.
+
+### Aplicar e consultar versões
+
+Iniciar o backend com Cargo ou Compose já aplica as migrations pendentes.
+Para usar a CLI sem iniciar a API, mantenha o PostgreSQL disponível e execute no
+diretório `backend`, usando os valores locais padrão:
+
+```bash
+DATABASE_URL='postgres://capp:capp@localhost:5432/capp' sqlx migrate run
+DATABASE_URL='postgres://capp:capp@localhost:5432/capp' sqlx migrate info
+```
+
+Ajuste a URL se personalizou o ambiente. Reexecutar aplica somente as versões
+pendentes e valida as já registradas. Consulte o
+[`Migrator` do SQLx](https://docs.rs/sqlx/0.8.6/sqlx/migrate/struct.Migrator.html)
+e a [documentação da CLI](https://github.com/launchbadge/sqlx/blob/v0.8.6/sqlx-cli/README.md)
+para detalhes dos comandos e da validação.
+
+### Compilação, Docker e testes
+
+O `build.rs` instrui o Cargo a observar `migrations/`, incluindo arquivos novos.
+Assim, um próximo `cargo build`, `cargo run` ou `cargo test` recompila o conteúdo
+embutido quando esse diretório muda. O binário em execução continua usando as
+migrations de sua compilação; reinicie-o com a versão recompilada.
+Esse acompanhamento segue a
+[orientação do SQLx para Rust stable](https://docs.rs/sqlx/0.8.6/sqlx/macro.migrate.html).
+
+O Dockerfile copia `build.rs` e `migrations/` para a imagem. Após adicionar uma
+migration, execute novamente `docker compose --profile backend up -d --build`
+na raiz do monorepo para reconstruir e iniciar a versão atualizada.
+
+Os alvos BDD usam o mesmo `MIGRATOR` para preparar sua base-modelo antes da fixture.
+A aplicação das migrations nos testes fica restrita aos containers descartáveis
+criados pelas suítes. Para validar uma nova migration, execute os testes do backend
+conforme a [seção BDD](#bdd).
 
 ---
 
@@ -715,7 +787,8 @@ Os dois alvos reutilizam o código de `tests/support/`, mas registram seus steps
 leem seus diretórios de cenários separadamente. Cada execução de um alvo cria um
 único container PostgreSQL, reutilizado por todos os cenários daquela suíte, com
 porta dinâmica. Executar os dois alvos cria dois containers independentes. A
-preparação aplica as migrations e a fixture `tests/fixtures/api_bdd.sql` a uma base-modelo.
+preparação usa o mesmo `MIGRATOR` do servidor e aplica a fixture
+`tests/fixtures/api_bdd.sql` a uma base-modelo.
 Cenários consultivos compartilham uma cópia dessa base com transações de leitura
 por padrão. Cenários que escrevem devem receber a tag `@isolated_database`, na
 feature, regra ou cenário, para obter uma base própria clonada do modelo.
