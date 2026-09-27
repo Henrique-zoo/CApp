@@ -482,55 +482,170 @@ Exemplos:
 
 # Configuração
 
-Localizada em:
+Atualmente o executável lê `DATABASE_URL` e `RUST_LOG` diretamente do ambiente.
+O módulo `src/config/` está reservado para centralizar essa configuração no futuro.
+O backend não carrega arquivos `.env` automaticamente.
 
-```
-src/config/
+O [Compose](../compose.yaml) utiliza os valores abaixo e permite personalizá-los
+no arquivo `.env` da raiz do monorepo. As variáveis já definidas no terminal têm
+precedência sobre esse arquivo.
+
+| Variável | Padrão local | Uso |
+|---|---|---|
+| `POSTGRES_DB` | `capp` | Nome do banco criado na inicialização do PostgreSQL. |
+| `POSTGRES_USER` | `capp` | Usuário inicial do PostgreSQL. |
+| `POSTGRES_PASSWORD` | `capp` | Senha local do usuário inicial. |
+| `POSTGRES_PORT` | `5432` | Porta do PostgreSQL publicada no host. |
+| `BACKEND_PORT` | `3000` | Porta da API publicada no host pelo Compose. |
+| `RUST_LOG` | `info` | Filtro dos eventos de diagnóstico do backend. |
+
+Os valores de usuário e senha acima destinam-se ao ambiente local de desenvolvimento.
+Para personalizá-los, na primeira configuração e somente se ainda não existir
+um `.env`, copie o exemplo a partir da raiz:
+
+```bash
+cp .env.example .env
 ```
 
-Responsável por carregar configurações externas.
+Edite os valores necessários. O arquivo `.env` é ignorado pelo Git; mantenha o
+[`.env.example`](../.env.example) como referência compartilhada.
+O Compose também funciona sem `.env`, usando os padrões da tabela.
 
-Exemplos:
+Dentro da rede do Compose, o backend recebe uma `DATABASE_URL` construída com
+usuário, senha e banco configurados, usando o endereço `postgres:5432`.
+Ao executar com Cargo no host, forneça a URL explicitamente, usando
+`localhost` e a porta publicada em `POSTGRES_PORT`.
 
-```
-DATABASE_URL
-FIREBASE_PROJECT_ID
-MICROSOFT_CLIENT_ID
-```
+`BACKEND_PORT` altera somente o mapeamento do Compose. O processo Rust escuta em
+`0.0.0.0:3000`, tanto no container quanto na execução direta com Cargo.
 
 ---
 
 # Banco de dados
 
-As alterações do banco são controladas por migrations.
+O ambiente local usa PostgreSQL 17 Alpine. Na primeira inicialização de um volume
+vazio, a imagem cria o usuário e o banco definidos pelas variáveis `POSTGRES_*`.
+Os dados ficam no volume nomeado `postgres_data` do Compose e são reutilizados
+nas próximas execuções.
 
-Exemplo:
+Alterar essas variáveis no `.env` não modifica usuários, senhas ou bancos já
+existentes no volume. Esse comportamento de inicialização é descrito na
+[documentação da imagem PostgreSQL](https://hub.docker.com/_/postgres).
 
-```
-migrations/
-
-001_initial_schema.sql
-002_create_news.sql
-003_create_events.sql
-```
-
-Cada migration representa uma evolução versionada do banco.
+O diretório `migrations/` contém atualmente apenas o marcador `.keep`.
+Ainda não há migrations SQL de domínio, e a inicialização do servidor não executa
+migrations automaticamente. A infraestrutura BDD já aplica as migrations
+disponíveis à sua base-modelo descartável; isso não altera o banco de desenvolvimento.
 
 ---
 
 # Desenvolvimento
 
-Executar aplicação:
+## Pré-requisitos
+
+- Docker com daemon acessível e o comando `docker compose` disponível.
+- Acesso à internet na primeira execução para obter imagens e dependências.
+- Portas locais livres; os padrões são `5432` para o banco e `3000` para a API.
+- Para executar o backend ou os testes fora do container, Rust e Cargo da
+  toolchain `stable`, instalados via `rustup`.
+- `curl` para as verificações HTTP mostradas abaixo.
+
+No Windows, execute os comandos do backend no WSL 2 com acesso ao Docker.
+No Linux, use o terminal do próprio sistema. Não é necessário instalar PostgreSQL
+no host; para executar toda a aplicação pelo Compose, o Rust é fornecido pela imagem.
+
+## PostgreSQL e backend pelo Compose
+
+Na raiz do monorepo, valide a configuração e inicie os serviços:
 
 ```bash
-cargo run
+docker compose --profile backend config --quiet
+docker compose --profile backend up -d --build
 ```
 
-Executar testes:
+O perfil `backend` inclui a API, enquanto o PostgreSQL participa do ambiente por
+padrão. O Compose aguarda o healthcheck do banco antes de iniciar o backend e
+fornece sua `DATABASE_URL` automaticamente.
+
+Acompanhe o estado dos serviços e os logs:
 
 ```bash
-cargo test
+docker compose --profile backend ps
+docker compose logs -f backend
 ```
+
+O container do backend executa `cargo run`, portanto a primeira inicialização
+pode levar algum tempo compilando dependências. Espere a compilação terminar
+antes de consultar a API. `Ctrl+C` encerra apenas o acompanhamento dos logs.
+Após alterar o código, execute novamente o comando com `--build`, pois o código
+é copiado para a imagem e não está montado como um volume.
+
+## PostgreSQL pelo Compose e backend com Cargo
+
+Para desenvolver diretamente com o compilador local, suba somente o banco a
+partir da raiz e aguarde seu healthcheck:
+
+```bash
+docker compose config --quiet
+docker compose up -d --wait postgres
+```
+
+Caso a API já esteja rodando pelo Compose, pare esse serviço antes de usar a
+mesma porta com Cargo:
+
+```bash
+docker compose --profile backend stop backend
+```
+
+Depois, usando os valores locais padrão:
+
+```bash
+cd backend
+DATABASE_URL='postgres://capp:capp@localhost:5432/capp' RUST_LOG=info cargo run --locked
+```
+
+Se personalizou usuário, senha, banco ou porta, ajuste a URL desse comando.
+O `.env` da raiz é lido pelo Compose; ele não exporta variáveis para o processo
+Cargo. Mantenha esse terminal aberto enquanto usar a API e utilize `Ctrl+C` para
+encerrar o backend.
+
+## Verificar a comunicação
+
+Com a API em execução, use outro terminal. Estes endereços consideram a porta
+padrão; ajuste-a se estiver usando outro `BACKEND_PORT` no Compose:
+
+```bash
+curl -i http://localhost:3000/health
+curl -i http://localhost:3000/ready
+```
+
+`/health` retorna HTTP 200 quando a API responde. `/ready` executa uma consulta
+no PostgreSQL e retorna HTTP 200 no sucesso ou HTTP 503 em erro ou timeout.
+
+Para consultar o banco diretamente, na raiz do monorepo:
+
+```bash
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1;"'
+```
+
+Esse comando usa o `psql` do container e as configurações fornecidas ao serviço.
+
+## Encerrar o ambiente e executar testes
+
+Na raiz, para parar e remover os containers mantendo o volume com os dados:
+
+```bash
+docker compose --profile backend down
+```
+
+Para executar os testes, no diretório `backend`:
+
+```bash
+cargo test --all-features --locked --no-fail-fast
+```
+
+As suítes BDD criam seus próprios containers e não precisam que o ambiente Compose
+esteja iniciado. Consulte a [seção BDD](#bdd) para executar cada suíte separadamente.
 
 ---
 

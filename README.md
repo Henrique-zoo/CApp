@@ -238,7 +238,23 @@ Estrutura recomendada:
 
             └── backend
 
-O backend deve ser executado dentro do WSL 2.
+No Windows, execute o backend dentro do WSL 2. No Linux, utilize o terminal
+do próprio sistema.
+
+Para iniciar PostgreSQL e backend juntos, execute na raiz do monorepo:
+
+```bash
+docker compose --profile backend up -d --build
+```
+
+O Compose fornece a conexão com o banco e espera o PostgreSQL ficar saudável
+antes de iniciar a API. A primeira execução também compila o backend; acompanhe
+com `docker compose logs -f backend`.
+
+O [guia de desenvolvimento do backend](backend/README.md#desenvolvimento)
+detalha pré-requisitos, variáveis, execução com Cargo, verificação de prontidão
+e encerramento do ambiente. A [configuração local](backend/README.md#configuração)
+explica os valores padrão e a personalização pelo `.env`.
 
 ------------------------------------------------------------------------
 
