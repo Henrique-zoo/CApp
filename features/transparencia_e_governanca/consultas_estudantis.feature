@@ -1,5 +1,6 @@
 # language: pt
 
+@backend @pending_backend
 Funcionalidade: Consultas estudantis e participação acadêmica
   Como estudante ou membro da gestão de um Centro Acadêmico
   Quero criar, gerenciar, participar e auditar consultas públicas estudantis
