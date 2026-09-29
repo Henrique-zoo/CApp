@@ -47,13 +47,57 @@ pub(crate) struct AppWorld {
     /// Inclui chamadas via `get_json` e aumenta antes de construir a requisição;
     /// uma URI inválida ou falha de leitura também pode incrementar o contador.
     pub(crate) request_count: usize,
+    /// Contexto e fixture para cenários de consultas estudantis.
+    pub(crate) consultation: ConsultationFixture,
+}
+
+/// Fixture de estado para os cenários de consultas estudantis.
+///
+/// Mantém as informações observadas durante o ciclo de vida da consulta em
+/// cada cenário, incluindo estado, permissões, votos e critérios de elegibilidade.
+#[derive(Debug, Default)]
+pub(crate) struct ConsultationFixture {
+    /// Nome do Centro Acadêmico ativo no cenário.
+    pub(crate) academic_center: Option<String>,
+    /// Indica se o Centro Acadêmico possui estudantes associados matriculados.
+    pub(crate) has_associated_students: bool,
+    /// Indica se o usuário possui permissão de membro da gestão do CA.
+    pub(crate) user_is_board_member: bool,
+    /// Estado da consulta estudantil (ex.: "Agendada", "Em andamento", "Encerrada").
+    pub(crate) state: Option<String>,
+    /// Quantidade de consultas registradas no cenário.
+    pub(crate) consultations_count: usize,
+    /// Último erro ou motivo de recusa/bloqueio capturado.
+    pub(crate) last_error: Option<String>,
+    /// Indica se o estudante atende aos critérios de elegibilidade da consulta.
+    pub(crate) student_eligible: bool,
+    /// Critério exclusivo de elegibilidade da consulta, se houver.
+    pub(crate) eligibility_criterion: Option<String>,
+    /// Indica se o estudante já registrou seu voto na consulta.
+    pub(crate) student_has_voted: bool,
+    /// Votos computados na consulta.
+    pub(crate) votes: Vec<String>,
+    /// Indica se a urna de votação está fechada para novas participações.
+    pub(crate) voting_closed: bool,
+    /// Indica se a apuração foi finalizada.
+    pub(crate) tallied: bool,
+    /// Total de participantes contabilizados na apuração.
+    pub(crate) total_participants: usize,
+    /// Indica se o acesso aos resultados da consulta foi executado.
+    pub(crate) results_accessed: bool,
+    /// Indica se houve tentativa de acesso à apuração parcial durante a votação.
+    pub(crate) partial_results_requested: bool,
+    /// Indica se há uma eleição geral de chapas em andamento simultaneamente.
+    pub(crate) election_in_progress: bool,
+    /// Indica se o caderno eleitoral da eleição de chapas permaneceu inalterado.
+    pub(crate) electoral_roll_intact: bool,
 }
 
 impl fmt::Debug for AppWorld {
     /// Formata o contexto do cenário sem expor pools ou o container.
     ///
-    /// Inclui modo do banco, presença do router, resultados SQL, última resposta
-    /// e contador de requisições. O corpo HTTP é incluído no diagnóstico.
+    /// Inclui modo do banco, presença do router, resultados SQL, última resposta,
+    /// contador de requisições e fixture de consultas. O corpo HTTP é incluído no diagnóstico.
     ///
     /// # Erros
     ///
@@ -72,6 +116,7 @@ impl fmt::Debug for AppWorld {
             .field("last_database_mutation", &self.last_database_mutation)
             .field("last_response", &self.last_response)
             .field("request_count", &self.request_count)
+            .field("consultation", &self.consultation)
             .finish()
     }
 }
