@@ -4,7 +4,7 @@
 //! antes dos steps e os liberam ao término. Respostas e resultados pertencem
 //! a cada cenário, mesmo quando o pool consultivo é compartilhado.
 
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
 use axum::{
     Router,
@@ -19,6 +19,86 @@ use super::{
     database::{SuiteDatabase, TestDatabase},
     results::{TestDatabaseMutation, TestResponse},
 };
+
+/// Papel do usuário atuante no cenário de publicação institucional.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstitutionalActorRole {
+    /// Membro com permissão da gestão ativa do Centro Acadêmico.
+    ActiveAuthorizedManager,
+    /// Membro de uma gestão anterior já encerrada.
+    PastManager,
+    /// Estudante regularmente matriculado sem cargo de gestão.
+    RegularStudent,
+}
+
+/// Registro de versão de documento institucional.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InstitutionalDocumentVersion {
+    /// Identificador textual da versão (ex.: "1.0", "1.1").
+    pub(crate) version: String,
+    /// Conteúdo normativo do documento.
+    pub(crate) content: String,
+    /// Data simulada da atualização ou publicação da versão.
+    pub(crate) recorded_at: String,
+    /// Autor ou responsável pelo registro da versão.
+    pub(crate) author: String,
+}
+
+/// Documento institucional com metadados e histórico versionado.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InstitutionalDocument {
+    /// Tipo classificador do documento (ex.: "Estatuto Social", "Regimento Interno").
+    pub(crate) doc_type: String,
+    /// Título formal do documento institucional.
+    pub(crate) title: String,
+    /// Versão atualmente vigente para visualização pública.
+    pub(crate) current_version: String,
+    /// Histórico ordenado de versões do documento.
+    pub(crate) versions: Vec<InstitutionalDocumentVersion>,
+    /// Data da última alteração do documento vigente.
+    pub(crate) updated_at: String,
+}
+
+/// Dados oficiais de canais de contato e composição da gestão ativa.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct InstitutionalContactAndManagement {
+    /// Endereço eletrônico oficial de contato.
+    pub(crate) official_email: String,
+    /// Canal de atendimento ao estudante.
+    pub(crate) service_channel: String,
+    /// Lista de cargos e ocupantes na gestão ativa.
+    pub(crate) management_members: Vec<(String, String)>,
+}
+
+/// Rejeições e erros de negócio em operações de publicação institucional.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum InstitutionalPublicationError {
+    /// Recusa por falta de permissão administrativa.
+    Unauthorized,
+    /// Recusa por usuário pertencer a gestão inativa/encerrada.
+    InactiveManagement,
+    /// Recusa por tentativa de atualizar documento inexistente.
+    DocumentNotFound,
+}
+
+/// Fixture que mantém o estado da publicação institucional no cenário BDD.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct InstitutionalPublicationFixture {
+    /// Nome do Centro Acadêmico ativo no cenário.
+    pub(crate) active_ca: Option<String>,
+    /// Papel do ator atual no cenário.
+    pub(crate) actor_role: Option<InstitutionalActorRole>,
+    /// Acervo de documentos institucionais publicados, indexados pelo tipo.
+    pub(crate) documents: HashMap<String, InstitutionalDocument>,
+    /// Informações de contato e composição da gestão vigente.
+    pub(crate) contact_info: Option<InstitutionalContactAndManagement>,
+    /// Indica se as informações publicadas estão disponíveis para a comunidade.
+    pub(crate) publicly_available: bool,
+    /// Erro registrado na última operação, se houver recusa.
+    pub(crate) last_error: Option<InstitutionalPublicationError>,
+    /// Última versão de documento publicada com sucesso.
+    pub(crate) last_published_version: Option<String>,
+}
 
 /// Contexto independente criado pelo Cucumber para cada cenário.
 ///
@@ -47,6 +127,8 @@ pub(crate) struct AppWorld {
     /// Inclui chamadas via `get_json` e aumenta antes de construir a requisição;
     /// uma URI inválida ou falha de leitura também pode incrementar o contador.
     pub(crate) request_count: usize,
+    /// Estado da publicação de informações institucionais no cenário de teste.
+    pub(crate) institutional_publication: InstitutionalPublicationFixture,
 }
 
 impl fmt::Debug for AppWorld {
@@ -72,6 +154,7 @@ impl fmt::Debug for AppWorld {
             .field("last_database_mutation", &self.last_database_mutation)
             .field("last_response", &self.last_response)
             .field("request_count", &self.request_count)
+            .field("institutional_publication", &self.institutional_publication)
             .finish()
     }
 }
