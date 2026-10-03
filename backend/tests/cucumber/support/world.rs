@@ -4,7 +4,7 @@
 //! antes dos steps e os liberam ao término. Respostas e resultados pertencem
 //! a cada cenário, mesmo quando o pool consultivo é compartilhado.
 
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
 use axum::{
     Router,
@@ -19,6 +19,123 @@ use super::{
     database::{SuiteDatabase, TestDatabase},
     results::{TestDatabaseMutation, TestResponse},
 };
+
+/// Papel do usuário atuante no cenário de prestação de contas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FinancialActorRole {
+    /// Membro da gestão com permissão explícita de prestação de contas.
+    ManagerWithFinancialPermission,
+    /// Membro da gestão ativa sem permissão de prestação de contas.
+    ManagerWithoutFinancialPermission,
+    /// Estudante regularmente matriculado sem cargo de gestão.
+    RegularStudent,
+}
+
+/// Natureza da transação contábil manual.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FinancialTransactionType {
+    /// Entrada de recursos financeiros.
+    Income,
+    /// Saída de recursos financeiros.
+    Expense,
+}
+
+/// Registro histórico de uma retificação de lançamento financeiro.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FinancialRectification {
+    /// Valor anterior à retificação.
+    pub(crate) previous_amount: f64,
+    /// Novo valor retificado.
+    pub(crate) new_amount: f64,
+    /// Justificativa formal da retificação.
+    pub(crate) reason: String,
+    /// Data em que a retificação foi registrada.
+    pub(crate) date: String,
+    /// Autor responsável pela retificação.
+    pub(crate) author: String,
+}
+
+/// Lançamento financeiro publicado na prestação de contas do Centro Acadêmico.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FinancialEntry {
+    /// Identificador do lançamento (ex.: "DESP-001", "REC-001").
+    pub(crate) id: String,
+    /// Natureza do lançamento (receita ou despesa).
+    pub(crate) transaction_type: FinancialTransactionType,
+    /// Título ou descrição concisa da operação.
+    pub(crate) title: String,
+    /// Valor monetário da operação.
+    pub(crate) amount: f64,
+    /// Data do lançamento contábil.
+    pub(crate) date: String,
+    /// Categoria orçamentária do lançamento.
+    pub(crate) category: String,
+    /// Nome ou caminho do arquivo de comprovante anexado.
+    pub(crate) attachment: Option<String>,
+    /// Histórico ordenado de retificações aplicadas ao lançamento.
+    pub(crate) rectifications: Vec<FinancialRectification>,
+}
+
+/// Erros observáveis em tentativas inválidas de movimentação ou alteração contábil.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FinancialAccountabilityError {
+    /// Recusa por ausência de permissão financeira explícita.
+    Unauthorized,
+    /// Recusa por lançamento financeiro não encontrado.
+    EntryNotFound,
+}
+
+/// Fixture que mantém o estado da prestação de contas durante o cenário BDD.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FinancialAccountabilityFixture {
+    /// Nome do Centro Acadêmico contextualizado no cenário.
+    pub(crate) active_ca: Option<String>,
+    /// Papel do usuário atuante no cenário.
+    pub(crate) actor_role: Option<FinancialActorRole>,
+    /// Lançamentos financeiros registrados e publicados, indexados pelo identificador.
+    pub(crate) entries: HashMap<String, FinancialEntry>,
+    /// Identificador do último lançamento publicado com sucesso.
+    pub(crate) last_published_id: Option<String>,
+    /// Erro registrado na última operação, se houver recusa.
+    pub(crate) last_error: Option<FinancialAccountabilityError>,
+}
+
+impl FinancialAccountabilityFixture {
+    /// Calcula a receita total acumulada de todos os lançamentos publicados.
+    ///
+    /// # Retorno
+    ///
+    /// Soma monetária de todas as transações do tipo [`FinancialTransactionType::Income`].
+    pub(crate) fn total_income(&self) -> f64 {
+        self.entries
+            .values()
+            .filter(|e| e.transaction_type == FinancialTransactionType::Income)
+            .map(|e| e.amount)
+            .sum()
+    }
+
+    /// Calcula a despesa total acumulada de todos os lançamentos publicados.
+    ///
+    /// # Retorno
+    ///
+    /// Soma monetária de todas as transações do tipo [`FinancialTransactionType::Expense`].
+    pub(crate) fn total_expense(&self) -> f64 {
+        self.entries
+            .values()
+            .filter(|e| e.transaction_type == FinancialTransactionType::Expense)
+            .map(|e| e.amount)
+            .sum()
+    }
+
+    /// Calcula o saldo financeiro consolidado do Centro Acadêmico.
+    ///
+    /// # Retorno
+    ///
+    /// Diferença entre o total de receitas e o total de despesas acumuladas.
+    pub(crate) fn consolidated_balance(&self) -> f64 {
+        self.total_income() - self.total_expense()
+    }
+}
 
 /// Contexto independente criado pelo Cucumber para cada cenário.
 ///
@@ -47,6 +164,8 @@ pub(crate) struct AppWorld {
     /// Inclui chamadas via `get_json` e aumenta antes de construir a requisição;
     /// uma URI inválida ou falha de leitura também pode incrementar o contador.
     pub(crate) request_count: usize,
+    /// Estado da prestação de contas e transparência financeira no cenário de teste.
+    pub(crate) financial_accountability: FinancialAccountabilityFixture,
 }
 
 impl fmt::Debug for AppWorld {
@@ -72,6 +191,7 @@ impl fmt::Debug for AppWorld {
             .field("last_database_mutation", &self.last_database_mutation)
             .field("last_response", &self.last_response)
             .field("request_count", &self.request_count)
+            .field("financial_accountability", &self.financial_accountability)
             .finish()
     }
 }
