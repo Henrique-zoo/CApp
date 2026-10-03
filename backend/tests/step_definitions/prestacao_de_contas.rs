@@ -632,6 +632,7 @@ fn student_queries_financial_statement(world: &mut AppWorld) {
 /// # Panics
 ///
 /// Se o valor calculado divergir do esperado.
+#[then(expr = "visualiza o total de receitas acumuladas de {string}")]
 #[then(expr = "ele visualiza o total de receitas acumuladas de {string}")]
 fn views_total_income(world: &mut AppWorld, expected_str: String) {
     let expected = expected_str.parse::<f64>().expect("valor");
@@ -652,6 +653,7 @@ fn views_total_income(world: &mut AppWorld, expected_str: String) {
 /// # Panics
 ///
 /// Se o valor calculado divergir do esperado.
+#[then(expr = "visualiza o total de despesas acumuladas de {string}")]
 #[then(expr = "ele visualiza o total de despesas acumuladas de {string}")]
 fn views_total_expense(world: &mut AppWorld, expected_str: String) {
     let expected = expected_str.parse::<f64>().expect("valor");
@@ -672,6 +674,7 @@ fn views_total_expense(world: &mut AppWorld, expected_str: String) {
 /// # Panics
 ///
 /// Se o saldo calculado divergir do esperado.
+#[then(expr = "visualiza o saldo atual consolidado de {string}")]
 #[then(expr = "ele visualiza o saldo atual consolidado de {string}")]
 fn views_consolidated_balance(world: &mut AppWorld, expected_str: String) {
     let expected = expected_str.parse::<f64>().expect("valor");
