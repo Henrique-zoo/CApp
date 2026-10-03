@@ -21,7 +21,7 @@
 
 mod database;
 pub(crate) mod results;
-mod world;
+pub(crate) mod world;
 
 use std::{path::PathBuf, sync::Arc};
 
