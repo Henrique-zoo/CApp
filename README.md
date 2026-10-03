@@ -135,6 +135,14 @@ Eles servem como fonte comum para:
 -   aplicativo móvel;
 -   futuros clientes.
 
+Os cenários descrevem comportamentos observáveis do produto na linguagem do
+domínio. Cada projeto implementa suas próprias step definitions para verificar
+esses comportamentos no contexto correspondente.
+
+As verificações técnicas de PostgreSQL, prontidão e isolamento da infraestrutura
+de testes ficam em `backend/tests/features/`, com steps e execução exclusivos do
+backend. Elas não fazem parte do contrato funcional compartilhado em `features/`.
+
 ------------------------------------------------------------------------
 
 # BDD
@@ -162,12 +170,31 @@ Os arquivos `.feature` descrevem comportamentos do produto.
 Exemplo:
 
 ``` gherkin
+# language: pt
+
 Funcionalidade: Gerenciamento de notícias
 
 Como usuário do CApp
 Quero visualizar notícias do CA ativo
 Para acompanhar informações relevantes
 ```
+
+As convenções para os cenários compartilhados são:
+
+- Declare `# language: pt` no início dos arquivos que usam palavras-chave em português.
+- Organize os arquivos por domínio funcional e use nomes descritivos em `snake_case`.
+- Descreva cada `Cenário` pelo comportamento ou resultado esperado, com atores e
+  termos do produto.
+- Use `Dado` para o contexto, `Quando` para a ação e `Então` para o resultado
+  observável; complemente com `E` quando necessário.
+- Mantenha os cenários independentes, sem depender da ordem de execução ou dos
+  dados deixados por outro cenário.
+- Deixe HTTP, SQL, containers e preparação dos dados nas step definitions de cada
+  componente. As verificações técnicas do backend permanecem em sua suíte própria.
+
+Os cenários concretos de cada funcionalidade serão adicionados nas milestones
+correspondentes. A configuração inicial das suítes não representa cobertura
+funcional dos arquivos que ainda contêm somente descrições de escopo.
 
 O backend implementa os comportamentos relacionados a:
 
@@ -211,7 +238,23 @@ Estrutura recomendada:
 
             └── backend
 
-O backend deve ser executado dentro do WSL 2.
+No Windows, execute o backend dentro do WSL 2. No Linux, utilize o terminal
+do próprio sistema.
+
+Para iniciar PostgreSQL e backend juntos, execute na raiz do monorepo:
+
+```bash
+docker compose --profile backend up -d --build
+```
+
+O Compose fornece a conexão com o banco e espera o PostgreSQL ficar saudável
+antes de iniciar a API. A primeira execução também compila o backend; acompanhe
+com `docker compose logs -f backend`.
+
+O [guia de desenvolvimento do backend](backend/README.md#desenvolvimento)
+detalha pré-requisitos, variáveis, execução com Cargo, verificação de prontidão
+e encerramento do ambiente. A [configuração local](backend/README.md#configuração)
+explica os valores padrão e a personalização pelo `.env`.
 
 ------------------------------------------------------------------------
 

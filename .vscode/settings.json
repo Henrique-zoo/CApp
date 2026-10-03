@@ -5,6 +5,5 @@
   "cucumberautocomplete.steps": [
     "backend/tests/**/*.rs"
   ],
-"cucumberautocomplete.syncfeatures": "features/**/*.feature",
-"cmake.sourceDirectory": "C:/Users/henri/Documents/Henrique/capp/mobile/windows/runner"
+  "cucumberautocomplete.syncfeatures": "{features,backend/tests/features}/**/*.feature"
 }
