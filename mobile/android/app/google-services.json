@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "13241645392",
+    "project_id": "capp-a331b",
+    "storage_bucket": "capp-a331b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:13241645392:android:f9927433685734e2a45455",
+        "android_client_info": {
+          "package_name": "br.com.capp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDFO89LW9QAWY4Z-OZnZJJ9ILnjbMnKn6A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
