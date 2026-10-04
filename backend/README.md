@@ -721,6 +721,46 @@ esteja iniciado. Consulte a [seção BDD](#bdd) para executar cada suíte separa
 
 ---
 
+# Implantação
+
+## Escopo da milestone 1
+
+Para a fundação do projeto, o ambiente controlado é o ambiente local de
+desenvolvimento, com a API Rust e o PostgreSQL. O Compose versiona a definição
+dos serviços, e a [configuração](#configuração) documenta as variáveis utilizadas.
+A execução local da API e do PostgreSQL já foi confirmada pelo mantenedor.
+
+Esse escopo atende à infraestrutura inicial da
+[issue #27](https://github.com/Henrique-zoo/CApp/issues/27), sem exigir uma VM
+dedicada ou hospedagem pública. A execução das funcionalidades do aplicativo
+será validada conforme elas forem implementadas nas entregas seguintes.
+
+## Disponibilizar e atualizar a versão local
+
+1. Confira os [pré-requisitos](#pré-requisitos) e a [configuração](#configuração).
+2. Com o código da versão desejada no checkout, siga a
+   [execução pelo Compose](#postgresql-e-backend-pelo-compose). Use novamente
+   `docker compose --profile backend up -d --build` após alterações para
+   reconstruir a imagem e iniciar a versão atualizada. Como alternativa, siga
+   a [execução com Cargo](#postgresql-pelo-compose-e-backend-com-cargo),
+   encerrando o processo anterior antes de iniciar o novo.
+3. Aguarde a inicialização e [verifique a comunicação](#verificar-a-comunicação)
+   com `/health` e `/ready`. As [migrations](#migrations) pendentes são aplicadas
+   pelo backend antes de abrir a porta HTTP.
+4. Ao terminar, siga o [encerramento do ambiente](#encerrar-o-ambiente-e-executar-testes),
+   que preserva o volume do banco para a próxima execução.
+
+## Hospedagem externa
+
+A implantação em servidor externo ainda não foi realizada. Ela será definida
+quando uma entrega precisar de acesso remoto ou operação contínua. Nessa etapa,
+este guia deverá registrar o destino escolhido, a configuração de acesso e
+segredos, a persistência dos dados e os comandos de publicação e atualização.
+O Dockerfile atual executa `cargo run` e serve ao desenvolvimento local; a forma
+de execução no ambiente hospedado será definida junto dessa implantação.
+
+---
+
 # BDD
 
 O projeto utiliza Behavior Driven Development.

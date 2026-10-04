@@ -256,6 +256,10 @@ detalha pré-requisitos, variáveis, execução com Cargo, verificação de pron
 e encerramento do ambiente. A [configuração local](backend/README.md#configuração)
 explica os valores padrão e a personalização pelo `.env`.
 
+O [guia de implantação](backend/README.md#implantação) registra o escopo local
+da milestone 1, o procedimento de atualização da API e quando será definida
+a hospedagem externa.
+
 ------------------------------------------------------------------------
 
 # Desenvolvimento do aplicativo móvel
