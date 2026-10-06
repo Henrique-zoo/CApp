@@ -1,5 +1,3 @@
-# language: pt
-
 # O acesso inicial ao CApp é exclusivo para contas institucionais da UnB.
 # Os e-mails abaixo são exemplos fictícios dessas contas.
 # O formato do e-mail, por si só, não comprova a identidade nem que a conta é da UnB.
@@ -9,7 +7,7 @@
 # @backend e @mobile indicam onde o cenário deve ser verificado.
 # Mensagens funcionais são verificadas na resposta da API e na interface, respectivamente.
 # Fluxos do provedor de login e navegação entre telas são exclusivos do mobile.
-
+# language: pt
 @specification_fixture
 Funcionalidade: Autenticação institucional de usuários da UnB
   Como estudante da Universidade de Brasília (UnB)
@@ -109,9 +107,9 @@ Funcionalidade: Autenticação institucional de usuários da UnB
       E o aplicativo solicita que o usuário realize a autenticação institucional
 
       Exemplos:
-        | situacao                               |
+        | situacao                                |
         | expirada sem possibilidade de renovação |
-        | inválida                               |
+        | inválida                                |
 
   Regra: Encerrar a sessão interrompe o acesso autenticado no aplicativo
 
