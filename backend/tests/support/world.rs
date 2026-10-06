@@ -4,7 +4,7 @@
 //! antes dos steps e os liberam ao término. Respostas e resultados pertencem
 //! a cada cenário, mesmo quando o pool consultivo é compartilhado.
 
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
 use axum::{
     Router,
@@ -19,6 +19,182 @@ use super::{
     database::{SuiteDatabase, TestDatabase},
     results::{TestDatabaseMutation, TestResponse},
 };
+
+/// Nome oficial da instituição de ensino padrão configurada no CApp.
+pub(crate) const DEFAULT_INSTITUTION_NAME: &str = "Universidade de Brasília";
+
+/// Situação cadastral da instituição de ensino parceira.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstitutionStatus {
+    /// Instituição ativa e disponível para autenticação.
+    Active,
+    /// Instituição inativa ou desativada no CApp.
+    Inactive,
+}
+
+/// Situação cadastral da conta institucional do estudante.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstitutionalAccountStatus {
+    /// Conta institucional ativa com vínculo regular.
+    Active,
+    /// Conta revogada ou inativa junto à instituição de ensino.
+    Revoked,
+}
+
+/// Representação da conta institucional para testes de autenticação.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InstitutionalAccount {
+    /// Endereço eletrônico institucional.
+    pub(crate) email: String,
+    /// Nome da instituição de ensino vinculada.
+    pub(crate) institution_name: String,
+    /// Situação cadastral da conta institucional.
+    pub(crate) status: InstitutionalAccountStatus,
+    /// Indica se as credenciais fornecidas na tentativa são válidas.
+    pub(crate) credentials_valid: bool,
+}
+
+/// Perfil do estudante associado à identidade acadêmica.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AuthenticatedUserProfile {
+    /// Endereço de e-mail institucional associado.
+    pub(crate) institutional_email: String,
+    /// Instituição de ensino de vínculo.
+    pub(crate) institution_name: String,
+    /// Indica se a identidade institucional foi vinculada com sucesso.
+    pub(crate) linked_identity: bool,
+}
+
+/// Sessão autenticada ativa no aplicativo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UserSession {
+    /// Identificador ou e-mail do usuário em sessão.
+    pub(crate) user_email: String,
+    /// Perfil institucional do usuário.
+    pub(crate) profile: AuthenticatedUserProfile,
+}
+
+/// Erros e recusas observáveis no fluxo de autenticação e acesso institucional.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum InstitutionalAuthError {
+    /// Credenciais institucionais incorretas ou inválidas.
+    InvalidCredentials,
+    /// Conta ou vínculo institucional revogado ou inativo.
+    AccountInactiveOrRevoked,
+    /// Instituição de ensino não reconhecida pelo CApp.
+    InstitutionNotRecognized,
+    /// Acesso a recurso restrito bloqueado por ausência de autenticação.
+    UnauthenticatedAccess,
+}
+
+/// Fixture que mantém o estado de autenticação institucional no cenário BDD.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct InstitutionalAuthFixture {
+    /// Instituições parceiras cadastradas, indexadas pelo nome.
+    pub(crate) institutions: HashMap<String, InstitutionStatus>,
+    /// Contas institucionais conhecidas, indexadas pelo e-mail.
+    pub(crate) accounts: HashMap<String, InstitutionalAccount>,
+    /// Sessão de usuário atualmente estabelecida.
+    pub(crate) active_session: Option<UserSession>,
+    /// Último erro registrado em tentativas de autenticação ou acesso restrito.
+    pub(crate) last_error: Option<InstitutionalAuthError>,
+    /// Indica se a plataforma solicitou autenticação ao usuário.
+    pub(crate) login_requested: bool,
+    /// Quantidade de registros acadêmicos persistidos.
+    pub(crate) academic_records_persisted: usize,
+    /// Indica se o último acesso à plataforma foi concedido com sucesso.
+    pub(crate) access_granted: bool,
+    /// Indica se alguma credencial de acesso foi gerada na última tentativa.
+    pub(crate) access_credentials_generated: bool,
+    /// E-mail institucional alvo da ação ou tentativa corrente no cenário.
+    pub(crate) current_target_email: Option<String>,
+}
+
+impl InstitutionalAuthFixture {
+    /// Registra uma instituição de ensino no catálogo da fixture.
+    pub(crate) fn register_institution(&mut self, name: &str, status: InstitutionStatus) {
+        self.institutions.insert(name.to_string(), status);
+    }
+
+    /// Registra uma conta institucional no catálogo da fixture.
+    pub(crate) fn register_account(&mut self, account: InstitutionalAccount) {
+        self.accounts.insert(account.email.clone(), account);
+    }
+
+    /// Executa a tentativa de autenticação com a conta informada.
+    pub(crate) fn authenticate(&mut self, email: &str) {
+        let Some(account) = self.accounts.get(email).cloned() else {
+            self.access_granted = false;
+            self.access_credentials_generated = false;
+            self.last_error = Some(InstitutionalAuthError::InvalidCredentials);
+            return;
+        };
+
+        let Some(&institution_status) = self.institutions.get(&account.institution_name) else {
+            self.access_granted = false;
+            self.access_credentials_generated = false;
+            self.last_error = Some(InstitutionalAuthError::InstitutionNotRecognized);
+            return;
+        };
+
+        if institution_status != InstitutionStatus::Active {
+            self.access_granted = false;
+            self.access_credentials_generated = false;
+            self.last_error = Some(InstitutionalAuthError::InstitutionNotRecognized);
+            return;
+        }
+
+        if !account.credentials_valid {
+            self.access_granted = false;
+            self.access_credentials_generated = false;
+            self.last_error = Some(InstitutionalAuthError::InvalidCredentials);
+            return;
+        }
+
+        if account.status != InstitutionalAccountStatus::Active {
+            self.access_granted = false;
+            self.access_credentials_generated = false;
+            self.last_error = Some(InstitutionalAuthError::AccountInactiveOrRevoked);
+            return;
+        }
+
+        let profile = AuthenticatedUserProfile {
+            institutional_email: account.email.clone(),
+            institution_name: account.institution_name.clone(),
+            linked_identity: true,
+        };
+
+        self.active_session = Some(UserSession {
+            user_email: account.email.clone(),
+            profile,
+        });
+        self.access_granted = true;
+        self.access_credentials_generated = true;
+        self.last_error = None;
+    }
+
+    /// Tenta acessar um serviço ou recurso restrito à comunidade acadêmica.
+    pub(crate) fn access_restricted_service(&mut self) -> bool {
+        if self.active_session.is_some() {
+            true
+        } else {
+            self.last_error = Some(InstitutionalAuthError::UnauthenticatedAccess);
+            self.login_requested = true;
+            false
+        }
+    }
+
+    /// Tenta submeter uma ação ou proposta acadêmica protegida.
+    pub(crate) fn submit_restricted_action(&mut self) -> bool {
+        if self.active_session.is_some() {
+            self.academic_records_persisted += 1;
+            true
+        } else {
+            self.last_error = Some(InstitutionalAuthError::UnauthenticatedAccess);
+            false
+        }
+    }
+}
 
 /// Contexto independente criado pelo Cucumber para cada cenário.
 ///
@@ -47,6 +223,8 @@ pub(crate) struct AppWorld {
     /// Inclui chamadas via `get_json` e aumenta antes de construir a requisição;
     /// uma URI inválida ou falha de leitura também pode incrementar o contador.
     pub(crate) request_count: usize,
+    /// Estado da autenticação institucional e contexto de acesso no cenário BDD.
+    pub(crate) authentication: InstitutionalAuthFixture,
 }
 
 impl fmt::Debug for AppWorld {
@@ -72,6 +250,7 @@ impl fmt::Debug for AppWorld {
             .field("last_database_mutation", &self.last_database_mutation)
             .field("last_response", &self.last_response)
             .field("request_count", &self.request_count)
+            .field("authentication", &self.authentication)
             .finish()
     }
 }
