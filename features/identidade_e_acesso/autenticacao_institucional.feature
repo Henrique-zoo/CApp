@@ -6,6 +6,9 @@
 # A origem institucional da conta deve ser confirmada pelo serviço de autenticação,
 # sem cadastro, convênio ou situação "ativa" de uma instituição no CApp.
 # Provisionamento do perfil e associação de dados acadêmicos têm regras próprias.
+# @backend e @mobile indicam onde o cenário deve ser verificado.
+# Mensagens funcionais são verificadas na resposta da API e na interface, respectivamente.
+# Fluxos do provedor de login e navegação entre telas são exclusivos do mobile.
 
 @specification_fixture
 Funcionalidade: Autenticação institucional de usuários da UnB
@@ -18,7 +21,7 @@ Funcionalidade: Autenticação institucional de usuários da UnB
 
   Regra: Uma conta institucional da UnB validada permite estabelecer a sessão de acesso
 
-    @happy
+    @happy @backend @mobile
     Cenário: Login bem-sucedido com conta institucional ativa da UnB
       Dado que o estudante possui uma conta institucional ativa da UnB com o e-mail "232012345@aluno.unb.br"
       Quando ele realiza a autenticação com suas credenciais institucionais
@@ -26,7 +29,7 @@ Funcionalidade: Autenticação institucional de usuários da UnB
       E uma sessão autenticada é estabelecida para o estudante
       E a identidade autenticada do usuário fica disponível com o e-mail "232012345@aluno.unb.br"
 
-    @happy
+    @happy @backend @mobile
     Cenário: Primeiro acesso com conta institucional da UnB dispensa cadastro manual
       Dado que um estudante com o e-mail "262001234@aluno.unb.br" realiza o primeiro acesso com conta institucional ativa da UnB
       Quando ele conclui a validação de sua identidade institucional
@@ -35,14 +38,14 @@ Funcionalidade: Autenticação institucional de usuários da UnB
 
   Regra: O login exige uma conta institucional da UnB cuja autenticação seja aceita
 
-    @sad
+    @sad @mobile
     Cenário: Tentativa de autenticação com credenciais institucionais inválidas
       Dado que um usuário possui credenciais institucionais inválidas para o e-mail "242099999@aluno.unb.br"
       Quando ele tenta realizar o login institucional
       Então a autenticação é recusada indicando credenciais inválidas
       E nenhuma sessão autenticada é estabelecida
 
-    @sad
+    @sad @mobile
     Cenário: Tentativa de login com conta institucional revogada pela UnB
       Dado que o estudante possui uma conta institucional com o e-mail "191099999@aluno.unb.br" revogada pela UnB
       E o serviço de autenticação recusa o acesso dessa conta
@@ -50,14 +53,14 @@ Funcionalidade: Autenticação institucional de usuários da UnB
       Então o aplicativo informa que não foi possível autenticar a conta institucional
       E o acesso à plataforma permanece bloqueado
 
-    @sad
+    @sad @backend @mobile
     Cenário: Conta pessoal Microsoft não permite login institucional
       Dado que o usuário possui uma conta pessoal Microsoft válida
       Quando ele tenta realizar o login institucional com essa conta
       Então o aplicativo informa que é necessário utilizar uma conta institucional da UnB
       E nenhuma sessão autenticada é estabelecida
 
-    @sad
+    @sad @backend @mobile
     Cenário: Conta institucional válida de outra universidade não permite acesso ao CApp
       Dado que o usuário possui uma conta institucional Microsoft válida de outra universidade
       E o serviço de autenticação confirma que a conta pertence a essa outra universidade
@@ -67,6 +70,7 @@ Funcionalidade: Autenticação institucional de usuários da UnB
 
   Regra: Um login não concluído mantém o usuário sem sessão e permite nova tentativa
 
+    @mobile
     Cenário: Estudante cancela o login institucional
       Dado que o estudante iniciou o login institucional
       Quando ele cancela a autenticação antes de concluí-la
@@ -74,7 +78,7 @@ Funcionalidade: Autenticação institucional de usuários da UnB
       E nenhuma sessão autenticada é estabelecida
       E o estudante pode iniciar uma nova tentativa de login
 
-    @sad
+    @sad @mobile
     Cenário: Serviço de autenticação indisponível durante o login
       Dado que o estudante possui uma conta institucional ativa da UnB com o e-mail "232012345@aluno.unb.br"
       E o serviço de autenticação está temporariamente indisponível
@@ -85,19 +89,19 @@ Funcionalidade: Autenticação institucional de usuários da UnB
 
   Regra: Recursos protegidos exigem uma sessão autenticada válida
 
-    @sad
+    @sad @backend @mobile
     Cenário: Usuário não autenticado tenta acessar recurso restrito aos estudantes
       Quando ele tenta acessar um serviço restrito da comunidade acadêmica
       Então o acesso ao recurso é bloqueado por ausência de autenticação
       E o aplicativo solicita que o usuário realize a autenticação institucional
 
-    @sad
+    @sad @backend @mobile
     Cenário: Usuário não autenticado tenta realizar uma ação protegida
       Quando ele tenta realizar uma ação que exige autenticação
       Então a operação é impedida por ausência de autenticação
       E a ação solicitada não é realizada
 
-    @sad
+    @sad @backend @mobile
     Esquema do Cenário: Sessão sem validade não permite acesso a recurso restrito
       Dado que o estudante possui uma sessão "<situacao>"
       Quando ele tenta acessar um serviço restrito da comunidade acadêmica
@@ -111,7 +115,7 @@ Funcionalidade: Autenticação institucional de usuários da UnB
 
   Regra: Encerrar a sessão interrompe o acesso autenticado no aplicativo
 
-    @happy
+    @happy @mobile
     Cenário: Estudante encerra a própria sessão
       Dado que o estudante possui uma sessão autenticada válida
       Quando ele solicita sair do CApp
