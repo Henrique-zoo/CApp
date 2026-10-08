@@ -22,14 +22,14 @@ Funcionalidade: Contexto Multi-CA e navegação entre Centros Acadêmicos
       | Centro Acadêmico de Ciência da Computação (CACC) | CACC  |
 
   Cenário: Definição e abertura do aplicativo no CA favorito do estudante
-    Dado que o estudante "242003979@aluno.unb.br" possui "Centro Acadêmico de Engenharia de Redes (CAER)" definido como seu CA favorito
+    Dado que o estudante "241098765@aluno.unb.br" possui "Centro Acadêmico de Engenharia de Redes (CAER)" definido como seu CA favorito
     Quando o estudante abre o aplicativo CApp
     Então o contexto ativo de navegação deve ser "Centro Acadêmico de Engenharia de Redes (CAER)"
     E o estudante visualiza as informações correspondentes a "Centro Acadêmico de Engenharia de Redes (CAER)"
     E o estudante não possui privilégios administrativos no CA ativo apenas por tê-lo como favorito
 
   Cenário: Alteração do contexto ativo para outro Centro Acadêmico disponível
-    Dado que o estudante "242003979@aluno.unb.br" possui "Centro Acadêmico de Engenharia de Redes (CAER)" definido como seu CA favorito
+    Dado que o estudante "241098765@aluno.unb.br" possui "Centro Acadêmico de Engenharia de Redes (CAER)" definido como seu CA favorito
     E está autenticado no aplicativo
     E está com o contexto ativo em "Centro Acadêmico de Engenharia de Redes (CAER)"
     Quando o estudante altera o contexto ativo para "Centro Acadêmico de Ciência da Computação (CACC)"
@@ -38,7 +38,7 @@ Funcionalidade: Contexto Multi-CA e navegação entre Centros Acadêmicos
     E a preferência de CA favorito do estudante permanece "Centro Acadêmico de Engenharia de Redes (CAER)"
 
   Cenário: Isolamento de permissões onde a mudança de contexto não concede privilégios administrativos
-    Dado que o estudante "242003979@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "Centro Acadêmico de Engenharia de Redes (CAER)"
+    Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "Centro Acadêmico de Engenharia de Redes (CAER)"
     E o cargo possui a permissão de "Publicar notícias diretamente"
     E o estudante não possui cargo de gestão em "Centro Acadêmico de Ciência da Computação (CACC)"
     Quando o estudante está com o contexto ativo em "Centro Acadêmico de Engenharia de Redes (CAER)"
