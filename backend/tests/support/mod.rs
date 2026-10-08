@@ -19,6 +19,7 @@
 //! panic. Essa sequência não garante limpeza explícita após aborto do processo
 //! ou panic fora do fluxo controlado, como na inicialização do ambiente.
 
+pub(crate) mod authentication_fixture;
 mod database;
 pub(crate) mod results;
 pub(crate) mod world;
