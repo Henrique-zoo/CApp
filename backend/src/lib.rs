@@ -7,6 +7,7 @@
 //! # Organização
 //!
 //! - [`api`]: estado, contrato de erros e composição HTTP.
+//! - [`domain`]: reexportação dos tipos de domínio de Centro Acadêmico.
 //! - [`modules::identity`]: verificação institucional e evidência de elegibilidade.
 //! - [`infrastructure::database`]: adaptador PostgreSQL e migrations compartilhadas.
 //! - [`domain`]: modelos e contratos de domínio consolidados da aplicação.

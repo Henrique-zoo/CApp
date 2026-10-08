@@ -3,8 +3,13 @@
 //! Centraliza as definições de domínio do sistema para facilitar a importação
 //! e manter compatibilidade com os módulos em [`crate::modules`].
 
+pub mod academic_center;
 pub mod eventos;
 
+pub use academic_center::{
+    AcademicCenter, AcademicCenterError, AcademicCenterStatus, CACC_DIDACTIC_ID, CAER_DIDACTIC_ID,
+    MAX_ACRONYM_LENGTH, MAX_DESCRIPTION_LENGTH, MAX_NAME_LENGTH,
+};
 pub use eventos::{
     DIRECT_EVENT_MANAGEMENT_PERMISSION, Event, EventDomainError, EventPeriod,
     EventPublicationStatus, EventRegistration, EventRegistrationInfo, MAX_EVENT_DESCRIPTION_LENGTH,
