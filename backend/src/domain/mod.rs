@@ -1,7 +1,7 @@
-//! Entidades do módulo de Centros Acadêmicos.
+//! Modelos e entidades de domínio do backend.
 //!
-//! Reúne os modelos de domínio do Centro Acadêmico, seu ciclo de vida,
-//! invariantes e regras de integridade estrutural.
+//! Centraliza as definições de domínio do sistema para facilitar a importação
+//! e manter a compatibilidade com a estrutura do projeto.
 
 pub mod academic_center;
 
