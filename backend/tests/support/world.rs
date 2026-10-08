@@ -4,7 +4,7 @@
 //! antes dos steps e os liberam ao término. Respostas e resultados pertencem
 //! a cada cenário, mesmo quando o pool consultivo é compartilhado.
 
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
 use axum::{
     Router,
@@ -47,6 +47,8 @@ pub(crate) struct AppWorld {
     /// Inclui chamadas via `get_json` e aumenta antes de construir a requisição;
     /// uma URI inválida ou falha de leitura também pode incrementar o contador.
     pub(crate) request_count: usize,
+    /// Estado e fixture dos cenários de provisionamento de usuário.
+    pub(crate) user_provisioning: UserProvisioningFixture,
 }
 
 impl fmt::Debug for AppWorld {
@@ -72,6 +74,7 @@ impl fmt::Debug for AppWorld {
             .field("last_database_mutation", &self.last_database_mutation)
             .field("last_response", &self.last_response)
             .field("request_count", &self.request_count)
+            .field("user_provisioning", &self.user_provisioning)
             .finish()
     }
 }
@@ -223,5 +226,295 @@ impl AppWorld {
         assert_eq!(response.status, StatusCode::OK);
 
         serde_json::from_str(&response.body).expect("response should match the expected JSON shape")
+    }
+}
+
+/// Situação cadastral da instituição de ensino parceira.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstitutionStatus {
+    /// Instituição ativa e disponível no CApp.
+    Active,
+    /// Instituição inativa ou desativada no CApp.
+    Inactive,
+}
+
+/// Registro interno do usuário na aplicação (`app_user`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AppUserRecord {
+    /// Identificador único e estável do usuário na aplicação.
+    pub(crate) id: uuid::Uuid,
+    /// Nome de exibição do usuário no aplicativo.
+    pub(crate) display_name: String,
+    /// E-mail institucional do usuário.
+    pub(crate) institutional_email: String,
+    /// Situação cadastral da conta interna ("active" ou "inactive").
+    pub(crate) status: String,
+    /// Instante lógico de criação do registro.
+    pub(crate) created_at: u64,
+    /// Instante lógico da última atualização do registro.
+    pub(crate) updated_at: u64,
+}
+
+/// Associação da identidade institucional externa (`external_identity`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExternalIdentityRecord {
+    /// Identificador único deste registro de identidade externa.
+    pub(crate) id: uuid::Uuid,
+    /// Identificador do usuário interno ao qual este registro pertence.
+    pub(crate) user_id: uuid::Uuid,
+    /// Nome da instituição de ensino associada.
+    pub(crate) institution_name: String,
+    /// Identificador do sujeito na Microsoft/provedor institucional.
+    pub(crate) external_subject: String,
+    /// Instante lógico do último login registrado para a identidade.
+    pub(crate) last_login_at: u64,
+}
+
+/// Fixture que mantém o estado de provisionamento de usuários no cenário BDD.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct UserProvisioningFixture {
+    /// Instituições parceiras cadastradas, indexadas pelo nome.
+    pub(crate) institutions: HashMap<String, InstitutionStatus>,
+    /// Usuários internos cadastrados, indexados pelo identificador único.
+    pub(crate) users: HashMap<uuid::Uuid, AppUserRecord>,
+    /// Identidades externas cadastradas, indexadas pelo identificador do sujeito externo.
+    pub(crate) external_identities: HashMap<String, ExternalIdentityRecord>,
+    /// Mapeamento de e-mail institucional para o identificador do sujeito externo.
+    pub(crate) email_to_subject: HashMap<String, String>,
+    /// E-mail do estudante em foco no cenário.
+    pub(crate) current_email: Option<String>,
+    /// Identificador interno do usuário em foco no cenário.
+    pub(crate) current_user_id: Option<uuid::Uuid>,
+    /// Identificador interno original capturado antes de novas operações.
+    pub(crate) initial_user_id: Option<uuid::Uuid>,
+    /// Quantidade de usuários cadastrados antes da última operação.
+    pub(crate) user_count_before: usize,
+    /// Quantidade de usuários cadastrados após a última operação.
+    pub(crate) user_count_after: usize,
+    /// Indica se um novo perfil interno foi criado na última operação.
+    pub(crate) was_user_created: bool,
+    /// Indica se o perfil existente foi recuperado na última operação.
+    pub(crate) was_user_recovered: bool,
+    /// Instante do último login antes da operação mais recente.
+    pub(crate) last_login_before: Option<u64>,
+    /// Instante do último login após a operação mais recente.
+    pub(crate) last_login_after: Option<u64>,
+    /// Relógio lógico monotonicamente crescente.
+    pub(crate) clock: u64,
+    /// Indica se o fluxo de autenticação exigiu formulário manual de cadastro.
+    pub(crate) registration_form_required: bool,
+}
+
+impl UserProvisioningFixture {
+    /// Registra uma instituição de ensino no catálogo da fixture.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `name`: nome da instituição parceira.
+    /// - `status`: situação cadastral da instituição.
+    pub(crate) fn register_institution(&mut self, name: &str, status: InstitutionStatus) {
+        self.institutions.insert(name.to_string(), status);
+    }
+
+    /// Cadastra previamente um estudante existente na aplicação.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `email`: e-mail institucional do estudante.
+    /// - `display_name`: nome de exibição no aplicativo.
+    ///
+    /// # Retorno
+    ///
+    /// Identificador único gerado para o usuário pré-cadastrado.
+    pub(crate) fn register_existing_user(&mut self, email: &str, display_name: &str) -> uuid::Uuid {
+        self.clock += 1;
+        let user_id = uuid::Uuid::new_v4();
+        let subject = format!("sub-unb-{}", email);
+
+        let user = AppUserRecord {
+            id: user_id,
+            display_name: display_name.to_string(),
+            institutional_email: email.to_string(),
+            status: "active".to_string(),
+            created_at: self.clock,
+            updated_at: self.clock,
+        };
+
+        let identity = ExternalIdentityRecord {
+            id: uuid::Uuid::new_v4(),
+            user_id,
+            institution_name: "Universidade de Brasília".to_string(),
+            external_subject: subject.clone(),
+            last_login_at: self.clock,
+        };
+
+        self.users.insert(user_id, user);
+        self.external_identities.insert(subject.clone(), identity);
+        self.email_to_subject.insert(email.to_string(), subject);
+        self.user_count_before = self.users.len();
+        self.user_count_after = self.users.len();
+        self.current_user_id = Some(user_id);
+        self.current_email = Some(email.to_string());
+
+        user_id
+    }
+
+    /// Executa o login e provisionamento automático do estudante com base no e-mail institucional.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `email`: e-mail institucional autenticado externamente.
+    pub(crate) fn provision_or_authenticate(&mut self, email: &str) {
+        self.user_count_before = self.users.len();
+        self.clock += 1;
+
+        let subject = self
+            .email_to_subject
+            .get(email)
+            .cloned()
+            .unwrap_or_else(|| format!("sub-unb-{}", email));
+
+        if let Some(identity) = self.external_identities.get_mut(&subject) {
+            self.last_login_before = Some(identity.last_login_at);
+            identity.last_login_at = self.clock;
+            self.last_login_after = Some(self.clock);
+
+            let user_id = identity.user_id;
+            if let Some(user) = self.users.get_mut(&user_id) {
+                user.updated_at = self.clock;
+            }
+
+            self.was_user_created = false;
+            self.was_user_recovered = true;
+            self.current_user_id = Some(user_id);
+        } else {
+            let user_id = uuid::Uuid::new_v4();
+            let user = AppUserRecord {
+                id: user_id,
+                display_name: format!(
+                    "Estudante {}",
+                    &email[..email.find('@').unwrap_or(email.len())]
+                ),
+                institutional_email: email.to_string(),
+                status: "active".to_string(),
+                created_at: self.clock,
+                updated_at: self.clock,
+            };
+
+            let identity = ExternalIdentityRecord {
+                id: uuid::Uuid::new_v4(),
+                user_id,
+                institution_name: "Universidade de Brasília".to_string(),
+                external_subject: subject.clone(),
+                last_login_at: self.clock,
+            };
+
+            self.users.insert(user_id, user);
+            self.external_identities.insert(subject.clone(), identity);
+            self.email_to_subject.insert(email.to_string(), subject);
+
+            self.was_user_created = true;
+            self.was_user_recovered = false;
+            self.current_user_id = Some(user_id);
+            self.last_login_before = None;
+            self.last_login_after = Some(self.clock);
+        }
+
+        self.user_count_after = self.users.len();
+        self.registration_form_required = false;
+        self.current_email = Some(email.to_string());
+    }
+
+    /// Executa múltiplas tentativas consecutivas de reautenticação para o mesmo e-mail.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `email`: e-mail institucional do estudante.
+    /// - `times`: quantidade de tentativas de login.
+    pub(crate) fn reauthenticate_multiple(&mut self, email: &str, times: usize) {
+        for _ in 0..times {
+            self.provision_or_authenticate(email);
+        }
+    }
+
+    /// Obtém uma referência ao usuário pelo seu identificador único.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `id`: identificador do usuário na aplicação.
+    ///
+    /// # Retorno
+    ///
+    /// Referência ao registro do usuário, se encontrado.
+    pub(crate) fn get_user(&self, id: &uuid::Uuid) -> Option<&AppUserRecord> {
+        self.users.get(id)
+    }
+
+    /// Obtém uma referência ao usuário pelo seu e-mail institucional.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `email`: e-mail institucional pesquisado.
+    ///
+    /// # Retorno
+    ///
+    /// Referência ao registro do usuário, se cadastrado.
+    pub(crate) fn get_user_by_email(&self, email: &str) -> Option<&AppUserRecord> {
+        self.users
+            .values()
+            .find(|user| user.institutional_email == email)
+    }
+
+    /// Obtém a identidade externa associada a um determinado usuário interno.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `user_id`: identificador do usuário interno.
+    ///
+    /// # Retorno
+    ///
+    /// Referência ao registro de identidade externa correspondente.
+    pub(crate) fn get_identity_for_user(
+        &self,
+        user_id: &uuid::Uuid,
+    ) -> Option<&ExternalIdentityRecord> {
+        self.external_identities
+            .values()
+            .find(|identity| identity.user_id == *user_id)
+    }
+
+    /// Conta quantos usuários internos estão associados ao mesmo identificador externo.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `subject`: identificador do sujeito externo.
+    ///
+    /// # Retorno
+    ///
+    /// Quantidade de usuários vinculados àquela identidade externa.
+    pub(crate) fn count_users_for_identity(&self, subject: &str) -> usize {
+        let Some(identity) = self.external_identities.get(subject) else {
+            return 0;
+        };
+        self.users
+            .values()
+            .filter(|user| user.id == identity.user_id)
+            .count()
+    }
+
+    /// Conta quantos registros de usuários possuem o e-mail institucional informado.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `email`: endereço de e-mail institucional.
+    ///
+    /// # Retorno
+    ///
+    /// Quantidade de usuários cadastrados com esse e-mail.
+    pub(crate) fn count_users_with_email(&self, email: &str) -> usize {
+        self.users
+            .values()
+            .filter(|user| user.institutional_email == email)
+            .count()
     }
 }

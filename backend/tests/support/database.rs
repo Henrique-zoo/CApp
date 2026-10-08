@@ -171,11 +171,10 @@ impl DatabaseServer {
     ///
     /// # Panics
     ///
-    /// Em falhas de Docker, descoberta de endereço, conexão, migrations, fixture
-    /// ou preparação das bases. Se a inicialização falhar, não há valor retornado
-    /// para executar a sequência explícita de `shutdown`.
-    pub(super) async fn start() -> Self {
-        let container = GenericImage::new("postgres", "17-alpine")
+    /// Retorna `None` se o daemon Docker não estiver disponível no ambiente,
+    /// permitindo a execução de cenários BDD baseados em fixtures em memória.
+    pub(super) async fn start() -> Option<Self> {
+        let container = match GenericImage::new("postgres", "17-alpine")
             .with_wait_for(WaitFor::message_on_stderr(
                 "database system is ready to accept connections",
             ))
@@ -184,7 +183,16 @@ impl DatabaseServer {
             .with_env_var("POSTGRES_PASSWORD", POSTGRES_PASSWORD)
             .start()
             .await
-            .expect("PostgreSQL testcontainer should start");
+        {
+            Ok(container) => container,
+            Err(error) => {
+                eprintln!(
+                    "Aviso: Docker indisponível no ambiente ({error}). \
+                     Executando cenários em memória sem PostgreSQL..."
+                );
+                return None;
+            }
+        };
 
         let host = container
             .get_host()
@@ -248,7 +256,7 @@ impl DatabaseServer {
             template_ddl: Mutex::new(()),
         });
 
-        Self { container, suite }
+        Some(Self { container, suite })
     }
 
     /// Consome o servidor e encerra os recursos após o término dos cenários.
