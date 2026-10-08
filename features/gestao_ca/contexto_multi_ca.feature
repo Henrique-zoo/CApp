@@ -1,10 +1,9 @@
 # language: pt
 
 Funcionalidade: Contexto Multi-CA e navegação entre Centros Acadêmicos
-
-  Como estudante da Universidade de Brasília (UnB)
-  Quero definir meu Centro Acadêmico favorito e alternar entre diferentes CAs
-  Para acompanhar informações e serviços estudantis com isolamento estrito de permissões
+  Como estudante da instituição de ensino
+  Quero navegar entre diferentes Centros Acadêmicos e definir meu CA favorito
+  Para que eu possa acompanhar informações relevantes sem perder o isolamento de privilégios
 
   # Regras de Negócio Fundamentais:
   # 1. Preferência vs Vínculo - O CA favorito é estritamente uma preferência de navegação inicial,
@@ -17,10 +16,11 @@ Funcionalidade: Contexto Multi-CA e navegação entre Centros Acadêmicos
 
   Contexto:
     Dado que existem os seguintes Centros Acadêmicos cadastrados na UnB:
-      | nome                                            | sigla |
-      | Centro Acadêmico de Engenharia de Redes (CAER)  | CAER  |
+      | nome                                           | sigla |
+      | Centro Acadêmico de Engenharia de Redes (CAER) | CAER  |
       | Centro Acadêmico de Ciência da Computação (CACC) | CACC  |
 
+  @backend @mobile @happy
   Cenário: Definição e abertura do aplicativo no CA favorito do estudante
     Dado que o estudante "241098765@aluno.unb.br" possui "Centro Acadêmico de Engenharia de Redes (CAER)" definido como seu CA favorito
     Quando o estudante abre o aplicativo CApp
@@ -28,6 +28,7 @@ Funcionalidade: Contexto Multi-CA e navegação entre Centros Acadêmicos
     E o estudante visualiza as informações correspondentes a "Centro Acadêmico de Engenharia de Redes (CAER)"
     E o estudante não possui privilégios administrativos no CA ativo apenas por tê-lo como favorito
 
+  @backend @mobile @happy
   Cenário: Alteração do contexto ativo para outro Centro Acadêmico disponível
     Dado que o estudante "241098765@aluno.unb.br" possui "Centro Acadêmico de Engenharia de Redes (CAER)" definido como seu CA favorito
     E está autenticado no aplicativo
@@ -37,6 +38,7 @@ Funcionalidade: Contexto Multi-CA e navegação entre Centros Acadêmicos
     E o estudante visualiza as informações correspondentes a "Centro Acadêmico de Ciência da Computação (CACC)"
     E a preferência de CA favorito do estudante permanece "Centro Acadêmico de Engenharia de Redes (CAER)"
 
+  @backend @mobile @sad
   Cenário: Isolamento de permissões onde a mudança de contexto não concede privilégios administrativos
     Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "Centro Acadêmico de Engenharia de Redes (CAER)"
     E o cargo possui a permissão de "Publicar notícias diretamente"
@@ -47,6 +49,7 @@ Funcionalidade: Contexto Multi-CA e navegação entre Centros Acadêmicos
     Então o estudante não possui permissão para "Publicar notícias diretamente" no CA ativo
     E atua estritamente como visitante no novo contexto
 
+  @backend @happy
   Cenário: Manutenção de cargos distintos e isolados por CA
     Dado que o estudante "231012345@aluno.unb.br" exerce o cargo de "Presidente" em "Centro Acadêmico de Engenharia de Redes (CAER)"
     E o cargo possui a permissão de "Administrar integrantes da gestão"
