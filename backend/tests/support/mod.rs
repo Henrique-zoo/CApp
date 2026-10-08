@@ -25,7 +25,7 @@ mod world;
 
 use std::{path::PathBuf, sync::Arc};
 
-use cucumber::{StatsWriter, World as _};
+use cucumber::{StatsWriter, World as _, tag::Ext};
 use futures::FutureExt as _;
 
 use database::DatabaseServer;
@@ -79,12 +79,17 @@ fn has_isolated_database_tag(
 /// Se a preparação ou o encerramento do PostgreSQL falhar, ou se as estatísticas
 /// indicarem qualquer falha após o encerramento. Um panic na preparação ou no
 /// próprio encerramento pode interromper a sequência explícita de limpeza.
-pub(crate) async fn run(features_path: PathBuf) {
+pub(crate) async fn run(features_path: PathBuf, required_tag: Option<&'static str>) {
+    let mut cli = cucumber::cli::Opts::<_, _, _>::parsed();
+    let requested_tags = cli.tags_filter.take();
+    let requested_name = cli.re_filter.take();
+
     let database_server = DatabaseServer::start().await;
     let before_suite = Arc::clone(&database_server.suite);
     let after_suite = Arc::clone(&database_server.suite);
 
     let writer = AppWorld::cucumber()
+        .with_cli(cli)
         .max_concurrent_scenarios(4)
         .before(move |feature, rule, scenario, world| {
             let suite = Arc::clone(&before_suite);
@@ -100,7 +105,26 @@ pub(crate) async fn run(features_path: PathBuf) {
             }
             .boxed_local()
         })
-        .run(features_path)
+        .filter_run(features_path, move |feature, rule, scenario| {
+            let tags = feature
+                .tags
+                .iter()
+                .chain(rule.into_iter().flat_map(|rule| rule.tags.iter()))
+                .chain(scenario.tags.iter());
+
+            let component_matches =
+                required_tag.is_none_or(|required| tags.clone().any(|tag| tag == required));
+
+            let tags_match = requested_tags
+                .as_ref()
+                .is_none_or(|filter| filter.eval(tags));
+
+            let name_matches = requested_name
+                .as_ref()
+                .is_none_or(|filter| filter.is_match(&scenario.name));
+
+            component_matches && tags_match && name_matches
+        })
         .await;
 
     let failures = (

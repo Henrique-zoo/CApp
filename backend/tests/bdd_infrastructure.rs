@@ -29,5 +29,5 @@ mod support;
 #[tokio::main]
 async fn main() {
     let features = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/features");
-    support::run(features).await;
+    support::run(features, None).await;
 }
