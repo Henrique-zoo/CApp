@@ -22,7 +22,7 @@
 mod database;
 pub(crate) mod results;
 mod scenario_filter;
-mod world;
+pub(crate) mod world;
 
 use std::{path::PathBuf, sync::Arc};
 
