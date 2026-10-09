@@ -22,6 +22,7 @@
 pub(crate) mod authentication_fixture;
 mod database;
 pub(crate) mod results;
+mod scenario_filter;
 pub(crate) mod world;
 
 use std::{path::PathBuf, sync::Arc};
@@ -69,7 +70,9 @@ fn has_isolated_database_tag(
 ///
 /// Um único container é reutilizado pelos cenários desta chamada. A execução
 /// permite até quatro cenários concorrentes, com hooks de preparação e limpeza.
-/// Os filtros de linha de comando são processados pelo Cucumber.
+/// Os filtros de linha de comando são processados pelo Cucumber. Cenários com
+/// `@pending_backend` na feature, regra ou cenário são excluídos da execução,
+/// inclusive quando correspondem aos filtros explícitos da CLI.
 ///
 /// Steps falhos ou pulados, erros de parsing e erros nos hooks são tratados
 /// como falha da suíte. Isso inclui steps sem definição, contabilizados como
@@ -107,6 +110,10 @@ pub(crate) async fn run(features_path: PathBuf, required_tag: Option<&'static st
             .boxed_local()
         })
         .filter_run(features_path, move |feature, rule, scenario| {
+            if scenario_filter::is_pending_backend(feature, rule, scenario) {
+                return false;
+            }
+
             let tags = feature
                 .tags
                 .iter()
