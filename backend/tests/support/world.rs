@@ -1,4 +1,4 @@
-//! Contexto de cada cenário, fixtures de especificação e acesso ao router real.
+//! Contexto de cada cenário e acesso ao banco de testes e ao router real.
 //!
 //! [`AppWorld`] nasce sem recursos externos. Os hooks associam banco e router
 //! antes dos steps e os liberam ao término. Respostas e resultados pertencem
@@ -16,7 +16,6 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 
 use super::{
-    authentication_fixture::InstitutionalAuthFixture,
     database::{SuiteDatabase, TestDatabase},
     results::{TestDatabaseMutation, TestResponse},
 };
@@ -27,7 +26,7 @@ use super::{
 /// requisições zerado. O hook `before` associa os recursos conforme a tag de
 /// isolamento; o hook `after` os libera. Steps de integração acessam o pool por
 /// [`Self::database_pool`] e enviam requisições por [`Self::get`] ou
-/// [`Self::get_json`]. Os exemplos de especificação usam [`Self::authentication`].
+/// [`Self::get_json`].
 ///
 /// Os campos de resultados SQL são preenchidos pelos steps que executarem
 /// mutações. Os helpers HTTP não os atualizam automaticamente.
@@ -48,8 +47,6 @@ pub(crate) struct AppWorld {
     /// Inclui chamadas via `get_json` e aumenta antes de construir a requisição;
     /// uma URI inválida ou falha de leitura também pode incrementar o contador.
     pub(crate) request_count: usize,
-    /// Simulação provisória de autenticação para cenários de especificação (#3).
-    pub(crate) authentication: InstitutionalAuthFixture,
 }
 
 impl fmt::Debug for AppWorld {
@@ -75,7 +72,6 @@ impl fmt::Debug for AppWorld {
             .field("last_database_mutation", &self.last_database_mutation)
             .field("last_response", &self.last_response)
             .field("request_count", &self.request_count)
-            .field("authentication", &self.authentication)
             .finish()
     }
 }

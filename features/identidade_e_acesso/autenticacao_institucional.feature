@@ -1,3 +1,4 @@
+# language: pt
 # O acesso inicial ao CApp é exclusivo para contas institucionais da UnB.
 # Os e-mails abaixo são exemplos fictícios dessas contas.
 # O formato do e-mail, por si só, não comprova a identidade nem que a conta é da UnB.
@@ -7,8 +8,7 @@
 # @backend e @mobile indicam onde o cenário deve ser verificado.
 # Mensagens funcionais são verificadas na resposta da API e na interface, respectivamente.
 # Fluxos do provedor de login e navegação entre telas são exclusivos do mobile.
-# language: pt
-@specification_fixture
+@pending_backend @pending_mobile
 Funcionalidade: Autenticação institucional de usuários da UnB
   Como estudante da Universidade de Brasília (UnB)
   Quero autenticar minha conta institucional Microsoft da UnB no CApp

@@ -7,3 +7,14 @@
 //! `bdd_infrastructure`, sem serem registrados nesta suíte.
 
 mod autenticacao_institucional;
+
+/// Sinaliza que uma step registrada ainda aguarda a implementação real.
+///
+/// # Panics
+///
+/// Sempre falha com o texto da step. O Cucumber registra a falha e a suíte
+/// permanece reprovada até que o comportamento seja automatizado.
+#[track_caller]
+pub(super) fn pending_step(step: &str) -> ! {
+    unimplemented!("Step pendente: {step}");
+}

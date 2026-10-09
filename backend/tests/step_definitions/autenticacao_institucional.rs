@@ -1,302 +1,238 @@
-//! Steps provisórios da especificação de autenticação institucional (#3).
+//! Steps pendentes da especificação de autenticação institucional (#3).
 //!
-//! Os `Dado` escolhem fixtures, os `Quando` aplicam resultados predeterminados
-//! e os `Então` conferem a simulação. Estes cenários passam sem implementação
-//! de login, chamadas Microsoft/Firebase ou persistência de usuários.
-//! Na automação posterior (#11), substituir a simulação por chamadas à
-//! implementação real e verificações dos seus resultados.
+//! Os padrões Gherkin estão registrados, mas a automação ainda não foi
+//! implementada. Cada step falha explicitamente com uma mensagem de pendência;
+//! nenhum resultado de autenticação é simulado ou aprovado antecipadamente.
+//! A implementação posterior (#11) deverá preparar os contextos, executar o
+//! comportamento real do backend e verificar seus resultados.
 
 use cucumber::{given, then, when};
 
-use crate::support::{
-    AppWorld,
-    authentication_fixture::{
-        AuthMessageFixture, InstitutionalAuthFixture, LoginResponseFixture, ScreenFixture,
-        SessionFixture,
-    },
-};
+use super::pending_step;
+use crate::support::AppWorld;
 
-/// Inicia cada exemplo com uma fixture própria, sem autenticação anterior.
+/// Pendente: que o usuário não está autenticado no aplicativo.
 #[given("que o usuário não está autenticado no aplicativo")]
-fn user_is_not_authenticated(world: &mut AppWorld) {
-    world.authentication = InstitutionalAuthFixture::default();
+fn user_is_not_authenticated(_world: &mut AppWorld) {
+    pending_step("que o usuário não está autenticado no aplicativo");
 }
 
-/// Prepara o sucesso de uma conta da UnB, inclusive no primeiro acesso.
+/// Pendente: que o estudante possui uma conta institucional ativa da UnB com o e-mail {string}.
 #[given(expr = "que o estudante possui uma conta institucional ativa da UnB com o e-mail {string}")]
 #[given(
     expr = "que um estudante com o e-mail {string} realiza o primeiro acesso com conta institucional ativa da UnB"
 )]
-fn student_has_unb_account(world: &mut AppWorld, email: String) {
-    world
-        .authentication
-        .prepare_login(email, LoginResponseFixture::UnbAccount);
+fn student_has_unb_account(_world: &mut AppWorld, _email: String) {
+    pending_step(
+        "que o estudante possui uma conta institucional ativa da UnB com o e-mail {string}",
+    );
 }
 
-/// Prepara a recusa de credenciais, sem consultar um provedor de identidade.
+/// Pendente: que um usuário possui credenciais institucionais inválidas para o e-mail {string}.
 #[given(expr = "que um usuário possui credenciais institucionais inválidas para o e-mail {string}")]
-fn user_has_invalid_credentials(world: &mut AppWorld, email: String) {
-    world
-        .authentication
-        .prepare_login(email, LoginResponseFixture::InvalidCredentials);
+fn user_has_invalid_credentials(_world: &mut AppWorld, _email: String) {
+    pending_step(
+        "que um usuário possui credenciais institucionais inválidas para o e-mail {string}",
+    );
 }
 
-/// Prepara a recusa de uma conta revogada, sem inferir situação acadêmica.
+/// Pendente: que o estudante possui uma conta institucional com o e-mail {string} revogada pela UnB.
 #[given(
     expr = "que o estudante possui uma conta institucional com o e-mail {string} revogada pela UnB"
 )]
-fn student_account_revoked(world: &mut AppWorld, email: String) {
-    world
-        .authentication
-        .prepare_login(email, LoginResponseFixture::RevokedAccount);
+fn student_account_revoked(_world: &mut AppWorld, _email: String) {
+    pending_step(
+        "que o estudante possui uma conta institucional com o e-mail {string} revogada pela UnB",
+    );
 }
 
-/// Confirma que a recusa da conta foi preparada no contexto deste cenário.
+/// Pendente: o serviço de autenticação recusa o acesso dessa conta.
 #[given("o serviço de autenticação recusa o acesso dessa conta")]
-fn provider_rejects_account(world: &mut AppWorld) {
-    assert_eq!(
-        world
-            .authentication
-            .prepared_login
-            .as_ref()
-            .expect("prepare a revoked account")
-            .response,
-        LoginResponseFixture::RevokedAccount,
-    );
+fn provider_rejects_account(_world: &mut AppWorld) {
+    pending_step("o serviço de autenticação recusa o acesso dessa conta");
 }
 
-/// Prepara uma conta pessoal Microsoft, sem autorização para o CApp da UnB.
+/// Pendente: que o usuário possui uma conta pessoal Microsoft válida.
 #[given("que o usuário possui uma conta pessoal Microsoft válida")]
-fn user_has_personal_account(world: &mut AppWorld) {
-    world.authentication.prepare_login(
-        "pessoa@example.com".to_owned(),
-        LoginResponseFixture::PersonalAccount,
-    );
+fn user_has_personal_account(_world: &mut AppWorld) {
+    pending_step("que o usuário possui uma conta pessoal Microsoft válida");
 }
 
-/// Prepara a identidade de outra universidade, sem catálogo de instituições.
+/// Pendente: que o usuário possui uma conta institucional Microsoft válida de outra universidade.
 #[given("que o usuário possui uma conta institucional Microsoft válida de outra universidade")]
-fn user_has_other_university_account(world: &mut AppWorld) {
-    world.authentication.prepare_login(
-        "estudante@outra.example".to_owned(),
-        LoginResponseFixture::OtherUniversity,
+fn user_has_other_university_account(_world: &mut AppWorld) {
+    pending_step(
+        "que o usuário possui uma conta institucional Microsoft válida de outra universidade",
     );
 }
 
-/// Confirma a origem já definida na fixture, independentemente do e-mail.
+/// Pendente: o serviço de autenticação confirma que a conta pertence a essa outra universidade.
 #[given("o serviço de autenticação confirma que a conta pertence a essa outra universidade")]
-fn provider_confirms_other_university(world: &mut AppWorld) {
-    assert_eq!(
-        world
-            .authentication
-            .prepared_login
-            .as_ref()
-            .expect("prepare another university account")
-            .response,
-        LoginResponseFixture::OtherUniversity,
+fn provider_confirms_other_university(_world: &mut AppWorld) {
+    pending_step(
+        "o serviço de autenticação confirma que a conta pertence a essa outra universidade",
     );
 }
 
-/// Prepara o fluxo ainda aberto que poderá ser cancelado pelo estudante.
+/// Pendente: que o estudante iniciou o login institucional.
 #[given("que o estudante iniciou o login institucional")]
-fn student_started_login(world: &mut AppWorld) {
-    world.authentication.screen = ScreenFixture::Authentication;
+fn student_started_login(_world: &mut AppWorld) {
+    pending_step("que o estudante iniciou o login institucional");
 }
 
-/// Substitui a resposta preparada por indisponibilidade, sem rede ou espera.
+/// Pendente: o serviço de autenticação está temporariamente indisponível.
 #[given("o serviço de autenticação está temporariamente indisponível")]
-fn provider_is_unavailable(world: &mut AppWorld) {
-    world
-        .authentication
-        .prepared_login
-        .as_mut()
-        .expect("prepare a login attempt")
-        .response = LoginResponseFixture::Unavailable;
+fn provider_is_unavailable(_world: &mut AppWorld) {
+    pending_step("o serviço de autenticação está temporariamente indisponível");
 }
 
-/// Prepara os estados sem validade usados nos exemplos do esquema de cenário.
-///
-/// # Panics
-///
-/// Se o exemplo pedir uma situação não especificada nesta fixture.
+/// Pendente: que o estudante possui uma sessão {string}.
 #[given(expr = "que o estudante possui uma sessão {string}")]
-fn student_has_unusable_session(world: &mut AppWorld, status: String) {
-    world.authentication.session = match status.as_str() {
-        "expirada sem possibilidade de renovação" => SessionFixture::Expired,
-        "inválida" => SessionFixture::Invalid,
-        _ => panic!("situação de sessão sem fixture: {status}"),
-    };
+fn student_has_unusable_session(_world: &mut AppWorld, _status: String) {
+    pending_step("que o estudante possui uma sessão {string}");
 }
 
-/// Prepara uma sessão da UnB para especificar o encerramento no aplicativo.
+/// Pendente: que o estudante possui uma sessão autenticada válida.
 #[given("que o estudante possui uma sessão autenticada válida")]
-fn student_has_valid_session(world: &mut AppWorld) {
-    world.authentication.session = SessionFixture::Valid {
-        email: "232012345@aluno.unb.br".to_owned(),
-    };
-    world.authentication.screen = ScreenFixture::Authenticated;
-    world.authentication.access_granted = true;
+fn student_has_valid_session(_world: &mut AppWorld) {
+    pending_step("que o estudante possui uma sessão autenticada válida");
 }
 
-/// Aplica a resposta de login predeterminada pelos passos de contexto.
+/// Pendente: ele realiza a autenticação com suas credenciais institucionais.
 #[when("ele realiza a autenticação com suas credenciais institucionais")]
 #[when("ele conclui a validação de sua identidade institucional")]
 #[when("ele tenta realizar o login institucional")]
 #[when("ele tenta autenticar no CApp")]
 #[when("ele tenta realizar o login institucional com essa conta")]
-fn user_attempts_login(world: &mut AppWorld) {
-    world.authentication.authenticate();
+fn user_attempts_login(_world: &mut AppWorld) {
+    pending_step("ele realiza a autenticação com suas credenciais institucionais");
 }
 
-/// Simula o cancelamento do fluxo antes da criação da sessão.
+/// Pendente: ele cancela a autenticação antes de concluí-la.
 #[when("ele cancela a autenticação antes de concluí-la")]
-fn student_cancels_login(world: &mut AppWorld) {
-    world.authentication.cancel_login();
+fn student_cancels_login(_world: &mut AppWorld) {
+    pending_step("ele cancela a autenticação antes de concluí-la");
 }
 
-/// Aplica o resultado de consulta correspondente à sessão fictícia.
+/// Pendente: ele tenta acessar um serviço restrito da comunidade acadêmica.
 #[when("ele tenta acessar um serviço restrito da comunidade acadêmica")]
-fn user_accesses_restricted_service(world: &mut AppWorld) {
-    world.authentication.access_restricted_service();
+fn user_accesses_restricted_service(_world: &mut AppWorld) {
+    pending_step("ele tenta acessar um serviço restrito da comunidade acadêmica");
 }
 
-/// Simula uma ação protegida sem executar operações reais no banco.
+/// Pendente: ele tenta realizar uma ação que exige autenticação.
 #[when("ele tenta realizar uma ação que exige autenticação")]
-fn user_attempts_restricted_action(world: &mut AppWorld) {
-    world.authentication.submit_restricted_action();
+fn user_attempts_restricted_action(_world: &mut AppWorld) {
+    pending_step("ele tenta realizar uma ação que exige autenticação");
 }
 
-/// Simula a saída da sessão local, sem revogar tokens em serviços externos.
+/// Pendente: ele solicita sair do CApp.
 #[when("ele solicita sair do CApp")]
-fn student_logs_out(world: &mut AppWorld) {
-    world.authentication.logout();
+fn student_logs_out(_world: &mut AppWorld) {
+    pending_step("ele solicita sair do CApp");
 }
 
-/// Confere que a resposta simulada concedeu acesso sem mensagem de erro.
+/// Pendente: o acesso à plataforma é concedido com sucesso.
 #[then("o acesso à plataforma é concedido com sucesso")]
-fn access_is_granted(world: &mut AppWorld) {
-    assert!(world.authentication.access_granted);
-    assert_eq!(world.authentication.message, None);
+fn access_is_granted(_world: &mut AppWorld) {
+    pending_step("o acesso à plataforma é concedido com sucesso");
 }
 
-/// Confere a sessão criada pelo resultado de sucesso da fixture.
+/// Pendente: uma sessão autenticada é estabelecida para o estudante.
 #[then("uma sessão autenticada é estabelecida para o estudante")]
 #[then("o sistema estabelece a sessão autenticada do usuário")]
-fn session_is_established(world: &mut AppWorld) {
-    assert!(matches!(
-        world.authentication.session,
-        SessionFixture::Valid { .. }
-    ));
-    assert_eq!(world.authentication.screen, ScreenFixture::Authenticated);
+fn session_is_established(_world: &mut AppWorld) {
+    pending_step("uma sessão autenticada é estabelecida para o estudante");
 }
 
-/// Confere que a identidade simulada mantém o e-mail usado no exemplo.
+/// Pendente: a identidade autenticada do usuário fica disponível com o e-mail {string}.
 #[then(expr = "a identidade autenticada do usuário fica disponível com o e-mail {string}")]
-fn authenticated_identity_is_available(world: &mut AppWorld, email: String) {
-    assert_eq!(
-        world.authentication.session,
-        SessionFixture::Valid { email }
-    );
+fn authenticated_identity_is_available(_world: &mut AppWorld, _email: String) {
+    pending_step("a identidade autenticada do usuário fica disponível com o e-mail {string}");
 }
 
-/// Confere a ausência de cadastro manual no resultado preparado de sucesso.
+/// Pendente: não é solicitado cadastro manual para entrar no CApp.
 #[then("não é solicitado cadastro manual para entrar no CApp")]
-fn manual_registration_is_not_requested(world: &mut AppWorld) {
-    assert_eq!(world.authentication.registration_requested, Some(false));
+fn manual_registration_is_not_requested(_world: &mut AppWorld) {
+    pending_step("não é solicitado cadastro manual para entrar no CApp");
 }
 
-/// Confere a mensagem e a ausência de acesso no resultado simulado de recusa.
-fn assert_login_rejected(world: &AppWorld, message: AuthMessageFixture) {
-    assert_eq!(world.authentication.message, Some(message));
-    assert!(!world.authentication.access_granted);
-    assert_eq!(world.authentication.session, SessionFixture::Absent);
-}
-
-/// Confere a mensagem correspondente à fixture de credenciais inválidas.
+/// Pendente: a autenticação é recusada indicando credenciais inválidas.
 #[then("a autenticação é recusada indicando credenciais inválidas")]
-fn invalid_credentials_are_rejected(world: &mut AppWorld) {
-    assert_login_rejected(world, AuthMessageFixture::InvalidCredentials);
+fn invalid_credentials_are_rejected(_world: &mut AppWorld) {
+    pending_step("a autenticação é recusada indicando credenciais inválidas");
 }
 
-/// Confere a recusa da conta sem afirmar que o vínculo acadêmico está inativo.
+/// Pendente: o aplicativo informa que não foi possível autenticar a conta institucional.
 #[then("o aplicativo informa que não foi possível autenticar a conta institucional")]
-fn account_rejection_is_reported(world: &mut AppWorld) {
-    assert_login_rejected(world, AuthMessageFixture::AccountRejected);
+fn account_rejection_is_reported(_world: &mut AppWorld) {
+    pending_step("o aplicativo informa que não foi possível autenticar a conta institucional");
 }
 
-/// Confere a restrição à UnB para contas pessoais ou de outra universidade.
+/// Pendente: o aplicativo informa que é necessário utilizar uma conta institucional da UnB.
 #[then("o aplicativo informa que é necessário utilizar uma conta institucional da UnB")]
-fn unb_account_is_required(world: &mut AppWorld) {
-    assert_login_rejected(world, AuthMessageFixture::UnbAccountRequired);
+fn unb_account_is_required(_world: &mut AppWorld) {
+    pending_step("o aplicativo informa que é necessário utilizar uma conta institucional da UnB");
 }
 
-/// Confere a mensagem de indisponibilidade preparada no cenário.
+/// Pendente: o aplicativo informa a indisponibilidade temporária da autenticação.
 #[then("o aplicativo informa a indisponibilidade temporária da autenticação")]
-fn provider_unavailability_is_reported(world: &mut AppWorld) {
-    assert_login_rejected(world, AuthMessageFixture::Unavailable);
+fn provider_unavailability_is_reported(_world: &mut AppWorld) {
+    pending_step("o aplicativo informa a indisponibilidade temporária da autenticação");
 }
 
-/// Confere que a simulação não criou sessão nem concedeu acesso.
+/// Pendente: nenhuma sessão autenticada é estabelecida.
 #[then("nenhuma sessão autenticada é estabelecida")]
 #[then("o acesso à plataforma permanece bloqueado")]
-fn no_session_is_established(world: &mut AppWorld) {
-    assert_eq!(world.authentication.session, SessionFixture::Absent);
-    assert!(!world.authentication.access_granted);
+fn no_session_is_established(_world: &mut AppWorld) {
+    pending_step("nenhuma sessão autenticada é estabelecida");
 }
 
-/// Confere o retorno à entrada, sem executar uma interface Flutter.
+/// Pendente: o aplicativo retorna à tela de entrada.
 #[then("o aplicativo retorna à tela de entrada")]
-fn entry_screen_is_displayed(world: &mut AppWorld) {
-    assert_eq!(world.authentication.screen, ScreenFixture::Entry);
+fn entry_screen_is_displayed(_world: &mut AppWorld) {
+    pending_step("o aplicativo retorna à tela de entrada");
 }
 
-/// Confere que o resultado simulado disponibiliza outra tentativa de entrada.
+/// Pendente: o estudante pode iniciar uma nova tentativa de login.
 #[then("o estudante pode iniciar uma nova tentativa de login")]
-fn retry_is_available(world: &mut AppWorld) {
-    assert!(world.authentication.retry_available);
-    assert_eq!(world.authentication.screen, ScreenFixture::Entry);
+fn retry_is_available(_world: &mut AppWorld) {
+    pending_step("o estudante pode iniciar uma nova tentativa de login");
 }
 
-/// Confere a recusa de consulta ou ação realizada sem autenticação.
+/// Pendente: o acesso ao recurso é bloqueado por ausência de autenticação.
 #[then("o acesso ao recurso é bloqueado por ausência de autenticação")]
 #[then("a operação é impedida por ausência de autenticação")]
-fn unauthenticated_access_is_blocked(world: &mut AppWorld) {
-    assert_login_rejected(world, AuthMessageFixture::AuthenticationRequired);
+fn unauthenticated_access_is_blocked(_world: &mut AppWorld) {
+    pending_step("o acesso ao recurso é bloqueado por ausência de autenticação");
 }
 
-/// Confere que a recusa decorreu da sessão expirada ou inválida preparada.
+/// Pendente: o acesso ao recurso é bloqueado por falta de uma sessão válida.
 #[then("o acesso ao recurso é bloqueado por falta de uma sessão válida")]
-fn invalid_session_access_is_blocked(world: &mut AppWorld) {
-    assert_eq!(
-        world.authentication.message,
-        Some(AuthMessageFixture::InvalidSession)
-    );
-    assert!(!world.authentication.access_granted);
+fn invalid_session_access_is_blocked(_world: &mut AppWorld) {
+    pending_step("o acesso ao recurso é bloqueado por falta de uma sessão válida");
 }
 
-/// Confere a solicitação de login no resultado do acesso protegido.
+/// Pendente: o aplicativo solicita que o usuário realize a autenticação institucional.
 #[then("o aplicativo solicita que o usuário realize a autenticação institucional")]
-fn authentication_is_requested(world: &mut AppWorld) {
-    assert!(world.authentication.login_requested);
+fn authentication_is_requested(_world: &mut AppWorld) {
+    pending_step("o aplicativo solicita que o usuário realize a autenticação institucional");
 }
 
-/// Confere o resultado negativo da tentativa de ação, sem presumir persistência.
+/// Pendente: a ação solicitada não é realizada.
 #[then("a ação solicitada não é realizada")]
-fn restricted_action_is_not_performed(world: &mut AppWorld) {
-    assert_eq!(world.authentication.action_performed, Some(false));
+fn restricted_action_is_not_performed(_world: &mut AppWorld) {
+    pending_step("a ação solicitada não é realizada");
 }
 
-/// Confere que a saída foi executada e removeu a sessão da simulação.
+/// Pendente: a sessão do estudante é encerrada no aplicativo.
 #[then("a sessão do estudante é encerrada no aplicativo")]
-fn session_is_closed(world: &mut AppWorld) {
-    assert!(world.authentication.logout_completed);
-    assert_eq!(world.authentication.session, SessionFixture::Absent);
+fn session_is_closed(_world: &mut AppWorld) {
+    pending_step("a sessão do estudante é encerrada no aplicativo");
 }
 
-/// Confere o estado sem acesso autenticado após a saída local.
+/// Pendente: o acesso a recursos restritos passa a exigir nova autenticação.
 #[then("o acesso a recursos restritos passa a exigir nova autenticação")]
-fn protected_access_requires_new_login(world: &mut AppWorld) {
-    assert!(world.authentication.logout_completed);
-    assert_eq!(world.authentication.session, SessionFixture::Absent);
-    assert!(!world.authentication.access_granted);
+fn protected_access_requires_new_login(_world: &mut AppWorld) {
+    pending_step("o acesso a recursos restritos passa a exigir nova autenticação");
 }
