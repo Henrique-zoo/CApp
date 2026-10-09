@@ -84,11 +84,14 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
 
     @happy @backend @mobile
     Cenário: Gestor altera o cargo de um integrante
-      Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
+      Dado que o cargo "Diretor de Comunicação" possui a permissão de "Publicar notícias diretamente"
+      E o cargo "Diretor de Eventos" possui a permissão de "Publicar e gerenciar eventos diretamente"
+      E o cargo "Diretor de Eventos" não possui a permissão de "Publicar notícias diretamente"
+      E o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
       Quando o gestor "231012345@aluno.unb.br" altera o cargo de "241098765@aluno.unb.br" para "Diretor de Eventos" em "CAER"
       Então "241098765@aluno.unb.br" passa a exercer o cargo "Diretor de Eventos" em "CAER"
-      E "241098765@aluno.unb.br" passa a possuir as permissões do cargo "Diretor de Eventos" em "CAER"
-      E "241098765@aluno.unb.br" deixa de possuir as permissões exclusivas do cargo "Diretor de Comunicação" em "CAER"
+      E "241098765@aluno.unb.br" passa a possuir a permissão de "Publicar e gerenciar eventos diretamente" em "CAER"
+      E "241098765@aluno.unb.br" deixa de possuir a permissão de "Publicar notícias diretamente" em "CAER"
 
     @sad @backend @mobile
     Cenário: Integrante sem permissão de administrar a gestão não pode alterar cargos
@@ -105,7 +108,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       E não integra a gestão de "CAER"
       Quando o gestor "231012345@aluno.unb.br" tenta alterar o cargo de "241098765@aluno.unb.br" para "Diretor de Eventos" em "CAER"
       Então a operação é recusada informando que o usuário não integra a gestão do CA
-      E "241098765@aluno.unb.br" não passa a integrar a gestão de "CAER"
+      E "241098765@aluno.unb.br" permanece sem integrar a gestão de "CAER"
 
     @sad @backend @mobile
     Cenário: Alterar para o cargo atualmente exercido não modifica a gestão
@@ -158,18 +161,26 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
   Regra: Toda mudança na composição da gestão é registrada e o histórico é preservado
 
     @happy @backend
-    Esquema do Cenário: Mudanças na gestão geram registro no histórico administrativo
-      Dado que o estudante "241098765@aluno.unb.br" se encontra na situação "<situacao_inicial>" em "CAER"
-      Quando o gestor "231012345@aluno.unb.br" realiza a operação "<operacao>" sobre "241098765@aluno.unb.br" em "CAER"
-      Então o histórico administrativo de "CAER" registra a operação "<operacao>"
-      E o registro identifica o integrante afetado, o cargo anterior "<cargo_anterior>" e o cargo resultante "<cargo_resultante>"
-      E o registro identifica o gestor "231012345@aluno.unb.br" como responsável e a data da operação
+    Cenário: Vinculação de integrante é registrada no histórico administrativo
+      Dado que o estudante "241098765@aluno.unb.br" possui perfil no CApp
+      E não integra a gestão de "CAER"
+      Quando o gestor "231012345@aluno.unb.br" vincula "241098765@aluno.unb.br" ao cargo "Diretor de Comunicação" em "CAER"
+      Então o histórico administrativo de "CAER" registra a vinculação de "241098765@aluno.unb.br" ao cargo "Diretor de Comunicação"
+      E o registro identifica o gestor "231012345@aluno.unb.br" como responsável e a data da vinculação
 
-      Exemplos:
-        | situacao_inicial                   | operacao   | cargo_anterior         | cargo_resultante       |
-        | sem vínculo com a gestão           | vinculação | nenhum                 | Diretor de Comunicação |
-        | no cargo de Diretor de Comunicação | alteração  | Diretor de Comunicação | Diretor de Eventos     |
-        | no cargo de Diretor de Comunicação | remoção    | Diretor de Comunicação | nenhum                 |
+    @happy @backend
+    Cenário: Alteração de cargo é registrada no histórico administrativo
+      Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
+      Quando o gestor "231012345@aluno.unb.br" altera o cargo de "241098765@aluno.unb.br" para "Diretor de Eventos" em "CAER"
+      Então o histórico administrativo de "CAER" registra a alteração de "241098765@aluno.unb.br" do cargo "Diretor de Comunicação" para "Diretor de Eventos"
+      E o registro identifica o gestor "231012345@aluno.unb.br" como responsável e a data da alteração
+
+    @happy @backend
+    Cenário: Remoção de integrante é registrada no histórico administrativo
+      Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
+      Quando o gestor "231012345@aluno.unb.br" remove "241098765@aluno.unb.br" da gestão de "CAER"
+      Então o histórico administrativo de "CAER" registra a remoção de "241098765@aluno.unb.br" do cargo "Diretor de Comunicação"
+      E o registro identifica o gestor "231012345@aluno.unb.br" como responsável e a data da remoção
 
     @happy @backend @mobile
     Cenário: Remoção de integrante preserva sua passagem pela gestão no histórico
@@ -187,11 +198,16 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       E os registros da passagem anterior de "241098765@aluno.unb.br" pela gestão permanecem disponíveis
 
     @sad @backend @mobile
-    Cenário: Registros do histórico administrativo não podem ser alterados nem excluídos
+    Esquema do Cenário: Registros do histórico administrativo não podem ser modificados
       Dado que o histórico de "CAER" registra a vinculação de "241098765@aluno.unb.br" ao cargo "Diretor de Comunicação"
-      Quando o gestor "231012345@aluno.unb.br" tenta alterar ou excluir esse registro do histórico
+      Quando o gestor "231012345@aluno.unb.br" tenta <acao> esse registro do histórico
       Então a operação é recusada informando que o histórico administrativo não pode ser modificado
       E o registro permanece inalterado no histórico de "CAER"
+
+      Exemplos:
+        | acao    |
+        | alterar |
+        | excluir |
 
     @sad @backend @mobile
     Cenário: Operação recusada não gera registro no histórico administrativo
