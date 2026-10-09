@@ -189,6 +189,11 @@ As convenções para os cenários compartilhados são:
   observável; complemente com `E` quando necessário.
 - Mantenha os cenários independentes, sem depender da ordem de execução ou dos
   dados deixados por outro cenário.
+- Use `@pending_backend` e `@pending_mobile` para suspender a execução somente
+  na plataforma cuja automação está pendente. As tags podem estar na feature,
+  regra ou cenário e são herdadas pelos cenários contidos. O backend exclui
+  `@pending_backend`; o mobile registra `@pending_mobile` como teste ignorado.
+  Remova a tag de cada plataforma quando a implementação do teste estiver pronta.
 - Deixe HTTP, SQL, containers e preparação dos dados nas step definitions de cada
   componente. As verificações técnicas do backend permanecem em sua suíte própria.
 

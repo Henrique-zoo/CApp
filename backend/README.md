@@ -793,6 +793,12 @@ Eles validam a infraestrutura do backend e são executados por um alvo separado.
 | `bdd` | `../features/` — comportamentos compartilhados do produto | `tests/step_definitions/` |
 | `bdd_infrastructure` | `tests/features/` — verificações técnicas do backend | `tests/infrastructure_steps/` |
 
+O runner exclui automaticamente cenários com `@pending_backend`, considerando
+tags na feature, regra ou cenário. Essa exclusão também vale quando filtros
+da CLI são informados; `@pending_mobile` não impede a execução no backend.
+Remova a tag da plataforma quando sua automação estiver implementada.
+A exclusão pode resultar em zero cenários e não comprova cobertura funcional.
+
 Para executar os testes BDD, é necessário ter Rust/Cargo instalados e um daemon
 Docker disponível para o usuário atual. Na primeira execução, o Docker precisa
 conseguir obter a imagem `postgres:17-alpine`.

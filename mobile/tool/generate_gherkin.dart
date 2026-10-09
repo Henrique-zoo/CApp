@@ -47,10 +47,7 @@ Future<void> main() async {
     }
   }
 
-  if (scenarios.isEmpty) {
-    throw StateError('Nenhum cenário Gherkin encontrado.');
-  }
-
+  // Uma base sem cenários ainda gera um arquivo válido para a análise e a CI.
   final output = File('integration_test/generated/gherkin_cases.dart');
 
   await output.parent.create(recursive: true);

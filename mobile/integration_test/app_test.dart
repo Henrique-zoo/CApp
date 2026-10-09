@@ -8,6 +8,7 @@ import 'package:integration_test/integration_test.dart';
 
 import 'generated/gherkin_cases.dart';
 import 'steps/steps.dart';
+import 'support/scenario_filter.dart';
 import 'support/scenario_hooks.dart';
 import 'support/step_registry.dart';
 
@@ -55,6 +56,6 @@ void main() {
           stepDefinitions: stepDefinitions,
         );
       }
-    });
+    }, skip: isPendingMobileScenario(tags));
   }
 }
