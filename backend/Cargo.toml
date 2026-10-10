@@ -43,6 +43,11 @@ name = "bdd_infrastructure"
 path = "tests/bdd_infrastructure.rs"
 harness = false
 
+[[test]]
+name = "user_preference_persistence"
+path = "tests/user_preference_persistence.rs"
+
+
 [lints.rust]
 missing_docs = "warn"
 

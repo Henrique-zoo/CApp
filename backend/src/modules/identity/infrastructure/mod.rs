@@ -1,6 +1,10 @@
-//! Camada de persistência prevista para o módulo de identidade institucional.
+//! Infraestrutura do módulo de identidade institucional.
 //!
-//! [`repository`] reserva os adaptadores de acesso aos dados desse domínio.
-//! Ainda não existem consultas ou implementações de repositório.
+//! Contém adaptadores de banco de dados e persistência para as entidades do módulo.
 
 pub mod repository;
+
+pub use repository::{
+    InMemoryUserPreferenceRepository, PgUserPreferenceRepository, UserPreferenceRepository,
+    UserPreferenceRepositoryError,
+};
