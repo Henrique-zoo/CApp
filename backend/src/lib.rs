@@ -7,6 +7,7 @@
 //! # Organização
 //!
 //! - [`api`]: composição das rotas e recursos compartilhados pelas requisições.
+//! - [`domain`]: centralização das entidades e modelos do domínio.
 //! - [`modules`]: estrutura dos módulos de negócio e suas camadas.
 //! - [`infrastructure`]: migrations compartilhadas e estrutura para integrações externas.
 //! - [`config`]: espaço reservado para centralizar configurações.
@@ -25,6 +26,7 @@
 
 pub mod api;
 pub mod config;
+pub mod domain;
 pub mod infrastructure;
 pub mod modules;
 pub mod shared;
