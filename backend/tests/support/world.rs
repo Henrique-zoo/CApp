@@ -1,4 +1,4 @@
-//! Contexto de cada cenário e requisições em memória ao router real.
+//! Contexto de cada cenário e acesso ao banco de testes e ao router real.
 //!
 //! [`AppWorld`] nasce sem recursos externos. Os hooks associam banco e router
 //! antes dos steps e os liberam ao término. Respostas e resultados pertencem
@@ -24,8 +24,8 @@ use super::{
 ///
 /// [`Default`] inicia sem banco ou router, sem resultados e com contador de
 /// requisições zerado. O hook `before` associa os recursos conforme a tag de
-/// isolamento; o hook `after` os libera. Steps devem acessar o pool por
-/// [`Self::database_pool`] e enviar requisições por [`Self::get`] ou
+/// isolamento; o hook `after` os libera. Steps de integração acessam o pool por
+/// [`Self::database_pool`] e enviam requisições por [`Self::get`] ou
 /// [`Self::get_json`].
 ///
 /// Os campos de resultados SQL são preenchidos pelos steps que executarem

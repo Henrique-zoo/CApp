@@ -1,9 +1,27 @@
 {
+  "editor.formatOnSave": true,
+  "files.trimTrailingWhitespace": true,
+  "[cucumber]": {
+    "editor.formatOnSave": false,
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true,
+    "editor.detectIndentation": false
+  },
   "rust-analyzer.linkedProjects": [
     "backend/Cargo.toml"
   ],
-  "cucumberautocomplete.steps": [
-    "backend/tests/**/*.rs"
+  "cucumber.features": [
+    "features/**/*.feature",
+    "backend/tests/features/**/*.feature"
   ],
-  "cucumberautocomplete.syncfeatures": "{features,backend/tests/features}/**/*.feature"
+  "cucumber.glue": [
+    "backend/tests/step_definitions/**/*.rs",
+    "backend/tests/infrastructure_steps/**/*.rs"
+  ],
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  },
+  "[dart]": {
+    "editor.defaultFormatter": "Dart-Code.dart-code"
+  }
 }
