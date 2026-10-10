@@ -12,7 +12,7 @@ Funcionalidade: Associação dos dados acadêmicos
 
   Regra: Os dados acadêmicos necessários ao contexto do estudante são recuperados com sucesso
 
-    @happy
+    @happy @backend @mobile
     Cenário: Recuperação e associação dos dados acadêmicos
       Dado que o estudante possui uma identidade institucional autenticada
       E a instituição disponibiliza o curso e a situação acadêmica do estudante
@@ -23,7 +23,7 @@ Funcionalidade: Associação dos dados acadêmicos
 
   Regra: Dados acadêmicos indisponíveis não podem ser associados como se tivessem sido recuperados
 
-    @sad
+    @sad @backend @mobile
     Cenário: Instituição não disponibiliza os dados acadêmicos do estudante
       Dado que o estudante possui uma identidade institucional autenticada
       E a instituição não disponibiliza os dados acadêmicos necessários para identificar seu contexto
@@ -34,7 +34,7 @@ Funcionalidade: Associação dos dados acadêmicos
 
   Regra: Dados acadêmicos incompletos não devem ser considerados plenamente associados
 
-    @sad
+    @sad @backend @mobile
     Esquema do Cenário: Ausência de uma informação acadêmica necessária
       Dado que o estudante possui uma identidade institucional autenticada
       E a instituição não disponibiliza a informação "<informacao>" do estudante
@@ -49,7 +49,7 @@ Funcionalidade: Associação dos dados acadêmicos
 
   Regra: Uma falha temporária na obtenção dos dados não confirma informações acadêmicas
 
-    @sad
+    @sad @backend @mobile
     Cenário: Falha temporária ao consultar os dados acadêmicos
       Dado que o estudante possui uma identidade institucional autenticada
       E não foi possível obter os dados acadêmicos da instituição
