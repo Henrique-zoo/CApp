@@ -7,3 +7,12 @@
 
 pub mod institution;
 pub mod institutional_verification;
+
+pub mod app_user;
+pub mod user_preference;
+
+pub use app_user::{
+    AppUser, AppUserError, AppUserStatus, CALOURO_DIDACTIC_ID, MAX_DISPLAY_NAME_LENGTH,
+    MAX_EMAIL_LENGTH, PROHIBITED_MATRICULA, VETERANO_1_DIDACTIC_ID, VETERANO_2_DIDACTIC_ID,
+};
+pub use user_preference::{UserPreference, UserPreferenceError};

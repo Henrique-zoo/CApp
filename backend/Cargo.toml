@@ -66,6 +66,10 @@ path = "tests/cucumber/scenario_filters.rs"
 name = "bdd_step_registry"
 path = "tests/cucumber/step_registry.rs"
 
+[[test]]
+name = "user_preference_persistence"
+path = "tests/user_preference_persistence.rs"
+
 [lints.rust]
 missing_docs = "warn"
 
