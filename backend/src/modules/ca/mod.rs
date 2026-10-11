@@ -1,10 +1,7 @@
 //! Estrutura do módulo de Centros Acadêmicos.
 //!
-//! O escopo previsto abrange cadastro de CAs, perfis administrativos, cargos e permissões. Um usuário
-//! pode ter perfis administrativos distintos em diferentes CAs.
-//!
-//! As camadas [`api`], [`application`], [`domain`] e [`infrastructure`] ainda
-//! são espaços reservados; este módulo não implementa esses comportamentos.
+//! O escopo abrange cadastro e ciclo de vida de Centros Acadêmicos, seleção
+//! e alternância de contexto ativo de navegação em sessão e isolamento de permissões administrativas.
 
 pub mod api;
 pub mod application;
