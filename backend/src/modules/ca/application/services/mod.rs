@@ -1,4 +1,7 @@
-//! Espaço reservado para serviços de aplicação do módulo de Centros Acadêmicos.
+//! Serviços de aplicação do módulo de Centros Acadêmicos.
 //!
-//! Ainda não possui serviços. Sua responsabilidade prevista é coordenar
-//! regras de domínio, persistência e integrações durante os casos de uso.
+//! Coordena casos de uso, regras de domínio e persistência de sessões de navegação.
+
+pub mod active_context_service;
+
+pub use active_context_service::ActiveContextService;
