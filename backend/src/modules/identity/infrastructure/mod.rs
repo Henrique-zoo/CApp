@@ -1,6 +1,5 @@
-//! Camada de persistência prevista para o módulo de identidade institucional.
-//!
-//! [`repository`] reserva os adaptadores de acesso aos dados desse domínio.
-//! Ainda não existem consultas ou implementações de repositório.
+//! Camada de infraestrutura e persistência do módulo de identidade institucional.
 
 pub mod repository;
+
+pub use repository::*;
