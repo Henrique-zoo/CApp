@@ -19,6 +19,8 @@ componentes da aplicação:
     │
     ├── features/
     │
+    ├── docs/
+    │
     └── README.md
 
 ------------------------------------------------------------------------
@@ -142,6 +144,18 @@ esses comportamentos no contexto correspondente.
 As verificações técnicas de PostgreSQL, prontidão e isolamento da infraestrutura
 de testes ficam em `backend/tests/features/`, com steps e execução exclusivos do
 backend. Elas não fazem parte do contrato funcional compartilhado em `features/`.
+
+------------------------------------------------------------------------
+
+## docs/
+
+Contém a documentação técnica, arquitetural e de governança do projeto.
+
+Documentos disponíveis:
+
+-   `docs/seguranca/politica_de_segredos_e_rotacao.md`: política de proteção de
+    segredos, inventário de credenciais, segregação de ambientes e procedimentos
+    de rotação para banco de dados, Firebase, JWT e provedores OAuth.
 
 ------------------------------------------------------------------------
 
