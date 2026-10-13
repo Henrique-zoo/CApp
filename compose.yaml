@@ -26,6 +26,7 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-capp}:${POSTGRES_PASSWORD:-capp}@postgres:5432/${POSTGRES_DB:-capp}
       RUST_LOG: ${RUST_LOG:-info}
+      APP_ENV: ${APP_ENV:-development}
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     depends_on:
