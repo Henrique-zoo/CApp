@@ -14,12 +14,13 @@
 # @backend e @mobile indicam onde o cenário deve ser verificado.
 @gestao_ca @pending_backend @pending_mobile
 Funcionalidade: Cargos padrão da gestão de um Centro Acadêmico
-  Como administrador da plataforma ou gestor de um Centro Acadêmico
+  Como estudante da UnB ou gestor de um Centro Acadêmico
   Quero que cada CA tenha uma estrutura inicial de cargos com o cargo de Presidente preservado
   Para que a gestão possa ser organizada desde o cadastro sem risco de ficar sem presidência
 
   Contexto:
-    Dado que o administrador "200000001@unb.br" está autorizado a cadastrar Centros Acadêmicos na plataforma
+    Dado que o estudante "241098765@aluno.unb.br" possui perfil no CApp
+    E o administrador "200000001@unb.br" administra a plataforma
     E o Centro Acadêmico "Centro Acadêmico de Engenharia de Redes (CAER)" está cadastrado na UnB
     E o Centro Acadêmico "Centro Acadêmico de Ciência da Computação (CACC)" está cadastrado na UnB
 
@@ -27,29 +28,21 @@ Funcionalidade: Cargos padrão da gestão de um Centro Acadêmico
 
     @happy @backend @mobile
     Cenário: Cadastro de um novo CA cria os cargos padrão
-      Quando o administrador "200000001@unb.br" cadastra o Centro Acadêmico "Centro Acadêmico de Engenharia Elétrica (CAEE)"
+      Quando o estudante "241098765@aluno.unb.br" cadastra o Centro Acadêmico "Centro Acadêmico de Engenharia Elétrica (CAEE)"
       Então o CA "CAEE" passa a possuir exatamente os cargos "Presidente", "Vice-Presidente" e "Tesoureiro"
       E nenhum desses cargos possui integrante vinculado
 
     @happy @backend
     Cenário: Os cargos padrão do novo CA ficam disponíveis para vinculação de integrantes
-      Dado que o estudante "241098765@aluno.unb.br" possui perfil no CApp
-      E o Centro Acadêmico "Centro Acadêmico de Engenharia Elétrica (CAEE)" foi recém-cadastrado
-      Quando o administrador "200000001@unb.br" vincula "241098765@aluno.unb.br" ao cargo "Presidente" em "CAEE"
+      Dado que o Centro Acadêmico "Centro Acadêmico de Engenharia Elétrica (CAEE)" foi recém-cadastrado
+      Quando o estudante "241098765@aluno.unb.br" vincula a si mesmo ao cargo "Presidente" em "CAEE"
       Então "241098765@aluno.unb.br" passa a exercer o cargo "Presidente" em "CAEE"
 
     @sad @backend
     Cenário: Cadastro recusado não cria cargos
-      Quando o administrador "200000001@unb.br" tenta cadastrar novamente o Centro Acadêmico "Centro Acadêmico de Engenharia de Redes (CAER)"
+      Quando o estudante "241098765@aluno.unb.br" tenta cadastrar novamente o Centro Acadêmico "Centro Acadêmico de Engenharia de Redes (CAER)"
       Então o cadastro é recusado informando que o CA já existe
       E o CA "CAER" permanece com um único conjunto de cargos
-
-    @sad @backend @mobile
-    Cenário: Usuário sem autorização não cadastra Centro Acadêmico nem cria cargos
-      Dado que o estudante "241098765@aluno.unb.br" não está autorizado a cadastrar Centros Acadêmicos
-      Quando "241098765@aluno.unb.br" tenta cadastrar o Centro Acadêmico "Centro Acadêmico de Engenharia Elétrica (CAEE)"
-      Então a operação é recusada por falta de permissão
-      E o Centro Acadêmico "CAEE" não passa a existir
 
   Regra: O cargo de Presidente não pode ser excluído por nenhuma permissão administrativa
 
