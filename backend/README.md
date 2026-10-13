@@ -480,9 +480,17 @@ Exemplos:
 
 # Configuração
 
-Atualmente o executável lê `DATABASE_URL`, `FIREBASE_PROJECT_ID` e `RUST_LOG` diretamente do ambiente.
-O módulo `src/config/` está reservado para centralizar essa configuração no futuro.
-O backend não carrega arquivos `.env` automaticamente.
+A configuração do backend é centralizada pelo módulo `src/config/` (`AppConfig`),
+responsável por validar variáveis obrigatórias, detectar o ambiente de execução e
+proteger segredos contra exposição em logs e mensagens de erro através do tipo
+`SecretString`. Para detalhes completos sobre governança, segregação de ambientes e
+rotação de credenciais, consulte a
+[Política de Segredos e Rotação](../docs/seguranca/politica_de_segredos_e_rotacao.md).
+
+O backend lê as variáveis a partir do ambiente do processo e não carrega arquivos
+`.env` automaticamente em produção.
+
+`FIREBASE_PROJECT_ID` continua sendo lida pelo executável para configurar a validação dos ID tokens.
 
 O [Compose](../compose.yaml) utiliza os valores abaixo e permite personalizá-los
 no arquivo `.env` da raiz do monorepo. As variáveis já definidas no terminal têm
@@ -490,10 +498,13 @@ precedência sobre esse arquivo.
 
 | Variável | Padrão local | Uso |
 |---|---|---|
+| `APP_ENV` | `development` | Ambiente de execução (`development`, `staging`, `production`). |
 | `POSTGRES_DB` | `capp` | Nome do banco criado na inicialização do PostgreSQL. |
 | `POSTGRES_USER` | `capp` | Usuário inicial do PostgreSQL. |
 | `POSTGRES_PASSWORD` | `capp` | Senha local do usuário inicial. |
 | `POSTGRES_PORT` | `5432` | Porta do PostgreSQL publicada no host. |
+| `DATABASE_URL` | - | URL de conexão PostgreSQL utilizada pelo backend. |
+| `SERVER_HOST` | `0.0.0.0` | Endereço de escuta do servidor HTTP. |
 | `BACKEND_PORT` | `3000` | Porta da API publicada no host pelo Compose. |
 | `RUST_LOG` | `info` | Filtro dos eventos de diagnóstico do backend. |
 | `FIREBASE_PROJECT_ID` | Sem padrão válido | Obrigatória para o backend e os runners BDD; define audiência e emissor esperados nos ID tokens. O valor de `.env.example` é um placeholder. |
