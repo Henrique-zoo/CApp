@@ -3,7 +3,6 @@
 
 CREATE TABLE IF NOT EXISTS academic_center (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    institution_id UUID NULL,
     created_by_id UUID NULL,
     name TEXT NOT NULL,
     acronym TEXT NOT NULL,
