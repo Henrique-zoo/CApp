@@ -141,11 +141,22 @@ fn connect_options(host: &str, port: u16, database: &str) -> PgConnectOptions {
 /// Se a configuração do pool for inválida ou a conexão inicial falhar.
 /// A falha de conexão inclui o nome da base no diagnóstico.
 async fn connect_pool(host: &str, port: u16, database: &str, max_connections: u32) -> PgPool {
-    PgPoolOptions::new()
-        .max_connections(max_connections)
-        .connect_with(connect_options(host, port, database))
-        .await
-        .unwrap_or_else(|error| panic!("Cucumber should connect to database {database}: {error}"))
+    let mut attempts = 0;
+    loop {
+        match PgPoolOptions::new()
+            .max_connections(max_connections)
+            .acquire_timeout(std::time::Duration::from_secs(30))
+            .connect_with(connect_options(host, port, database))
+            .await
+        {
+            Ok(pool) => return pool,
+            Err(_error) if attempts < 20 => {
+                attempts += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+            Err(error) => panic!("Cucumber should connect to database {database}: {error}"),
+        }
+    }
 }
 
 impl DatabaseServer {

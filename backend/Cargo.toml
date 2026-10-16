@@ -43,6 +43,10 @@ name = "bdd_infrastructure"
 path = "tests/bdd_infrastructure.rs"
 harness = false
 
+[[test]]
+name = "data_retention_policy"
+path = "tests/data_retention_policy_test.rs"
+
 [lints.rust]
 missing_docs = "warn"
 
