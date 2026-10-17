@@ -1,8 +1,11 @@
-//! Rotas globais de saúde e prontidão do backend.
+//! Rotas globais de saúde, prontidão e identidade do backend.
 //!
 //! A composição é independente do transporte: o chamador pode servir o router
 //! com Axum ou enviar requisições em memória. Nenhuma conexão é aberta ao
 //! construir o router; o acesso ao PostgreSQL ocorre no handler de prontidão.
+//! A rota `/identity/me` delega a validação do Bearer Firebase ID token ao
+//! verificador de identidade configurado em [`AppState`]. Isso não implementa
+//! autorização de recursos de negócio nem comprova o tenant institucional.
 
 use std::time::Duration;
 
@@ -10,7 +13,7 @@ use axum::{Router, extract::State, routing::get};
 use reqwest::StatusCode;
 use tokio::time::timeout;
 
-use crate::api::state::AppState;
+use crate::{api::state::AppState, modules::identity::api::handlers::current_identity};
 
 /// Monta as rotas globais, ainda dependentes de [`AppState`].
 ///
@@ -19,6 +22,7 @@ use crate::api::state::AppState;
 /// | Método e caminho | Comportamento |
 /// | --- | --- |
 /// | `GET /health` | Retorna HTTP 200 e `O servidor está saudável.` sem consultar dependências. |
+/// | `GET /identity/me` | Valida o Firebase ID token e retorna a identidade; erros de autenticação retornam HTTP 401. |
 /// | `GET /ready` | Executa `SELECT 1 AS ok` no pool; retorna HTTP 200 no sucesso e HTTP 503 em erro ou timeout. |
 ///
 /// A prontidão limita a espera pela aquisição da conexão e execução da consulta
@@ -30,8 +34,10 @@ use crate::api::state::AppState;
 /// # Retorno
 ///
 /// Um [`Router<AppState>`] que deve receber o estado por [`Router::with_state`]
-/// antes de atender requisições. Não inicia servidor, não aplica migrations e
-/// não instala autenticação ou outros middlewares.
+/// antes de atender requisições. Não inicia servidor nem aplica migrations.
+/// A rota `/identity/me` verifica a identidade por meio do adaptador configurado;
+/// ela não define permissões de negócio nem confirma o vínculo ao tenant
+/// institucional da UnB.
 ///
 /// # Exemplos
 ///
@@ -59,6 +65,7 @@ use crate::api::state::AppState;
 pub fn create_router() -> Router<AppState> {
     Router::new()
         .route("/health", get(|| async { "O servidor está saudável." }))
+        .route("/identity/me", get(current_identity))
         .route(
             "/ready",
             get(|State(state): State<AppState>| async move {
@@ -81,4 +88,142 @@ pub fn create_router() -> Router<AppState> {
                 }
             }),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode, header::AUTHORIZATION},
+    };
+    use sqlx::postgres::PgPoolOptions;
+    use tower::ServiceExt;
+
+    use super::create_router;
+    use crate::{
+        api::state::AppState,
+        modules::identity::application::queries::current_identity::{
+            AuthenticatedIdentity, IdentityTokenVerifier, IdentityVerificationError,
+        },
+    };
+
+    struct MockIdentityTokenVerifier;
+
+    #[async_trait]
+    impl IdentityTokenVerifier for MockIdentityTokenVerifier {
+        async fn verify_id_token(
+            &self,
+            token: &str,
+        ) -> Result<AuthenticatedIdentity, IdentityVerificationError> {
+            match token {
+                "valid-test-token" => Ok(AuthenticatedIdentity {
+                    uid: "firebase-user-123".to_owned(),
+                    email: Some("232012345@aluno.unb.br".to_owned()),
+                    email_verified: true,
+                }),
+                "provider-down-token" => Err(IdentityVerificationError::ProviderUnavailable),
+                _ => Err(IdentityVerificationError::InvalidToken),
+            }
+        }
+    }
+
+    fn test_app() -> axum::Router {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://capp:capp@localhost:5432/capp")
+            .expect("A URL de teste deve ser válida");
+
+        let state =
+            AppState::with_identity_token_verifier(pool, Arc::new(MockIdentityTokenVerifier));
+
+        create_router().with_state(state)
+    }
+
+    #[tokio::test]
+    async fn identity_route_rejects_missing_token() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/identity/me")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn identity_route_rejects_malformed_authorization_header() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/identity/me")
+                    .header(AUTHORIZATION, "Bearer ")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn identity_route_rejects_invalid_token() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/identity/me")
+                    .header(AUTHORIZATION, "Bearer invalid-test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn identity_route_returns_authenticated_identity() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/identity/me")
+                    .header(AUTHORIZATION, "Bearer valid-test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["uid"], "firebase-user-123");
+        assert_eq!(payload["email"], "232012345@aluno.unb.br");
+        assert_eq!(payload["email_verified"], true);
+    }
+
+    #[tokio::test]
+    async fn identity_route_reports_provider_unavailability() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/identity/me")
+                    .header(AUTHORIZATION, "Bearer provider-down-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
 }

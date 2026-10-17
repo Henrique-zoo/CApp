@@ -1,7 +1,9 @@
-//! Camada de casos de uso prevista para o módulo de identidade institucional.
+//! Camada de aplicação do módulo de identidade institucional.
 //!
-//! [`commands`] agrupará alterações de estado, [`queries`] consultas e
-//! [`services`] a coordenação dessas operações. Ainda não há implementações.
+//! [`queries::current_identity`] define a identidade autenticada, o contrato
+//! para verificação de tokens e os erros esperados desse fluxo.
+//! [`commands`] e [`services`] permanecem reservados para comportamentos
+//! ainda não implementados.
 
 pub mod commands;
 pub mod queries;

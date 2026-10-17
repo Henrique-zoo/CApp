@@ -3,6 +3,12 @@
 //! O pool é criado por quem inicializa a aplicação; este módulo somente o
 //! transporta entre os handlers. Nos testes, o pool pertence ao banco do cenário.
 
+use std::sync::Arc;
+
+use crate::{
+    infrastructure::firebase::FirebaseIdentityTokenVerifier,
+    modules::identity::application::queries::current_identity::IdentityTokenVerifier,
+};
 use sqlx::PgPool;
 
 /// Estado compartilhado entre as requisições atendidas pelo router.
@@ -17,6 +23,9 @@ pub struct AppState {
     /// Pode ser acessado diretamente para executar consultas ou iniciar transações.
     /// A criação deste estado não verifica a conectividade do pool.
     pub pool: PgPool,
+
+    /// Adaptador usado para validar tokens e recuperar a identidade autenticada.
+    pub(crate) identity_token_verifier: Arc<dyn IdentityTokenVerifier>,
 }
 
 impl AppState {
@@ -48,6 +57,23 @@ impl AppState {
     /// # }
     /// ```
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            identity_token_verifier: Arc::new(FirebaseIdentityTokenVerifier),
+        }
+    }
+
+    /// Constrói o estado com um verificador de identidade fornecido pelo chamador.
+    ///
+    /// Permite substituir o provedor concreto, por exemplo, em testes que precisam
+    /// simular identidades válidas sem acessar serviços externos.
+    pub fn with_identity_token_verifier(
+        pool: PgPool,
+        identity_token_verifier: Arc<dyn IdentityTokenVerifier>,
+    ) -> Self {
+        Self {
+            pool,
+            identity_token_verifier,
+        }
     }
 }
