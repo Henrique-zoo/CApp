@@ -1,0 +1,8 @@
+# Configuração do OSV-Scanner para o cliente móvel (Flutter/Dart) do CApp
+# Base de dados: Open Source Vulnerabilities (https://osv.dev)
+
+# Para registrar exceções temporárias formalmente aprovadas conforme a política:
+# [[IgnoredVulns]]
+# id = "GHSA-xxxx-xxxx-xxxx"
+# reason = "Vulnerabilidade em código não invocado. Justificativa técnica aprovada pelo comitê de segurança."
+# ignoreUntil = 2026-12-31
