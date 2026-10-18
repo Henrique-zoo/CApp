@@ -8,7 +8,7 @@
 # @backend e @mobile indicam onde o cenário deve ser verificado.
 # Mensagens funcionais são verificadas na resposta da API e na interface, respectivamente.
 # Fluxos do provedor de login e navegação entre telas são exclusivos do mobile.
-@pending_backend @pending_mobile
+@pending_mobile
 Funcionalidade: Autenticação institucional de usuários da UnB
   Como estudante da Universidade de Brasília (UnB)
   Quero autenticar minha conta institucional Microsoft da UnB no CApp
