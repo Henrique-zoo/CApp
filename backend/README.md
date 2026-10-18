@@ -46,23 +46,19 @@ module/
 └── api/
 ```
 
-O fluxo de dependências segue:
+As dependências entre camadas apontam para as regras de negócio e os contratos internos. No esquema abaixo, `A → B` significa que o código de `A` conhece e depende de `B`:
 
 ```
-API
-
-↓
-
-Application
-
-↓
-
-Domain
-
-↓
-
-Infrastructure
+API → Application → Domain
+Infrastructure → Application
+Infrastructure → Domain
 ```
+
+Os contratos de persistência e de acesso a serviços externos são definidos como traits nas camadas internas. Contratos necessários aos casos de uso ficam em `Application`; contratos que fazem parte do modelo de domínio podem ficar em `Domain`. A `Infrastructure` implementa esses contratos. O `Domain` permanece independente de `Application` e `Infrastructure`.
+
+A direção das dependências é diferente do fluxo de chamadas durante a execução. Por exemplo, um caso de uso em `Application` pode chamar `UserRepository::save`, cuja implementação em `Infrastructure` executa SQL. O caso de uso conhece apenas a trait `UserRepository`; a implementação concreta conhece essa trait e os detalhes de acesso ao banco.
+
+A inicialização da aplicação atua como ponto de composição: instancia os adaptadores de infraestrutura e os fornece aos casos de uso. Assim, os casos de uso recebem suas dependências sem precisar construir um repositório PostgreSQL ou um cliente de serviço externo.
 
 ---
 
@@ -89,6 +85,8 @@ Caso o sistema cresça significativamente, módulos específicos podem ser extra
 
 Contém as regras de negócio do sistema.
 
+Entidades e regras aplicam as validações e transições do negócio. A coordenação de consultas e persistência normalmente cabe aos casos de uso em `Application`.
+
 Não possui conhecimento sobre:
 
 - banco de dados;
@@ -109,6 +107,8 @@ Exemplos:
 
 Contém os casos de uso da aplicação.
 
+Coordena as regras de `Domain` e as operações de persistência ou integração por meio dos contratos internos, sem depender das implementações concretas de `Infrastructure`.
+
 Responsável por coordenar operações como:
 
 - criar notícia;
@@ -121,7 +121,7 @@ Responsável por coordenar operações como:
 
 ## Infrastructure
 
-Contém implementações técnicas.
+Contém as implementações técnicas dos contratos definidos em `Application` ou `Domain`, incluindo consultas SQL e comunicação com serviços externos.
 
 Exemplos:
 
