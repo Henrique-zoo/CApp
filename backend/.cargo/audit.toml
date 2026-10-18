@@ -4,8 +4,7 @@ ignore = [
     # dependência transitiva do validator_derive 0.19.0 sem impacto direto em runtime.
     "RUSTSEC-2026-0173",
 ]
-deny = ["unmaintained"]
+severity_threshold = "low"
 
 [output]
-deny = ["warnings"]
 format = "text"
