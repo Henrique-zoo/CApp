@@ -1,29 +1,88 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:capp/app/app.dart';
+import 'package:capp/features/authentication/domain/authenticated_identity.dart';
+import 'package:capp/features/authentication/domain/authentication_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+class FakeAuthenticationRepository implements AuthenticationRepository {
+  bool failNextSignIn = false;
+  AuthenticatedIdentity? currentIdentity;
+
+  static const identity = AuthenticatedIdentity(
+    uid: 'firebase-user-test',
+    email: '232012345@aluno.unb.br',
+    emailVerified: true,
+  );
+
+  @override
+  Future<AuthenticatedIdentity?> restoreSession() async => currentIdentity;
+
+  @override
+  Future<AuthenticatedIdentity> signIn() async {
+    if (failNextSignIn) {
+      failNextSignIn = false;
+      throw const AuthenticationFailure(
+        AuthenticationFailureReason.serviceUnavailable,
+        'O serviço de autenticação está temporariamente indisponível. Tente novamente.',
+      );
+    }
+
+    currentIdentity = identity;
+    return identity;
+  }
+
+  @override
+  Future<void> signOut() async {
+    currentIdentity = null;
+  }
+}
+
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const CApp());
+  testWidgets('shows the institutional Microsoft login without a session', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      CApp(authenticationRepository: FakeAuthenticationRepository()),
+    );
+    await tester.pumpAndSettle();
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(find.text('Entre com sua conta institucional'), findsOneWidget);
+    expect(find.text('Entrar com a Microsoft'), findsOneWidget);
+    expect(find.byKey(const ValueKey('logout-button')), findsNothing);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+  testWidgets('allows retry after failure and signs out successfully', (
+    tester,
+  ) async {
+    final repository = FakeAuthenticationRepository()..failNextSignIn = true;
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    await tester.pumpWidget(CApp(authenticationRepository: repository));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('microsoft-login-button')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'O serviço de autenticação está temporariamente indisponível. Tente novamente.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('microsoft-login-button')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('microsoft-login-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sessão autenticada'), findsOneWidget);
+    expect(find.text('232012345@aluno.unb.br'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('logout-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Entre com sua conta institucional'), findsOneWidget);
+    expect(find.byKey(const ValueKey('logout-button')), findsNothing);
   });
 }

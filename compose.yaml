@@ -25,6 +25,7 @@ services:
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-capp}:${POSTGRES_PASSWORD:-capp}@postgres:5432/${POSTGRES_DB:-capp}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-capp-a331b}
       RUST_LOG: ${RUST_LOG:-info}
     ports:
       - "${BACKEND_PORT:-3000}:3000"

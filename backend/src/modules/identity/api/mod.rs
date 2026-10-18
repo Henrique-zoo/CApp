@@ -1,7 +1,7 @@
-//! Camada HTTP prevista para o módulo de identidade institucional.
+//! Camada HTTP do módulo de identidade institucional.
 //!
-//! [`dto`] reservará os contratos de entrada e saída; [`handlers`] adaptará
-//! as requisições aos casos de uso. Ainda não existem endpoints registrados aqui.
+//! [`dto`] define os contratos de resposta e [`handlers`] adapta as requisições
+//! aos casos de uso. O router global registra `GET /identity/me`.
 
 pub mod dto;
 pub mod handlers;
