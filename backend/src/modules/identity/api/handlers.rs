@@ -14,6 +14,27 @@ use crate::{
     },
 };
 
+const UNB_STUDENT_EMAIL_DOMAIN: &str = "aluno.unb.br";
+const FORBIDDEN_STUDENT_MATRICULA: &str = "242003979";
+const INSTITUTIONAL_ACCOUNT_REQUIRED_MESSAGE: &str = "Apenas contas @aluno.unb.br são permitidas";
+
+/// Valida o e-mail discente da UnB e rejeita identificadores não permitidos.
+///
+/// O endereço deve conter uma matrícula de nove dígitos e o domínio
+/// institucional discente. A matrícula explicitamente proibida é recusada.
+fn is_allowed_unb_student_email(email: &str) -> bool {
+    let Some((matricula, domain)) = email.rsplit_once('@') else {
+        return false;
+    };
+
+    domain.eq_ignore_ascii_case(UNB_STUDENT_EMAIL_DOMAIN)
+        && matricula.len() == 9
+        && matricula
+            .bytes()
+            .all(|character| character.is_ascii_digit())
+        && matricula != FORBIDDEN_STUDENT_MATRICULA
+}
+
 /// Retorna a identidade do usuário após validar o token de autenticação.
 pub async fn current_identity(
     State(state): State<AppState>,
@@ -43,11 +64,23 @@ pub async fn current_identity(
         .verify_id_token(token.trim())
         .await
     {
-        Ok(identity) => Ok(Json(CurrentIdentityResponse {
-            uid: identity.uid,
-            email: identity.email,
-            email_verified: identity.email_verified,
-        })),
+        Ok(identity) => {
+            match identity.email.as_deref() {
+                Some(email) if is_allowed_unb_student_email(email) => {}
+                _ => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        INSTITUTIONAL_ACCOUNT_REQUIRED_MESSAGE,
+                    ));
+                }
+            }
+
+            Ok(Json(CurrentIdentityResponse {
+                uid: identity.uid,
+                email: identity.email,
+                email_verified: identity.email_verified,
+            }))
+        }
         Err(IdentityVerificationError::InvalidToken) => Err((
             StatusCode::UNAUTHORIZED,
             "Token de autenticação inválido ou expirado.",

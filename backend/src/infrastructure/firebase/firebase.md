@@ -25,23 +25,35 @@ automaticamente arquivos `.env` quando iniciado pelo Cargo.
 Exemplo de configuração local:
 `DATABASE_URL='postgres://capp:capp@localhost:5432/capp' FIREBASE_PROJECT_ID='capp-a331b' RUST_LOG=info cargo run --locked`
 
-**Atenção:** o `compose.yaml` ainda não repassa `FIREBASE_PROJECT_ID` ao
-contêiner do backend. Essa integração precisa ser coordenada com as alterações
-de configuração do PR #336 antes de considerar o fluxo operacional via Compose.
+O `compose.yaml` repassa `FIREBASE_PROJECT_ID` ao contêiner do backend.
+O valor padrão local é `capp-a331b`, correspondente ao projeto configurado no
+aplicativo. Para usar outro projeto, defina `FIREBASE_PROJECT_ID` no ambiente
+ou no arquivo `.env` da raiz. O ID precisa corresponder ao projeto que emitiu
+o Firebase ID token; caso contrário, a validação de audiência e emissor falhará.
+
+Os templates `.env.example` são mantidos separadamente na configuração do
+projeto. Se você copiar um template com um ID de desenvolvimento sintético para
+`.env`, substitua-o pelo ID do projeto usado pelo aplicativo durante os testes
+de integração.
 
 ## Restrição ao tenant institucional
 
+O handler `GET /identity/me` rejeita identidades cujo e-mail não corresponda
+ao domínio discente `@aluno.unb.br`, incluindo e-mail ausente, matrícula fora do
+formato de nove dígitos e a matrícula explicitamente proibida pela política do
+projeto.
+
 A claim `firebase.sign_in_provider == "microsoft.com"` identifica o provedor
-de login, mas não comprova, isoladamente, que a conta pertence ao tenant
-institucional da UnB.
+de login, mas nem essa claim nem o domínio do e-mail comprovam, isoladamente,
+que a identidade pertence ao tenant institucional da UnB.
 
 O aplicativo envia o parâmetro `tenant` ao iniciar o login Microsoft. Isso não
 substitui a configuração e a validação da política de contas permitidas no
 Microsoft Entra ID e no Firebase Authentication.
 
-Essa restrição precisa ser confirmada por alguém com acesso administrativo à
-configuração do provedor. Até lá, não se deve considerar comprovado que contas
-externas estão impedidas de entrar.
+A restrição efetiva ao tenant ainda precisa ser confirmada por alguém com
+acesso administrativo à configuração do provedor. Até lá, não se deve considerar
+comprovado que contas de outros tenants estão impedidas de entrar.
 
 ## Verificações e testes
 

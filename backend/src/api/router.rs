@@ -124,6 +124,26 @@ mod tests {
                     email: Some("232012345@aluno.unb.br".to_owned()),
                     email_verified: true,
                 }),
+                "external-email-token" => Ok(AuthenticatedIdentity {
+                    uid: "external-user".to_owned(),
+                    email: Some("student@example.com".to_owned()),
+                    email_verified: true,
+                }),
+                "missing-email-token" => Ok(AuthenticatedIdentity {
+                    uid: "user-without-email".to_owned(),
+                    email: None,
+                    email_verified: false,
+                }),
+                "malformed-student-email-token" => Ok(AuthenticatedIdentity {
+                    uid: "malformed-student".to_owned(),
+                    email: Some("12345@aluno.unb.br".to_owned()),
+                    email_verified: true,
+                }),
+                "forbidden-matricula-token" => Ok(AuthenticatedIdentity {
+                    uid: "forbidden-student".to_owned(),
+                    email: Some("242003979@aluno.unb.br".to_owned()),
+                    email_verified: true,
+                }),
                 "provider-down-token" => Err(IdentityVerificationError::ProviderUnavailable),
                 _ => Err(IdentityVerificationError::InvalidToken),
             }
@@ -209,6 +229,94 @@ mod tests {
         assert_eq!(payload["uid"], "firebase-user-123");
         assert_eq!(payload["email"], "232012345@aluno.unb.br");
         assert_eq!(payload["email_verified"], true);
+    }
+
+    #[tokio::test]
+    async fn identity_route_rejects_external_email_with_required_message() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/identity/me")
+                    .header(AUTHORIZATION, "Bearer external-email-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            std::str::from_utf8(&body).unwrap(),
+            "Apenas contas @aluno.unb.br são permitidas"
+        );
+    }
+
+    #[tokio::test]
+    async fn identity_route_rejects_missing_email_with_required_message() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/identity/me")
+                    .header(AUTHORIZATION, "Bearer missing-email-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            std::str::from_utf8(&body).unwrap(),
+            "Apenas contas @aluno.unb.br são permitidas"
+        );
+    }
+
+    #[tokio::test]
+    async fn identity_route_rejects_malformed_student_email_with_required_message() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/identity/me")
+                    .header(AUTHORIZATION, "Bearer malformed-student-email-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            std::str::from_utf8(&body).unwrap(),
+            "Apenas contas @aluno.unb.br são permitidas"
+        );
+    }
+
+    #[tokio::test]
+    async fn identity_route_rejects_forbidden_matricula_with_required_message() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/identity/me")
+                    .header(AUTHORIZATION, "Bearer forbidden-matricula-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            std::str::from_utf8(&body).unwrap(),
+            "Apenas contas @aluno.unb.br são permitidas"
+        );
     }
 
     #[tokio::test]
