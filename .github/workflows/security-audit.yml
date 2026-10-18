@@ -1,0 +1,95 @@
+name: Security Audit
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/Cargo.lock"
+      - "backend/Cargo.toml"
+      - "backend/.cargo/audit.toml"
+      - "mobile/pubspec.lock"
+      - "mobile/pubspec.yaml"
+      - "mobile/osv-scanner.toml"
+      - ".github/workflows/security-audit.yml"
+      - "scripts/audit-dependencies.sh"
+  pull_request:
+    paths:
+      - "backend/Cargo.lock"
+      - "backend/Cargo.toml"
+      - "backend/.cargo/audit.toml"
+      - "mobile/pubspec.lock"
+      - "mobile/pubspec.yaml"
+      - "mobile/osv-scanner.toml"
+      - ".github/workflows/security-audit.yml"
+      - "scripts/audit-dependencies.sh"
+  schedule:
+    # Execução semanal nas segundas-feiras às 06:00 UTC (03:00 Horário de Brasília)
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit-backend:
+    name: Backend Dependencies (RustSec / cargo-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Run cargo-audit
+        run: cargo audit --deny warnings
+
+  audit-mobile:
+    name: Mobile Dependencies (OSV / Flutter pub)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.4"
+          channel: stable
+          cache: true
+
+      - name: Verify pubspec.lock integrity
+        run: flutter pub get --enforce-lockfile
+
+      - name: Check for outdated packages
+        run: flutter pub outdated
+
+      - name: Install OSV-Scanner
+        uses: taiki-e/install-action@v2
+        with:
+          tool: osv-scanner
+
+      - name: Scan dependencies with OSV-Scanner
+        run: osv-scanner --lockfile=pubspec.lock --config=osv-scanner.toml
