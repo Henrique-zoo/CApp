@@ -9,7 +9,7 @@
 //! - [`api`]: composição das rotas e recursos compartilhados pelas requisições.
 //! - [`modules`]: estrutura dos módulos de negócio e suas camadas.
 //! - [`infrastructure`]: migrations compartilhadas e estrutura para integrações externas.
-//! - [`config`]: espaço reservado para centralizar configurações.
+//! - [`config`]: centralização de configurações, identificação de ambiente e proteção de segredos.
 //! - [`shared`]: espaço reservado para tipos comuns aos domínios.
 //!
 //! Neste estágio, a API implementa somente `/health` e `/ready`. Os módulos de

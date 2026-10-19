@@ -13,6 +13,12 @@
 migrate_working_dir/
 /integration_test/generated
 
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+
 # IntelliJ related
 *.iml
 *.ipr
