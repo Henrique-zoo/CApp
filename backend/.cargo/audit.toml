@@ -1,0 +1,10 @@
+[advisories]
+ignore = [
+    # RUSTSEC-2026-0173: proc-macro-error2 descontinuado; dependência transitiva do validator_derive
+    "RUSTSEC-2026-0173",
+
+    # RUSTSEC-2023-0071: Marvin Attack na crate rsa 0.9.10; dependência transitiva de jsonwebtoken
+    # sem patch de correção disponível em upstream (No fixed upgrade is available).
+    "RUSTSEC-2023-0071",
+]
+severity_threshold = "low"

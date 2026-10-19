@@ -37,6 +37,19 @@
       "problemMatcher": [
         "$rustc"
       ]
+    },
+    {
+      "label": "security: audit dependencies",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "scripts/audit-dependencies.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "test",
+      "problemMatcher": []
     }
   ]
 }
