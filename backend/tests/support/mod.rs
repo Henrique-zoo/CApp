@@ -88,21 +88,26 @@ pub(crate) async fn run(features_path: PathBuf, required_tag: Option<&'static st
     let requested_name = cli.re_filter.take();
 
     let database_server = DatabaseServer::start().await;
-    let before_suite = Arc::clone(&database_server.suite);
-    let after_suite = Arc::clone(&database_server.suite);
+    let before_suite = database_server.suite.as_ref().map(Arc::clone);
+    let after_suite = database_server.suite.as_ref().map(Arc::clone);
 
     let writer = AppWorld::cucumber()
         .with_cli(cli)
         .max_concurrent_scenarios(4)
         .before(move |feature, rule, scenario, world| {
-            let suite = Arc::clone(&before_suite);
+            let suite = before_suite.as_ref().map(Arc::clone);
             let isolated = has_isolated_database_tag(feature, rule, scenario);
-            async move { world.attach_database(&suite, isolated).await }.boxed_local()
+            async move {
+                if let Some(suite) = suite {
+                    world.attach_database(&suite, isolated).await;
+                }
+            }
+            .boxed_local()
         })
         .after(move |_, _, _, _, world| {
-            let suite = Arc::clone(&after_suite);
+            let suite = after_suite.as_ref().map(Arc::clone);
             async move {
-                if let Some(world) = world {
+                if let (Some(suite), Some(world)) = (suite, world) {
                     world.detach_database(&suite).await;
                 }
             }
