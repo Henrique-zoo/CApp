@@ -7,6 +7,7 @@
 //! `bdd_infrastructure`, sem serem registrados nesta suíte.
 
 mod autenticacao_institucional;
+mod contexto_multi_ca;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///

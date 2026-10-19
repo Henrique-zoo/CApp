@@ -27,6 +27,35 @@ use super::{
 /// isolamento; o hook `after` os libera. Steps de integração acessam o pool por
 /// [`Self::database_pool`] e enviam requisições por [`Self::get`] ou
 /// [`Self::get_json`].
+/// Estado de um Centro Acadêmico registrado no contexto do cenário BDD.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct AcademicCenterState {
+    /// Nome completo do Centro Acadêmico.
+    pub(crate) name: String,
+    /// Sigla do Centro Acadêmico.
+    pub(crate) acronym: String,
+}
+
+/// Atribuição de cargo e permissões a um estudante no contexto de um CA.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct CaRoleAssignment {
+    /// E-mail institucional do estudante.
+    pub(crate) student_email: String,
+    /// Nome ou sigla do Centro Acadêmico ao qual o cargo pertence.
+    pub(crate) ca_name: String,
+    /// Nome do cargo exercido pelo estudante.
+    pub(crate) role_name: String,
+    /// Lista de permissões administrativas conferidas pelo cargo.
+    pub(crate) permissions: Vec<String>,
+}
+
+/// Contexto independente criado pelo Cucumber para cada cenário.
+///
+/// [`Default`] inicia sem banco ou router, sem resultados e com contador de
+/// requisições zerado. O hook `before` associa os recursos conforme a tag de
+/// isolamento; o hook `after` os libera. Steps de integração acessam o pool por
+/// [`Self::database_pool`] e enviam requisições por [`Self::get`] ou
+/// [`Self::get_json`].
 ///
 /// Os campos de resultados SQL são preenchidos pelos steps que executarem
 /// mutações. Os helpers HTTP não os atualizam automaticamente.
@@ -47,6 +76,16 @@ pub(crate) struct AppWorld {
     /// Inclui chamadas via `get_json` e aumenta antes de construir a requisição;
     /// uma URI inválida ou falha de leitura também pode incrementar o contador.
     pub(crate) request_count: usize,
+    /// Centros Acadêmicos disponíveis registrados no cenário.
+    pub(crate) academic_centers: Vec<AcademicCenterState>,
+    /// E-mail institucional do estudante atualmente em foco no cenário.
+    pub(crate) current_student: Option<String>,
+    /// Centro Acadêmico configurado como favorito do estudante.
+    pub(crate) favorite_ca: Option<String>,
+    /// Centro Acadêmico atualmente ativo na navegação do aplicativo.
+    pub(crate) active_ca: Option<String>,
+    /// Atribuições de cargos e permissões administrativas por Centro Acadêmico.
+    pub(crate) role_assignments: Vec<CaRoleAssignment>,
 }
 
 impl fmt::Debug for AppWorld {
@@ -72,6 +111,11 @@ impl fmt::Debug for AppWorld {
             .field("last_database_mutation", &self.last_database_mutation)
             .field("last_response", &self.last_response)
             .field("request_count", &self.request_count)
+            .field("academic_centers", &self.academic_centers)
+            .field("current_student", &self.current_student)
+            .field("favorite_ca", &self.favorite_ca)
+            .field("active_ca", &self.active_ca)
+            .field("role_assignments", &self.role_assignments)
             .finish()
     }
 }
@@ -223,5 +267,188 @@ impl AppWorld {
         assert_eq!(response.status, StatusCode::OK);
 
         serde_json::from_str(&response.body).expect("response should match the expected JSON shape")
+    }
+
+    /// Cadastra um Centro Acadêmico disponível para o cenário.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `name`: nome institucional do Centro Acadêmico.
+    /// - `acronym`: sigla de representação do Centro Acadêmico.
+    pub(crate) fn register_academic_center(
+        &mut self,
+        name: impl Into<String>,
+        acronym: impl Into<String>,
+    ) {
+        let name = name.into();
+        let acronym = acronym.into();
+        if !self
+            .academic_centers
+            .iter()
+            .any(|c| c.name == name && c.acronym == acronym)
+        {
+            self.academic_centers
+                .push(AcademicCenterState { name, acronym });
+        }
+    }
+
+    /// Define o estudante ativo e seu Centro Acadêmico favorito.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `student_email`: e-mail institucional do estudante.
+    /// - `ca_name`: nome ou sigla do CA favorito.
+    pub(crate) fn set_student_favorite_ca(
+        &mut self,
+        student_email: impl Into<String>,
+        ca_name: impl Into<String>,
+    ) {
+        let email = student_email.into();
+        let ca = ca_name.into();
+        self.current_student = Some(email);
+        self.favorite_ca = Some(ca);
+    }
+
+    /// Define o estudante atual como autenticado na aplicação.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `student_email`: e-mail institucional do estudante.
+    pub(crate) fn set_authenticated_student(&mut self, student_email: impl Into<String>) {
+        self.current_student = Some(student_email.into());
+    }
+
+    /// Simula a abertura do aplicativo pelo estudante, inicializando o contexto ativo no CA favorito.
+    pub(crate) fn open_app(&mut self) {
+        if self.active_ca.is_none() {
+            self.active_ca = self.favorite_ca.clone();
+        }
+    }
+
+    /// Altera ou define o contexto ativo de navegação para o Centro Acadêmico informado.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `ca_name`: nome ou sigla do novo CA ativo.
+    pub(crate) fn set_active_ca(&mut self, ca_name: impl Into<String>) {
+        self.active_ca = Some(ca_name.into());
+    }
+
+    /// Atribui um cargo a um estudante em um Centro Acadêmico específico.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `student_email`: e-mail institucional do estudante.
+    /// - `ca_name`: nome ou sigla do Centro Acadêmico.
+    /// - `role_name`: nome do cargo na gestão.
+    pub(crate) fn assign_role(
+        &mut self,
+        student_email: impl Into<String>,
+        ca_name: impl Into<String>,
+        role_name: impl Into<String>,
+    ) {
+        let student_email = student_email.into();
+        let ca_name = ca_name.into();
+        let role_name = role_name.into();
+
+        if !self.role_assignments.iter().any(|a| {
+            a.student_email == student_email && a.ca_name == ca_name && a.role_name == role_name
+        }) {
+            self.role_assignments.push(CaRoleAssignment {
+                student_email: student_email.clone(),
+                ca_name,
+                role_name,
+                permissions: Vec::new(),
+            });
+        }
+        self.current_student = Some(student_email);
+    }
+
+    /// Adiciona uma permissão administrativa ao último cargo registrado.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `permission`: descrição ou código da permissão administrativa.
+    pub(crate) fn add_permission_to_last_role(&mut self, permission: impl Into<String>) {
+        let perm = permission.into();
+        if let Some(assignment) = self.role_assignments.last_mut()
+            && !assignment
+                .permissions
+                .iter()
+                .any(|p| p.eq_ignore_ascii_case(&perm))
+        {
+            assignment.permissions.push(perm);
+        }
+    }
+
+    /// Obtém todas as permissões ativas do estudante autenticado no contexto ativo atual.
+    ///
+    /// # Retorno
+    ///
+    /// Lista de permissões administrativas correspondentes aos cargos no CA ativo.
+    pub(crate) fn active_permissions(&self) -> Vec<String> {
+        let Some(student) = &self.current_student else {
+            return Vec::new();
+        };
+        let Some(active_ca) = &self.active_ca else {
+            return Vec::new();
+        };
+
+        let mut perms = Vec::new();
+        for assignment in &self.role_assignments {
+            if assignment.student_email.eq_ignore_ascii_case(student)
+                && Self::ca_names_match(&assignment.ca_name, active_ca)
+            {
+                for p in &assignment.permissions {
+                    if !perms
+                        .iter()
+                        .any(|existing: &String| existing.eq_ignore_ascii_case(p))
+                    {
+                        perms.push(p.clone());
+                    }
+                }
+            }
+        }
+        perms
+    }
+
+    /// Verifica se o estudante possui a permissão informada no contexto do CA ativo.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `permission`: permissão administrativa a ser conferida.
+    ///
+    /// # Retorno
+    ///
+    /// `true` se o estudante exercer cargo com a permissão no CA ativo.
+    pub(crate) fn has_active_permission(&self, permission: &str) -> bool {
+        self.active_permissions()
+            .iter()
+            .any(|p| p.eq_ignore_ascii_case(permission.trim()))
+    }
+
+    /// Confere se o estudante atual atua estritamente como visitante no contexto ativo (sem permissões de gestão).
+    ///
+    /// # Retorno
+    ///
+    /// `true` se o estudante não possui permissões administrativas no CA ativo.
+    pub(crate) fn is_visitor_in_active_context(&self) -> bool {
+        self.active_permissions().is_empty()
+    }
+
+    /// Verifica se dois identificadores de Centro Acadêmico se referem ao mesmo CA.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `a`: primeiro identificador (nome ou sigla).
+    /// - `b`: segundo identificador (nome ou sigla).
+    ///
+    /// # Retorno
+    ///
+    /// `true` se forem correspondentes.
+    pub(crate) fn ca_names_match(a: &str, b: &str) -> bool {
+        let a_clean = a.trim().to_lowercase();
+        let b_clean = b.trim().to_lowercase();
+        a_clean == b_clean || a_clean.contains(&b_clean) || b_clean.contains(&a_clean)
     }
 }
