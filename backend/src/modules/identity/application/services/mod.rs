@@ -1,4 +1,5 @@
-//! Espaço reservado para serviços de aplicação do módulo de identidade institucional.
-//!
-//! Ainda não possui serviços. Sua responsabilidade prevista é coordenar
-//! regras de domínio, persistência e integrações durante os casos de uso.
+//! Serviços de aplicação do módulo de identidade institucional.
+
+pub mod user_provisioning;
+
+pub use user_provisioning::*;

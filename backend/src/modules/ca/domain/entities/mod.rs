@@ -1,4 +1,5 @@
-//! Espaço reservado para entidades do módulo de Centros Acadêmicos.
-//!
-//! Ainda não define tipos. Os modelos de domínio deverão expressar identidade
-//! e estado do negócio sem depender dos formatos HTTP ou SQL.
+//! Entidades do domínio de Centros Acadêmicos (CA).
+
+pub mod academic_center;
+
+pub use academic_center::*;

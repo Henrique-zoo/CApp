@@ -1,12 +1,14 @@
 //! Estrutura do módulo de identidade institucional.
 //!
-//! O escopo previsto abrange autenticação, provisionamento e dados acadêmicos. A identidade do usuário
-//! não representa pertencimento a um Centro Acadêmico.
-//!
-//! As camadas [`api`], [`application`], [`domain`] e [`infrastructure`] ainda
-//! são espaços reservados; este módulo não implementa esses comportamentos.
+//! O escopo abrange autenticação, provisionamento automático de usuário,
+//! identidades externas e preferências padrão. A identidade do usuário
+//! não representa pertencimento nem concessão de privilégios em um Centro Acadêmico.
 
 pub mod api;
 pub mod application;
 pub mod domain;
 pub mod infrastructure;
+
+pub use application::*;
+pub use domain::*;
+pub use infrastructure::*;
