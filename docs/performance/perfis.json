@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "status": "proposta_inicial",
+  "seed": 2582026,
+  "synthetic_data_only": true,
+  "datasets": [
+    {
+      "id": "pequeno",
+      "ca_count": 10,
+      "users_total": 1000,
+      "published_content_records_total": 5000,
+      "operational_records_total": 2000,
+      "top_10_percent_ca_record_share": 0.6,
+      "top_10_percent_ca_request_share": 0.6
+    },
+    {
+      "id": "medio",
+      "ca_count": 50,
+      "users_total": 10000,
+      "published_content_records_total": 50000,
+      "operational_records_total": 20000,
+      "top_10_percent_ca_record_share": 0.6,
+      "top_10_percent_ca_request_share": 0.6
+    },
+    {
+      "id": "grande",
+      "ca_count": 200,
+      "users_total": 50000,
+      "published_content_records_total": 200000,
+      "operational_records_total": 100000,
+      "top_10_percent_ca_record_share": 0.6,
+      "top_10_percent_ca_request_share": 0.6
+    }
+  ],
+  "backend": {
+    "request_mix_percent": {
+      "list_read": 50,
+      "detail_read": 20,
+      "search": 15,
+      "write": 10,
+      "change_ca_context": 5
+    },
+    "workloads": [
+      {
+        "id": "smoke",
+        "rate_rps": 1,
+        "duration_seconds": 30
+      },
+      {
+        "id": "baseline",
+        "rate_rps": 5,
+        "duration_seconds": 300
+      },
+      {
+        "id": "normal",
+        "rate_rps": 20,
+        "duration_seconds": 600
+      },
+      {
+        "id": "peak",
+        "start_rps": 20,
+        "target_rps": 50,
+        "ramp_seconds": 60,
+        "hold_seconds": 300
+      },
+      {
+        "id": "spike",
+        "baseline_rps": 20,
+        "spike_rps": 80,
+        "ramp_seconds": 10,
+        "hold_seconds": 60,
+        "recovery_rps": 20,
+        "recovery_seconds": 120
+      },
+      {
+        "id": "soak",
+        "rate_rps": 10,
+        "duration_seconds": 1800
+      }
+    ],
+    "targets": {
+      "read_p95_ms": 500,
+      "read_p99_ms": 1000,
+      "write_p95_ms": 800,
+      "write_p99_ms": 1500,
+      "unexpected_error_rate_max_percent": 1,
+      "normal_rate_rps": 20,
+      "normal_duration_seconds": 600,
+      "peak_rate_rps": 50,
+      "peak_duration_seconds": 300,
+      "api_cpu_mean_percent_normal_max": 70,
+      "api_cpu_mean_percent_peak_max": 85,
+      "database_cpu_mean_percent_normal_max": 70,
+      "database_cpu_mean_percent_peak_max": 85,
+      "soak_memory_growth_max_percent": 10,
+      "spike_recovery_max_seconds": 60
+    }
+  },
+  "mobile": {
+    "devices": [
+      {
+        "id": "intermediario",
+        "minimum_ram_gb": 4,
+        "benchmark_mode": "profile",
+        "physical_device_preferred": true
+      },
+      {
+        "id": "restrito",
+        "minimum_ram_gb": 3,
+        "benchmark_mode": "profile",
+        "physical_device_preferred": true
+      }
+    ],
+    "network_profiles": [
+      {
+        "id": "favoravel",
+        "rtt_ms": 30,
+        "download_mbps": 20,
+        "upload_mbps": 10,
+        "packet_loss_percent": 0
+      },
+      {
+        "id": "movel_comum",
+        "rtt_ms": 100,
+        "download_mbps": 10,
+        "upload_mbps": 2,
+        "packet_loss_percent": 0
+      },
+      {
+        "id": "limitada",
+        "rtt_ms": 250,
+        "download_mbps": 1.5,
+        "upload_mbps": 0.5,
+        "packet_loss_percent": 1
+      }
+    ],
+    "journeys": [
+      {
+        "id": "cold_start",
+        "repetitions": 5
+      },
+      {
+        "id": "warm_start",
+        "repetitions": 5
+      },
+      {
+        "id": "list_and_detail",
+        "cycles": 10
+      },
+      {
+        "id": "search",
+        "queries": 10
+      },
+      {
+        "id": "change_ca_context",
+        "cycles": 10
+      },
+      {
+        "id": "valid_write",
+        "enabled_when_flow_exists": true
+      }
+    ],
+    "targets": {
+      "cold_start_p95_ms": 3000,
+      "warm_start_p95_ms": 1500,
+      "first_content_p95_ms_mobile_network": 2000,
+      "first_content_p95_ms_limited_network": 4000,
+      "frame_p95_ms_at_60hz": 16.7,
+      "frame_p99_ms_at_60hz": 33.3,
+      "process_memory_p95_mb_intermediate_device": 250,
+      "process_memory_p95_mb_restricted_device": 200,
+      "soak_memory_growth_max_percent": 10,
+      "crashes_allowed": 0
+    }
+  },
+  "target_governance": {
+    "status": "proposta_inicial_nao_aprovada",
+    "approved": false,
+    "measured": false,
+    "note": "Os valores são propostas iniciais de engenharia. Não são resultados medidos nem números retirados do relatório de funcionalidades. Devem ser revisados e fixados antes da comparação de otimizações.",
+    "rationale": {
+      "backend_latency": "Definir objetivos iniciais verificáveis para latência de leituras e escritas interativas.",
+      "unexpected_error_rate": "Estabelecer um limite inicial explícito para falhas inesperadas durante a carga.",
+      "cpu_limits": "Preservar margem de recursos no uso normal e durante picos.",
+      "spike_recovery": "Verificar se o sistema retorna ao comportamento de referência depois de uma rajada.",
+      "soak_memory_growth": "Identificar crescimento persistente de memória durante uso prolongado.",
+      "mobile_startup": "Definir objetivos iniciais para inicialização e apresentação de conteúdo útil.",
+      "mobile_frame_timing": "Usar como referência inicial o orçamento aproximado de um quadro em 60 Hz, além de observar a cauda de quadros lentos.",
+      "mobile_memory": "Definir limites iniciais comparáveis em dispositivos de diferentes capacidades; validar em dispositivos reais.",
+      "dataset_scale": "Comparar três tamanhos sintéticos e uma distribuição desigual de utilização entre Centros Acadêmicos."
+    }
+  },
+  "gherkin": {
+    "feature": "features/desempenho_e_capacidade.feature",
+    "platform_tags": {
+      "backend": "@backend",
+      "backend_pending": "@pending_backend",
+      "mobile": "@mobile",
+      "mobile_pending": "@pending_mobile"
+    },
+    "note": "As tags pendentes devem ficar nos cenários aplicáveis. Remover uma tag pendente somente quando o cenário estiver preparado para execução na plataforma correspondente."
+  }
+}
