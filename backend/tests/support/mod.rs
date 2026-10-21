@@ -5,6 +5,10 @@
 //! [`AppWorld`]; o hook `after` os libera, inclusive para cenários que falham
 //! sob o controle do runner.
 //!
+//! A preparação exige `FIREBASE_PROJECT_ID` no ambiente e não carrega `.env`.
+//! Clientes Firebase/Graph são reais e compartilhados na suíte; construí-los não
+//! consulta esses serviços nem autentica automaticamente os cenários.
+//!
 //! # Isolamento
 //!
 //! Cenários sem tag usam uma mesma cópia de leitura da base-modelo. Cenários
@@ -66,6 +70,8 @@ fn has_isolated_database_tag(
 ///
 /// - `features_path`: diretório de cenários selecionado pelo runner. Os dois
 ///   alvos fornecem caminhos absolutos derivados de `CARGO_MANIFEST_DIR`.
+/// - `required_tag`: tag de componente obrigatória, se houver; `None` não exige
+///   tag de componente. O filtro é combinado com a CLI e com `@pending_backend`.
 ///
 /// Um único container é reutilizado pelos cenários desta chamada. A execução
 /// permite até quatro cenários concorrentes, com hooks de preparação e limpeza.
@@ -79,7 +85,8 @@ fn has_isolated_database_tag(
 ///
 /// # Panics
 ///
-/// Se a preparação ou o encerramento do PostgreSQL falhar, ou se as estatísticas
+/// Se a preparação dos clientes (incluindo `FIREBASE_PROJECT_ID`) ou do PostgreSQL
+/// falhar, se o encerramento falhar, ou se as estatísticas
 /// indicarem qualquer falha após o encerramento. Um panic na preparação ou no
 /// próprio encerramento pode interromper a sequência explícita de limpeza.
 pub(crate) async fn run(features_path: PathBuf, required_tag: Option<&'static str>) {

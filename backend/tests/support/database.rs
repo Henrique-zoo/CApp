@@ -3,7 +3,9 @@
 //! [`DatabaseServer`] mantém um container por execução de suíte.
 //! [`SuiteDatabase`] compartilha o acesso administrativo, a base consultiva
 //! e a coordenação de clonagens. [`TestDatabase`] identifica o recurso que
-//! cada World deverá liberar.
+//! cada World deverá liberar. Os clientes HTTP reais são construídos uma vez
+//! por suíte e clonados entre routers; o cache Firebase é compartilhado. Isso
+//! não simula os provedores nem estabelece uma sessão para os cenários.
 //!
 //! As migrations e a fixture preparam uma base-modelo uma única vez. Cenários
 //! de escrita clonam esse modelo, em vez de iniciar outro container. A base
@@ -14,15 +16,24 @@
 //! Os nomes de bases usados no DDL são internos, nunca dados recebidos de uma
 //! requisição. Host e porta vêm do Testcontainers; `DATABASE_URL` não é usada.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
 };
 
 use axum::Router;
 use backend::{
-    api::{self, state::AppState},
-    infrastructure::database::MIGRATOR,
+    api::{
+        self,
+        state::{AppState, Clients},
+    },
+    infrastructure::database::{MIGRATOR, PgDatabase},
+    modules::identity::infrastructure::{
+        firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
+    },
 };
 use futures::lock::Mutex;
 use sqlx::{
@@ -102,6 +113,8 @@ pub(super) struct SuiteDatabase {
     next_database: AtomicU64,
     /// Mutex que serializa os comandos de clonagem da base-modelo.
     template_ddl: Mutex<()>,
+    /// Clientes reutilizados pelos routers da suíte.
+    clients: Clients,
 }
 
 /// Monta as opções de conexão do PostgreSQL descartável, sem abrir conexão.
@@ -158,11 +171,16 @@ impl DatabaseServer {
     ///    `tests/fixtures/api_bdd.sql` à base-modelo.
     /// 3. Fecha o pool do modelo, marca a base como template e cria sua cópia
     ///    compartilhada com `default_transaction_read_only = on`.
-    /// 4. Bloqueia conexões ao modelo e constrói o router com o pool compartilhado.
+    /// 4. Bloqueia conexões ao modelo e constrói os clientes externos reais usando
+    ///    `FIREBASE_PROJECT_ID` do ambiente, sem carregar `.env`.
+    /// 5. Constrói o router com o pool compartilhado e guarda os clientes na suíte.
     ///
     /// O pool temporário do modelo aceita até cinco conexões; o administrativo,
     /// oito; o compartilhado, dezesseis. Nenhum servidor HTTP é iniciado.
-    /// Requer Docker acessível e a imagem disponível localmente ou no registry.
+    /// Requer Docker acessível, a imagem disponível localmente ou no registry e
+    /// `FIREBASE_PROJECT_ID` definido e aceito pelo construtor. Construir clientes
+    /// não chama os provedores; cenários que autenticarem de fato precisarão de
+    /// credenciais compatíveis com esse projeto.
     ///
     /// # Retorno
     ///
@@ -171,7 +189,8 @@ impl DatabaseServer {
     ///
     /// # Panics
     ///
-    /// Em falhas de Docker, descoberta de endereço, conexão, migrations, fixture
+    /// Se `FIREBASE_PROJECT_ID` estiver ausente/inválido ou a construção dos clientes
+    /// falhar; em falhas de Docker, descoberta de endereço, conexão, migrations, fixture
     /// ou preparação das bases. Se a inicialização falhar, não há valor retornado
     /// para executar a sequência explícita de `shutdown`.
     pub(super) async fn start() -> Self {
@@ -210,24 +229,28 @@ impl DatabaseServer {
         template_pool.close().await;
 
         let admin_pool = connect_pool(&host, port, "postgres", 8).await;
+
         sqlx::query(&format!(
             "ALTER DATABASE \"{POSTGRES_TEMPLATE_DB}\" IS_TEMPLATE true"
         ))
         .execute(&admin_pool)
         .await
         .expect("Cucumber database should be marked as a template");
+
         sqlx::query(&format!(
             "CREATE DATABASE \"{POSTGRES_SHARED_DB}\" TEMPLATE \"{POSTGRES_TEMPLATE_DB}\""
         ))
         .execute(&admin_pool)
         .await
         .expect("Cucumber should create the shared read-only database");
+
         sqlx::query(&format!(
             "ALTER DATABASE \"{POSTGRES_SHARED_DB}\" SET default_transaction_read_only = on"
         ))
         .execute(&admin_pool)
         .await
         .expect("Cucumber shared database should default to read-only transactions");
+
         sqlx::query(&format!(
             "ALTER DATABASE \"{POSTGRES_TEMPLATE_DB}\" ALLOW_CONNECTIONS false"
         ))
@@ -235,9 +258,30 @@ impl DatabaseServer {
         .await
         .expect("Cucumber template database should reject ordinary connections");
 
+        let http = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("test HTTP client should be created");
+
+        let project_id = std::env::var("FIREBASE_PROJECT_ID")
+            .expect("FIREBASE_PROJECT_ID deve estar definido para o teste real");
+
+        let firebase = FirebaseTokenVerifier::new(project_id, http.clone())
+            .expect("configuração do Firebase deve ser válida");
+
+        let microsoft = MicrosoftGraphClient::new(http);
+
+        let clients = Clients::new(firebase, microsoft);
+
         let shared_pool = connect_pool(&host, port, POSTGRES_SHARED_DB, 16).await;
-        let shared_app =
-            api::router::create_router().with_state(AppState::new(shared_pool.clone()));
+
+        let shared_app = api::router::create_router().with_state(AppState::new(
+            PgDatabase::new(shared_pool.clone()),
+            clients.clone(),
+        ));
+
         let suite = Arc::new(SuiteDatabase {
             host,
             port,
@@ -246,6 +290,7 @@ impl DatabaseServer {
             shared_app,
             next_database: AtomicU64::new(1),
             template_ddl: Mutex::new(()),
+            clients,
         });
 
         Self { container, suite }
@@ -296,7 +341,10 @@ impl SuiteDatabase {
     /// Par com o banco a ser liberado pelo hook `after` e o router associado ao
     /// mesmo pool. No modo isolado, o nome usa um contador exclusivo da suíte,
     /// a clonagem é serializada pelo mutex e o pool aceita até cinco conexões.
-    /// As migrations e a fixture já estão presentes na base clonada.
+    /// As migrations e a fixture já estão presentes na base clonada. Os routers
+    /// isolados recebem clones dos clientes da suíte, preservando o cache de
+    /// chaves Firebase e o pool HTTP. A evidência institucional continua isolada
+    /// no PostgreSQL do cenário; não é armazenada nesses clientes.
     ///
     /// # Panics
     ///
@@ -329,7 +377,12 @@ impl SuiteDatabase {
         }
 
         let pool = connect_pool(&self.host, self.port, &database_name, 5).await;
-        let app = api::router::create_router().with_state(AppState::new(pool.clone()));
+
+        let app = api::router::create_router().with_state(AppState::new(
+            PgDatabase::new(pool.clone()),
+            self.clients.clone(),
+        ));
+
         (
             TestDatabase {
                 pool,
