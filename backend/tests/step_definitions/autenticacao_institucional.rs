@@ -17,15 +17,58 @@ fn user_is_not_authenticated(_world: &mut AppWorld) {
     pending_step("que o usuário não está autenticado no aplicativo");
 }
 
-/// Pendente: que o estudante possui uma conta institucional ativa da UnB com o e-mail {string}.
-#[given(expr = "que o estudante possui uma conta institucional ativa da UnB com o e-mail {string}")]
+/// Pendente: instituição cadastrada com seu diretório e grupo de estudantes.
+#[given(expr = "que a instituição {string} está cadastrada no CApp")]
+fn institution_is_registered(_world: &mut AppWorld, _institution: String) {
+    pending_step("que a instituição {string} está cadastrada no CApp");
+}
+
+/// Pendente: instituição sem cadastro, independentemente da validade da conta.
+#[given(expr = "que a instituição {string} não está cadastrada no CApp")]
+fn institution_is_not_registered(_world: &mut AppWorld, _institution: String) {
+    pending_step("que a instituição {string} não está cadastrada no CApp");
+}
+
+/// Pendente: conta válida cuja origem institucional será confirmada.
 #[given(
-    expr = "que um estudante com o e-mail {string} realiza o primeiro acesso com conta institucional ativa da UnB"
+    expr = "que o estudante possui uma conta institucional válida da instituição {string} com o e-mail {string}"
 )]
-fn student_has_unb_account(_world: &mut AppWorld, _email: String) {
+fn student_has_institutional_account(_world: &mut AppWorld, _institution: String, _email: String) {
     pending_step(
-        "que o estudante possui uma conta institucional ativa da UnB com o e-mail {string}",
+        "que o estudante possui uma conta institucional válida da instituição {string} com o e-mail {string}",
     );
+}
+
+/// Pendente: primeiro acesso sem usuário CApp previamente provisionado.
+#[given(
+    expr = "que um estudante com o e-mail {string} realiza o primeiro acesso com conta institucional válida da instituição {string}"
+)]
+fn student_accesses_for_the_first_time(
+    _world: &mut AppWorld,
+    _email: String,
+    _institution: String,
+) {
+    pending_step(
+        "que um estudante com o e-mail {string} realiza o primeiro acesso com conta institucional válida da instituição {string}",
+    );
+}
+
+/// Pendente: participação no grupo de estudantes da instituição indicada.
+#[given(expr = "a instituição {string} reconhece essa conta como estudante")]
+fn institution_recognizes_student(_world: &mut AppWorld, _institution: String) {
+    pending_step("a instituição {string} reconhece essa conta como estudante");
+}
+
+/// Pendente: resposta conclusiva sem participação no grupo da instituição indicada.
+#[given(expr = "a instituição {string} não reconhece essa conta como estudante")]
+fn institution_does_not_recognize_student(_world: &mut AppWorld, _institution: String) {
+    pending_step("a instituição {string} não reconhece essa conta como estudante");
+}
+
+/// Pendente: curso no perfil externo, sem presumir confirmação de vínculo estudantil.
+#[given(expr = "a conta informa o curso {string}")]
+fn account_has_course_name(_world: &mut AppWorld, _course: String) {
+    pending_step("a conta informa o curso {string}");
 }
 
 /// Pendente: que um usuário possui credenciais institucionais inválidas para o e-mail {string}.
@@ -36,13 +79,13 @@ fn user_has_invalid_credentials(_world: &mut AppWorld, _email: String) {
     );
 }
 
-/// Pendente: que o estudante possui uma conta institucional com o e-mail {string} revogada pela UnB.
+/// Pendente: conta revogada pela instituição indicada.
 #[given(
-    expr = "que o estudante possui uma conta institucional com o e-mail {string} revogada pela UnB"
+    expr = "que o estudante possui uma conta institucional com o e-mail {string} revogada pela instituição {string}"
 )]
-fn student_account_revoked(_world: &mut AppWorld, _email: String) {
+fn student_account_revoked(_world: &mut AppWorld, _email: String, _institution: String) {
     pending_step(
-        "que o estudante possui uma conta institucional com o e-mail {string} revogada pela UnB",
+        "que o estudante possui uma conta institucional com o e-mail {string} revogada pela instituição {string}",
     );
 }
 
@@ -58,20 +101,10 @@ fn user_has_personal_account(_world: &mut AppWorld) {
     pending_step("que o usuário possui uma conta pessoal Microsoft válida");
 }
 
-/// Pendente: que o usuário possui uma conta institucional Microsoft válida de outra universidade.
-#[given("que o usuário possui uma conta institucional Microsoft válida de outra universidade")]
-fn user_has_other_university_account(_world: &mut AppWorld) {
-    pending_step(
-        "que o usuário possui uma conta institucional Microsoft válida de outra universidade",
-    );
-}
-
-/// Pendente: o serviço de autenticação confirma que a conta pertence a essa outra universidade.
-#[given("o serviço de autenticação confirma que a conta pertence a essa outra universidade")]
-fn provider_confirms_other_university(_world: &mut AppWorld) {
-    pending_step(
-        "o serviço de autenticação confirma que a conta pertence a essa outra universidade",
-    );
+/// Pendente: origem da conta confirmada pelo diretório, sem inferência pelo e-mail.
+#[given(expr = "o serviço de autenticação confirma que a conta pertence à instituição {string}")]
+fn provider_confirms_institution(_world: &mut AppWorld, _institution: String) {
+    pending_step("o serviço de autenticação confirma que a conta pertence à instituição {string}");
 }
 
 /// Pendente: que o estudante iniciou o login institucional.
@@ -169,10 +202,28 @@ fn account_rejection_is_reported(_world: &mut AppWorld) {
     pending_step("o aplicativo informa que não foi possível autenticar a conta institucional");
 }
 
-/// Pendente: o aplicativo informa que é necessário utilizar uma conta institucional da UnB.
-#[then("o aplicativo informa que é necessário utilizar uma conta institucional da UnB")]
-fn unb_account_is_required(_world: &mut AppWorld) {
-    pending_step("o aplicativo informa que é necessário utilizar uma conta institucional da UnB");
+/// Pendente: conta pessoal não satisfaz a exigência de identidade institucional.
+#[then("o aplicativo informa que é necessário utilizar uma conta institucional")]
+fn institutional_account_is_required(_world: &mut AppWorld) {
+    pending_step("o aplicativo informa que é necessário utilizar uma conta institucional");
+}
+
+/// Pendente: recusa por instituição desconhecida, distinta de credencial inválida.
+#[then("o aplicativo informa que a instituição do usuário ainda não está cadastrada no CApp")]
+fn unknown_institution_is_reported(_world: &mut AppWorld) {
+    pending_step(
+        "o aplicativo informa que a instituição do usuário ainda não está cadastrada no CApp",
+    );
+}
+
+/// Pendente: recusa de vínculo identifica a instituição da conta apresentada.
+#[then(
+    expr = "o aplicativo informa que o usuário não foi reconhecido como aluno da instituição {string}"
+)]
+fn student_membership_is_required(_world: &mut AppWorld, _institution: String) {
+    pending_step(
+        "o aplicativo informa que o usuário não foi reconhecido como aluno da instituição {string}",
+    );
 }
 
 /// Pendente: o aplicativo informa a indisponibilidade temporária da autenticação.
