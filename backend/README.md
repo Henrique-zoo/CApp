@@ -179,7 +179,7 @@ O módulo de identidade representa a identidade institucional do usuário e suas
 
 Ele não representa uma relação de pertencimento a um Centro Acadêmico.
 
-A implementação atual cobre verificação institucional, registro da evidência e um extractor reutilizável para acesso protegido. Provisionamento e associação acadêmica permanecem fora desse recorte. Consulte [Autenticação institucional implementada](#autenticação-institucional-implementada) para o fluxo, contratos HTTP e limites atuais.
+A implementação atual cobre verificação institucional, registro da evidência e um extractor reutilizável para acesso protegido. Provisionamento e associação acadêmica permanecem fora desse recorte. Consulte os [Rustdocs do módulo](src/modules/identity/mod.rs) para fluxo, decisões e testes específicos, e o [OpenAPI](../packages/api-contracts/openapi.yaml) para o contrato HTTP.
 
 ---
 
@@ -456,125 +456,6 @@ Responsável por:
 - registro de rotas;
 - middleware;
 - respostas padronizadas.
-
----
-
-# Autenticação institucional implementada
-
-## Componentes e responsabilidades
-
-| Componente | Localização | Responsabilidade |
-|---|---|---|
-| Composição | `src/main.rs` e `src/api/state.rs` | Configurar clientes HTTP, verificador Firebase, adaptador PostgreSQL e estado. |
-| HTTP | `src/modules/identity/api/` | Extrair credenciais, converter DTOs/erros e aplicar timeout. |
-| Casos de uso | `src/modules/identity/application/services/authentication.rs` | Verificar a identidade e o vínculo; reutilizar uma evidência válida. |
-| Contratos | `src/modules/identity/application/ports.rs` | Definir acesso aos provedores e à persistência sem dependência de HTTP. |
-| Provedores | `src/modules/identity/infrastructure/{firebase,microsoft}/` | Validar Firebase ID tokens e consultar Microsoft Graph. |
-| Persistência | `src/modules/identity/infrastructure/repository.rs` | Implementar as traits de repositório para `PgDatabase`. |
-
-Os serviços são funções livres que recebem referências a traits. `AppState` guarda os adaptadores concretos e `Clients`, sem armazenar identidade ou token de um usuário. Seus clones compartilham o pool PostgreSQL, as conexões HTTP e o cache de chaves Firebase.
-
-## Verificar ou renovar o acesso institucional
-
-A rota disponível é `POST /auth/institutional/verify`. Ela não exige confirmação institucional anterior: precisa aceitar o primeiro acesso e a renovação de evidência vencida.
-
-```http
-POST /auth/institutional/verify
-Authorization: Bearer <FIREBASE_ID_TOKEN>
-Content-Type: application/json
-
-{
-  "microsoftAccessToken": "<MICROSOFT_ACCESS_TOKEN>"
-}
-```
-
-Os tokens devem corresponder à mesma identidade. O serviço:
-
-1. Valida assinatura e claims do Firebase ID token e obtém o UID e o objeto Microsoft vinculado.
-2. Consulta `/me` no Graph e compara seu ID com o vínculo Firebase.
-3. Consulta `/organization?$select=id` com o mesmo access token e busca a instituição pelo tenant.
-4. Consulta `/me/checkMemberGroups` para `institution.microsoft_student_group_id`.
-5. Persiste o resultado conclusivo em `institutional_verification` e, se positivo e aceito pelo repositório, retorna o perfil e a validade.
-
-O cadastro institucional é necessário, mas o usuário interno ainda não precisa existir. A configuração do grupo é lida no login, não carregada na inicialização. O nome do grupo e o domínio do e-mail não substituem a consulta. `institution.status` não é usado pelo serviço como autorização, e não há restrição fixa ao tenant da UnB no código atual: o conjunto permitido corresponde às instituições cadastradas. Os [cenários compartilhados](../features/identidade_e_acesso/autenticacao_institucional.feature) distinguem instituição cadastrada, instituição desconhecida e vínculo estudantil recusado. A UnB é o suporte inicial; a instituição fictícia dos exemplos especifica a extensão desse comportamento, sem afirmar que outra integração já esteja disponível. A automação desses cenários permanece pendente.
-
-Nome, e-mail, UPN e curso podem ser nulos. O curso vem de `jobTitle`; ausência ou texto vazio não impede a autenticação. O serviço não cria perfil interno, associa curso ou emite um token próprio.
-
-Resposta HTTP 200, com dados ilustrativos:
-
-```json
-{
-  "profile": {
-    "microsoftObjectId": "00000000-0000-0000-0000-000000000001",
-    "name": "Estudante",
-    "email": null,
-    "userPrincipalName": "estudante@example.edu",
-    "courseName": null
-  },
-  "expiresAt": "2026-10-20T21:00:00Z"
-}
-```
-
-`expiresAt` é a validade UTC atribuída à evidência persistida, serializada em RFC 3339. Não é o vencimento do ID token nem da sessão Firebase. O mobile pode guardar o perfil e antecipar a renovação por esse prazo; o backend continua responsável pela decisão de acesso.
-
-O handler aplica timeout total de 15 segundos ao serviço. JSON rejeitado, access token ausente, nulo ou vazio resultam em 400. O normalizador atual não remove espaços: uma string composta só por espaços continua sendo encaminhada como credencial. Um timeout não garante reversão de uma escrita já concluída no banco.
-
-## Reutilização da confirmação
-
-O serviço `authenticate_institutional_request` valida o Firebase ID token, consulta uma evidência positiva vigente e confronta o objeto Microsoft vinculado. Não consulta o Graph, não altera o registro e não estende seu prazo. O extractor `AuthenticatedInstitutionalIdentity`, em `api/extractors.rs`, adapta essa operação ao Axum e limita o serviço a dez segundos.
-
-Handlers protegidos devem receber explicitamente esse extractor. A mera existência dele não protege o router; nenhuma rota atual o utiliza. Não há endpoint adicional de identidade ou situação de login registrado. O handler de verificação usa apenas o parser Bearer e o serviço completo, evitando exigir a confirmação que ele próprio cria.
-
-Quando o extractor for usado, as requisições protegidas precisarão somente de `Authorization: Bearer <FIREBASE_ID_TOKEN>`. Uma evidência ausente, negativa, vencida, incompatível com a configuração ou com outro objeto Microsoft resulta em `institutional_verification_required`. O mobile deverá obter credenciais adequadas, repetir a verificação institucional e só então tentar novamente a operação. Esse erro não determina, por si só, encerramento da sessão Firebase.
-
-## Persistência, validade e concorrência
-
-A tabela `institutional_verification` tem chave primária `firebase_uid`, sem FK para um usuário interno. Guarda objeto Microsoft, instituição, tenant/grupo consultados, resultado, início da consulta (`checked_at`) e expiração (`expires_at`). O UID é uma string opaca de até 128 caracteres; não é convertido em UUID.
-
-O TTL atual é de **24 horas**, definido em `VERIFICATION_TTL_HOURS`. Começa antes das consultas ao Graph; mudar a constante afeta novas verificações, sem reescrever prazos já armazenados. A evidência não é um cache de sessão. Uma remoção do grupo pode permanecer desconhecida até nova consulta ou vencimento da confirmação anterior.
-
-O UPSERT substitui todos os campos somente quando `checked_at` é estritamente posterior ao valor existente. Isso prioriza consultas iniciadas mais recentemente e pressupõe relógios sincronizados entre instâncias. Uma resposta negativa conclusiva também é gravada; indisponibilidade do provedor preserva o último resultado sem renovar sua validade. Se uma positiva não substituir um registro mais recente, o serviço pede nova verificação.
-
-A leitura combina a evidência com `institution` e exige tenant e grupo iguais aos atuais. Mudar qualquer um deles impede a reutilização da confirmação antiga, sem reiniciar o cliente Graph. O serviço ainda compara o objeto Microsoft e verifica a expiração após a consulta. A tabela não guarda histórico nem remove automaticamente registros expirados. Excluir a instituição remove suas evidências por `ON DELETE CASCADE`.
-
-## Cache das chaves e acesso aos provedores
-
-O verificador Firebase aceita RS256 e verifica audiência, emissor, UID e claims temporais sem tolerância adicional (`leeway = 0`). Não consulta revogação ou situação atual da conta. O login e o gerenciamento da sessão permanecem no Firebase/mobile; a evidência institucional não os substitui.
-
-As chaves públicas usam cache em memória compartilhado entre clones, com leituras por `RwLock` e atualização serializada por `Mutex`. O TTL considera `Cache-Control`, `Age` e o tempo de processamento. Tentativas por falha ou chave desconhecida são contidas por até 30 segundos; um TTL positivo menor antecipa a próxima atualização. Um conjunto recém-baixado pode atender à chamada corrente mesmo com TTL zero, mas não fica válido para reutilização posterior.
-
-O cliente HTTP de produção não segue redirecionamentos, tem timeout de conexão de três segundos e padrão de dez segundos. As chamadas de JWKS e Graph impõem cinco segundos por requisição. O Graph espera HTTP 200; 401 vira credencial inválida e outros status, inclusive 403 e 429, viram indisponibilidade. Nenhum desses erros é convertido em resposta negativa de participação. A interpretação da participação pressupõe que a credencial tenha permissão para avaliar o grupo configurado.
-
-## Erros públicos
-
-As respostas produzidas por `ApiError` têm este envelope:
-
-```json
-{
-  "error": {
-    "code": "institutional_verification_required",
-    "message": "É necessário verificar novamente seu vínculo institucional.",
-    "details": null
-  }
-}
-```
-
-| HTTP | Código | Condição |
-|---|---|---|
-| 400 | `bad_request` | Corpo rejeitado ou access token obrigatório ausente/vazio. |
-| 401 | `unauthorized` | Cabeçalho Bearer ausente, repetido ou malformado. |
-| 401 | `invalid_token` | Credencial inválida; inclui 401 recebido do Graph. |
-| 401 | `expired_token` | Expiração reconhecida pelo verificador Firebase. |
-| 401 | `identity_mismatch` | IDs Microsoft válidos que não correspondem. |
-| 401 | `invalid_microsoft_id` | Vínculo Microsoft ausente ou incompatível com UUID. |
-| 403 | `unknown_institution` | Tenant sem instituição cadastrada. |
-| 403 | `student_membership_required` | Consulta não confirmou participação no grupo. |
-| 403 | `institutional_verification_required` | Evidência não reutilizável ou atualização positiva superada. |
-| 503 | `authentication_provider_unavailable` | Provedor não permitiu concluir a validação. |
-| 503 | `service_unavailable` | Timeout aplicado pela camada HTTP. |
-| 500 | `internal_server_error` | Falha interna ou de persistência. |
-
-Respostas 401 incluem `WWW-Authenticate: Bearer`. Somente a recusa de vínculo acrescenta `details.institution_name`; os demais erros acima usam `null`. O mobile deve decidir pelo código estável, usando mensagem e detalhes para apresentação. Diagnósticos SQL e tokens não fazem parte do corpo público. Os construtores genéricos de `ApiError` também estão disponíveis a outros handlers.
 
 ---
 
@@ -883,6 +764,61 @@ A imagem já executa um binário compilado em modo release. O Compose continua d
 
 ---
 
+# Organização dos testes
+
+Os testes unitários ficam junto à implementação, em `src/`. Os runners Cucumber são declarados no `Cargo.toml`; os testes de integração usam o alvo `integration`, descoberto automaticamente pelo Cargo em `tests/integration/main.rs`:
+
+```text
+tests/
+├── cucumber/
+│   ├── bdd.rs
+│   ├── bdd_infrastructure.rs
+│   ├── scenario_filters.rs
+│   ├── support/
+│   ├── step_definitions/
+│   ├── infrastructure_steps/
+│   ├── features/
+│   └── fixtures/api_bdd.sql
+├── integration/
+│   ├── main.rs
+│   ├── repositories/
+│   ├── http/
+│   └── support/mod.rs
+└── fixtures/
+```
+
+Cucumber mantém seu World, hooks, steps, fixtures SQL e cenários técnicos juntos. `integration/` contém verificações diretas de PostgreSQL e HTTP, sem runner Gherkin. Fixtures utilizadas por mais de uma suíte ficam em `tests/fixtures/`. As features funcionais compartilhadas com o mobile continuam em `features/` na raiz do monorepo.
+
+Os alvos `bdd`, `bdd_infrastructure` e `scenario_filters` são separados de `integration`, que permite filtrar os testes por módulo.
+
+Para acrescentar testes de outro repositório, crie `tests/integration/repositories/<módulo>.rs` e declare `mod <módulo>;` em `repositories/mod.rs`. Faça o equivalente em `http/` para fluxos HTTP. Não é necessário acrescentar `[[test]]` ao Cargo. O suporte `TestDatabase` centraliza a criação e o descarte de PostgreSQL e a aplicação de migrations; crie uma instância por teste e reutilize seu pool entre os casos. Cada instância permanece isolada das demais, inclusive em execução paralela; o agrupamento no alvo não cria um container global.
+
+## Executar as suítes Rust
+
+No diretório `backend`, execute os testes unitários sem PostgreSQL:
+
+```bash
+cargo test --lib --locked
+```
+
+Os testes de integração exigem Docker e criam seus próprios bancos descartáveis; não dependem do PostgreSQL do Compose. A feature `test-support` habilita os testes HTTP com provedores locais. Sem ela, o alvo executa somente os testes de repositórios:
+
+```bash
+cargo test --test integration --features test-support --locked
+cargo test --test integration --locked repositories::
+cargo test --test integration --features test-support --locked http::
+```
+
+Para executar unitários e integração juntos:
+
+```bash
+cargo test --lib --test integration --features test-support --locked
+```
+
+Os detalhes de cobertura, fixtures e filtros por domínio pertencem aos Rustdocs dos módulos e das suítes. Consulte os [Rustdocs de identity](src/modules/identity/mod.rs) e a [entrada dos testes de integração](tests/integration/main.rs). A seção [Documentação Rust](#documentação-rust) explica como gerar a versão navegável.
+
+---
+
 # BDD
 
 O projeto utiliza Behavior Driven Development.
@@ -903,17 +839,17 @@ O backend implementa os testes comportamentais relacionados às regras de negóc
 
 Essas especificações compartilhadas descrevem comportamentos do produto na
 linguagem do domínio. O backend implementa seus steps em
-`tests/step_definitions/`; cada cliente possui sua própria implementação dos
+`tests/cucumber/step_definitions/`; cada cliente possui sua própria implementação dos
 comportamentos aplicáveis ao seu contexto.
 
 Os cenários técnicos que verificam `/ready`, PostgreSQL e o isolamento dos testes
-ficam em `tests/features/`, com steps exclusivos em `tests/infrastructure_steps/`.
+ficam em `tests/cucumber/features/`, com steps exclusivos em `tests/cucumber/infrastructure_steps/`.
 Eles validam a infraestrutura do backend e são executados por um alvo separado.
 
 | Alvo Cargo | Cenários | Steps |
 |---|---|---|
-| `bdd` | `../features/` — comportamentos compartilhados do produto | `tests/step_definitions/` |
-| `bdd_infrastructure` | `tests/features/` — verificações técnicas do backend | `tests/infrastructure_steps/` |
+| `bdd` | `../features/` — comportamentos compartilhados do produto | `tests/cucumber/step_definitions/` |
+| `bdd_infrastructure` | `tests/cucumber/features/` — verificações técnicas do backend | `tests/cucumber/infrastructure_steps/` |
 
 O runner exclui automaticamente cenários com `@pending_backend`, considerando
 tags na feature, regra ou cenário. Essa exclusão também vale quando filtros
@@ -953,12 +889,12 @@ quando um deles falha; o comando continua retornando falha se qualquer alvo
 falhar. A opção controla a execução entre alvos, não a estratégia interna dos
 cenários do Cucumber.
 
-Os dois alvos reutilizam o código de `tests/support/`, mas registram seus steps e
+Os dois alvos reutilizam o código de `tests/cucumber/support/`, mas registram seus steps e
 leem seus diretórios de cenários separadamente. Cada execução de um alvo cria um
 único container PostgreSQL, reutilizado por todos os cenários daquela suíte, com
 porta dinâmica. Executar os dois alvos cria dois containers independentes. A
 preparação usa o mesmo `MIGRATOR` do servidor e aplica a fixture
-`tests/fixtures/api_bdd.sql` a uma base-modelo.
+`tests/cucumber/fixtures/api_bdd.sql` a uma base-modelo.
 Cenários consultivos compartilham uma cópia dessa base com transações de leitura
 por padrão. Cenários que escrevem devem receber a tag `@isolated_database`, na
 feature, regra ou cenário, para obter uma base própria clonada do modelo.
@@ -1017,19 +953,20 @@ No diretório `backend`, gere a documentação da biblioteca, incluindo itens pr
 RUSTDOCFLAGS="-D warnings" cargo doc --lib --all-features --no-deps --document-private-items --locked
 ```
 
-O índice fica em `target/doc/backend/index.html`. A documentação da biblioteca
-não inclui os módulos dos testes; para gerar também as duas suítes, usando o
+O índice fica em `target/doc/backend/index.html`. A visão do módulo de identidade fica em `target/doc/backend/modules/identity/index.html`. A documentação da biblioteca
+não inclui os módulos dos testes; para gerar também as suítes externas, usando o
 diretório `target/` padrão:
 
 ```bash
 cargo build --lib --all-features --locked
 cargo rustdoc --test bdd --all-features --locked -- --document-private-items -D warnings --extern backend=target/debug/libbackend.rlib
 cargo rustdoc --test bdd_infrastructure --all-features --locked -- --document-private-items -D warnings --extern backend=target/debug/libbackend.rlib
+cargo rustdoc --test integration --all-features --locked -- --document-private-items -D warnings --extern backend=target/debug/libbackend.rlib
 ```
 
 O argumento `--extern` fornece a biblioteca do projeto que o Cargo não inclui
 automaticamente nesta geração de documentação dos testes. Os índices ficam em
-`target/doc/bdd/index.html` e `target/doc/bdd_infrastructure/index.html`.
+`target/doc/bdd/index.html`, `target/doc/bdd_infrastructure/index.html` e `target/doc/integration/index.html`.
 Esses comandos documentam os testes sem executá-los e não precisam de Docker.
 
 Para documentar somente a inicialização do executável, use:
@@ -1093,3 +1030,9 @@ Flutter Mobile             Web Frontend
 ```
 
 As regras de negócio permanecem centralizadas no backend, enquanto diferentes clientes implementam apenas suas respectivas interfaces.
+
+# Contrato HTTP (OpenAPI)
+
+O contrato das rotas implementadas está em [`packages/api-contracts/openapi.yaml`](../packages/api-contracts/openapi.yaml), em OpenAPI 3.1. Ele descreve `GET /health`, `GET /ready` e `POST /auth/institutional/verify`, incluindo autenticação Firebase Bearer, token Microsoft no corpo, perfis de estudante e não estudante, validade e erros públicos. O backend serve esses caminhos sem prefixo `/v1`.
+
+Ao alterar um handler, DTO ou mapeamento de erros, atualize o contrato no mesmo conjunto de alterações. O arquivo pode ser aberto em ferramentas compatíveis com OpenAPI 3.1; o backend ainda não serve uma interface Swagger ou um endpoint de download do contrato. A rota `/protected` dos testes não integra a API pública.

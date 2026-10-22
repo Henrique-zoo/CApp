@@ -3,7 +3,353 @@ openapi: 3.1.0
 info:
   title: CApp API
   version: 1.0.0
-  description: API da plataforma CApp
+  description: |
+    Contrato das rotas atualmente implementadas no backend CApp.
+    Os caminhos são servidos sem prefixo /v1.
+
+    A verificação institucional valida um Firebase ID token e um Microsoft access
+    token da mesma pessoa, consulta a instituição pelo tenant Microsoft, verifica
+    a participação no grupo estudantil e persiste a evidência por 24 horas.
+    Estudantes e não estudantes podem concluir a verificação. Ela não provisiona
+    uma conta interna, não cria uma sessão Firebase e não concede permissões
+    específicas de curso. A expiração informada é da evidência institucional,
+    independente da expiração do ID token Firebase.
 
 servers:
-  - url: https://api.capp.com.br/v1
+  - url: http://localhost:3000
+    description: Backend local, inclusive quando a porta 3000 é publicada pelo Docker.
+
+tags:
+  - name: Infraestrutura
+    description: Saúde do processo e comunicação com PostgreSQL.
+  - name: Identidade
+    description: Verificação das credenciais e do vínculo institucional.
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [Infraestrutura]
+      summary: Verificar se o servidor responde
+      description: Não consulta PostgreSQL, Firebase ou Microsoft Graph.
+      security: []
+      responses:
+        '200':
+          description: O processo HTTP está respondendo.
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: O servidor está saudável.
+              example: O servidor está saudável.
+
+  /ready:
+    get:
+      operationId: getReadiness
+      tags: [Infraestrutura]
+      summary: Verificar a comunicação com PostgreSQL
+      description: |
+        Executa SELECT 1 AS ok, com limite total de dois segundos para aquisição
+        da conexão e execução. Não verifica tabelas, versão do esquema ou
+        disponibilidade dos provedores de autenticação. As respostas não têm corpo.
+      security: []
+      responses:
+        '200':
+          description: Consulta ao PostgreSQL concluída.
+        '503':
+          description: Erro de comunicação com PostgreSQL ou tempo limite excedido.
+
+  /auth/institutional/verify:
+    post:
+      operationId: verifyInstitutionalIdentity
+      tags: [Identidade]
+      summary: Criar ou renovar a verificação institucional
+      description: |
+        Exige um Firebase ID token no cabeçalho Authorization e um Microsoft
+        access token delegado no corpo. A identidade Microsoft vinculada ao ID
+        token deve corresponder ao perfil obtido no Graph.
+
+        O backend consulta a organização Microsoft, busca a instituição cadastrada
+        pelo tenant e usa o grupo dessa instituição em me/checkMemberGroups.
+        A ausência de participação no grupo resulta em affiliation.type=nonStudent,
+        sem rejeitar a autenticação. jobTitle é interpretado como curso somente
+        quando a participação estudantil foi confirmada. Nome, e-mail e curso
+        podem estar ausentes e são serializados como null.
+
+        Não exige uma verificação institucional anterior. O serviço tem timeout
+        total de 15 segundos; o cancelamento não garante desfazer uma gravação
+        já concluída. Esta operação não cria o usuário interno do CApp.
+      security:
+        - FirebaseIdToken: []
+      requestBody:
+        required: true
+        description: Credencial Microsoft da mesma identidade vinculada ao Firebase.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstitutionalAuthRequest'
+            example:
+              microsoftAccessToken: '<MICROSOFT_ACCESS_TOKEN>'
+      responses:
+        '200':
+          description: Identidade verificada e evidência institucional persistida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstitutionalVerificationResponse'
+              examples:
+                student:
+                  summary: Estudante com curso informado pelo diretório
+                  value:
+                    profile:
+                      microsoftObjectId: '00000000-0000-0000-0000-000000000001'
+                      name: Pessoa Exemplo
+                      email: pessoa@instituicao.example
+                      affiliation:
+                        type: student
+                        courseName: Engenharia de Software
+                    expiresAt: '2026-10-22T12:00:00Z'
+                studentWithoutOptionalData:
+                  summary: Estudante sem nome, e-mail ou curso informado
+                  value:
+                    profile:
+                      microsoftObjectId: '00000000-0000-0000-0000-000000000002'
+                      name: null
+                      email: null
+                      affiliation:
+                        type: student
+                        courseName: null
+                    expiresAt: '2026-10-22T12:00:00Z'
+                nonStudent:
+                  summary: Pessoa sem participação no grupo estudantil
+                  value:
+                    profile:
+                      microsoftObjectId: '00000000-0000-0000-0000-000000000003'
+                      name: Pessoa Exemplo
+                      email: null
+                      affiliation:
+                        type: nonStudent
+                    expiresAt: '2026-10-22T12:00:00Z'
+        '400':
+          description: |
+            bad_request — JSON ausente, malformado, de tipo incompatível ou
+            rejeitado pelo extractor (inclusive Content-Type inadequado ou limite
+            de corpo excedido); microsoftAccessToken ausente, null ou vazio.
+            Todas essas rejeições são normalizadas para HTTP 400.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                error:
+                  code: bad_request
+                  message: Requisição inválida
+                  details: null
+        '401':
+          description: |
+            Credenciais inválidas. Códigos possíveis:
+            - unauthorized: Authorization ausente, repetido ou Bearer malformado;
+            - invalid_token: credencial rejeitada pelo verificador ou pelo Graph;
+            - expired_token: ID token Firebase expirado;
+            - invalid_microsoft_id: identificador Microsoft vinculado ausente ou inválido;
+            - identity_mismatch: ID token e perfil Microsoft representam pessoas diferentes.
+          headers:
+            WWW-Authenticate:
+              description: Desafio Bearer incluído em todas as respostas 401.
+              schema:
+                type: string
+                const: Bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                missingCredentials:
+                  value:
+                    error:
+                      code: unauthorized
+                      message: Autenticação necessária
+                      details: null
+                invalidToken:
+                  value:
+                    error:
+                      code: invalid_token
+                      message: Token de autenticação inválido
+                      details: null
+                expiredToken:
+                  value:
+                    error:
+                      code: expired_token
+                      message: Token de autenticação expirado
+                      details: null
+                invalidMicrosoftId:
+                  value:
+                    error:
+                      code: invalid_microsoft_id
+                      message: Identificador Microsoft ausente ou inválido
+                      details: null
+                identityMismatch:
+                  value:
+                    error:
+                      code: identity_mismatch
+                      message: As identidades autenticadas não correspondem
+                      details: null
+        '403':
+          description: |
+            unknown_institution — o tenant Microsoft não corresponde a uma
+            instituição cadastrada.
+            institutional_verification_required — uma verificação concorrente com
+            início igual ou posterior já foi persistida para o mesmo UID e esta
+            tentativa não a substituiu; repita a verificação institucional.
+            Não pertencer ao grupo estudantil não gera esses erros; a resposta
+            é 200 com o vínculo nonStudent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                unknownInstitution:
+                  value:
+                    error:
+                      code: unknown_institution
+                      message: Sua instituição ainda não está cadastrada no CApp.
+                      details: null
+                concurrentVerification:
+                  value:
+                    error:
+                      code: institutional_verification_required
+                      message: É necessário verificar novamente seu vínculo institucional.
+                      details: null
+        '500':
+          description: internal_server_error — falha interna, inclusive de persistência.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                error:
+                  code: internal_server_error
+                  message: Erro interno do servidor
+                  details: null
+        '503':
+          description: |
+            authentication_provider_unavailable — falha de comunicação, resposta
+            inesperada ou indisponibilidade de Firebase/JWKS ou Microsoft Graph.
+            service_unavailable — timeout total de 15 segundos do serviço.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                providerUnavailable:
+                  value:
+                    error:
+                      code: authentication_provider_unavailable
+                      message: Serviço de autenticação temporariamente indisponível
+                      details: null
+                timeout:
+                  value:
+                    error:
+                      code: service_unavailable
+                      message: Serviço temporariamente indisponível
+                      details: null
+
+components:
+  securitySchemes:
+    FirebaseIdToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Firebase ID token do projeto configurado no backend, com identidade
+        microsoft.com vinculada. Enviar um único Authorization: Bearer <ID_TOKEN>.
+        O access token Microsoft é enviado separadamente no corpo da verificação.
+  schemas:
+    InstitutionalAuthRequest:
+      type: object
+      required: [microsoftAccessToken]
+      properties:
+        microsoftAccessToken:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: |
+            Access token delegado para consultar organização, perfil e participação
+            em grupos no Microsoft Graph. Não é um Firebase ID token. Strings vazias
+            são rejeitadas; o backend não aplica trim antes de consultar o provedor.
+    InstitutionalVerificationResponse:
+      type: object
+      required: [profile, expiresAt]
+      properties:
+        profile:
+          $ref: '#/components/schemas/InstitutionalIdentityResponse'
+        expiresAt:
+          type: string
+          format: date-time
+          description: |
+            Instante UTC (RFC 3339) de expiração da evidência institucional: 24 horas
+            após o início das consultas institucionais. Não é a expiração do token
+            Firebase e não substitui a validação no servidor. A resposta não inclui
+            um campo ttl separado.
+    InstitutionalIdentityResponse:
+      type: object
+      required: [microsoftObjectId, name, email, affiliation]
+      properties:
+        microsoftObjectId:
+          type: string
+          description: Identificador de objeto Microsoft validado como UUID; não é o UID Firebase nem um ID interno do CApp.
+          examples: ['00000000-0000-0000-0000-000000000001']
+        name:
+          type: [string, 'null']
+          description: displayName fornecido pela instituição, ou null se ausente.
+        email:
+          type: [string, 'null']
+          description: mail fornecido pelo diretório Microsoft, ou null se ausente; não há fallback para userPrincipalName.
+        affiliation:
+          $ref: '#/components/schemas/InstitutionalAffiliation'
+    InstitutionalAffiliation:
+      description: Vínculo determinado pela participação no grupo estudantil configurado para a instituição.
+      oneOf:
+        - $ref: '#/components/schemas/StudentAffiliation'
+        - $ref: '#/components/schemas/NonStudentAffiliation'
+      discriminator:
+        propertyName: type
+        mapping:
+          student: '#/components/schemas/StudentAffiliation'
+          nonStudent: '#/components/schemas/NonStudentAffiliation'
+    StudentAffiliation:
+      type: object
+      additionalProperties: false
+      required: [type, courseName]
+      properties:
+        type:
+          type: string
+          const: student
+        courseName:
+          type: [string, 'null']
+          description: jobTitle do estudante, ou null; ainda não representa associação ao catálogo interno de cursos.
+    NonStudentAffiliation:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: nonStudent
+          description: Participação no grupo estudantil não confirmada; courseName não é retornado e jobTitle não é interpretado como curso.
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code:
+              type: string
+              description: Identificador estável para tratamento programático; os códigos aplicáveis estão descritos em cada resposta HTTP.
+            message:
+              type: string
+              description: Mensagem pública legível, sem diagnósticos internos ou credenciais.
+            details:
+              description: Contexto público adicional ou null. Os erros atuais da rota de verificação retornam null.
