@@ -50,13 +50,17 @@ wiremock = "0.6"
 
 [[test]]
 name = "bdd"
-path = "tests/bdd.rs"
+path = "tests/cucumber/bdd.rs"
 harness = false
 
 [[test]]
 name = "bdd_infrastructure"
-path = "tests/bdd_infrastructure.rs"
+path = "tests/cucumber/bdd_infrastructure.rs"
 harness = false
+
+[[test]]
+name = "scenario_filters"
+path = "tests/cucumber/scenario_filters.rs"
 
 [lints.rust]
 missing_docs = "warn"

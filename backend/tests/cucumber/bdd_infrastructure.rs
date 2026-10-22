@@ -1,6 +1,6 @@
 //! Runner das verificações técnicas exclusivas do backend.
 //!
-//! Lê `tests/features/` e registra os steps de `infrastructure_steps`.
+//! Lê `tests/cucumber/features/` e registra os steps de `infrastructure_steps`.
 //! Usa o mesmo suporte da suíte funcional, mas cria seu próprio container
 //! PostgreSQL por execução. O caminho dos cenários é relativo ao manifesto.
 //!
@@ -28,6 +28,6 @@ mod support;
 /// [`support::run`], fazendo o alvo Cargo terminar com falha.
 #[tokio::main]
 async fn main() {
-    let features = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/features");
+    let features = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cucumber/features");
     support::run(features, None).await;
 }

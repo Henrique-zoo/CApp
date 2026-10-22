@@ -168,7 +168,7 @@ impl DatabaseServer {
     ///
     /// 1. Inicia `postgres:17-alpine` com porta dinâmica e credenciais de teste.
     /// 2. Aplica o mesmo [`MIGRATOR`] do servidor e, em seguida, a fixture
-    ///    `tests/fixtures/api_bdd.sql` à base-modelo.
+    ///    `tests/cucumber/fixtures/api_bdd.sql` à base-modelo.
     /// 3. Fecha o pool do modelo, marca a base como template e cria sua cópia
     ///    compartilhada com `default_transaction_read_only = on`.
     /// 4. Bloqueia conexões ao modelo e constrói os clientes externos reais usando
