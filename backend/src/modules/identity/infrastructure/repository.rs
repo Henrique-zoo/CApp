@@ -76,7 +76,7 @@ impl From<sqlx::Error> for InstitutionalVerificationRepositoryError {
 
 #[async_trait::async_trait]
 impl InstitutionalVerificationRepository for PgDatabase {
-    /// Seleciona evidência positiva vigente e compatível com o cadastro institucional.
+    /// Seleciona evidência vigente e compatível com o cadastro, incluindo não estudantes.
     ///
     /// O filtro por UID usa a chave primária e o JOIN usa o ID da instituição. O prazo
     /// é comparado com `CURRENT_TIMESTAMP` do PostgreSQL. Tenant e grupo armazenados
@@ -85,7 +85,7 @@ impl InstitutionalVerificationRepository for PgDatabase {
     ///
     /// # Retorno
     ///
-    /// Uma evidência ou `None` para ausência, negativa, expiração ou configuração
+    /// Uma evidência ou `None` para ausência, expiração ou configuração
     /// alterada. A consulta não altera registros nem remove evidências expiradas.
     ///
     /// # Erros
@@ -101,7 +101,6 @@ impl InstitutionalVerificationRepository for PgDatabase {
             FROM institutional_verification AS v
             JOIN institution AS i ON i.id = v.institution_id
             WHERE v.firebase_uid = $1
-              AND v.student_membership_confirmed
               AND v.expires_at > CURRENT_TIMESTAMP
               AND v.microsoft_tenant_id = i.microsoft_tenant_id
               AND v.microsoft_student_group_id = i.microsoft_student_group_id

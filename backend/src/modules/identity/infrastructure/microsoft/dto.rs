@@ -17,8 +17,6 @@ pub(super) struct GraphUserResponse {
     pub display_name: Option<String>,
     /// E-mail informado pelo diretório; pode estar ausente ou nulo.
     pub mail: Option<String>,
-    /// Nome de entrada no diretório; não garante existência de caixa postal.
-    pub user_principal_name: Option<String>,
     /// Texto usado como curso por convenção da integração institucional.
     pub job_title: Option<String>,
 }

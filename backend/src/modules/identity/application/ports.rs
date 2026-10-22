@@ -29,10 +29,21 @@ pub struct InstitutionalProfile {
     pub name: Option<String>,
     /// Endereço de e-mail informado pelo diretório.
     pub mail: Option<String>,
-    /// Nome de entrada da conta; não é necessariamente um e-mail.
-    pub user_principal_name: Option<String>,
-    /// Curso informado pela instituição, quando disponível.
-    pub course_name: Option<String>,
+    /// Vínculo estudantil e, quando aplicável, curso informado pelo diretório.
+    pub affiliation: InstitutionalAffiliation,
+}
+
+/// Vínculo identificado durante a verificação institucional.
+#[derive(Debug, Clone)]
+pub enum InstitutionalAffiliation {
+    /// Participação confirmada no grupo institucional de estudantes.
+    Student {
+        /// Curso informado pelo diretório, ainda sem associação ao catálogo do CApp.
+        course_name: Option<String>,
+    },
+
+    /// Participação não confirmada no grupo institucional de estudantes.
+    NonStudent,
 }
 
 /// Consultas necessárias à verificação institucional.
@@ -70,13 +81,14 @@ pub trait InstitutionalDirectory: Send + Sync {
     async fn get_profile(
         &self,
         access_token: &str,
+        is_student: bool,
     ) -> Result<InstitutionalProfile, AuthenticationError>;
 
     /// Confirma participação no grupo institucional selecionado pelo serviço.
     ///
     /// # Parâmetros
     ///
-    /// - `access_token`: credencial do usuário cujo perfil já foi confrontado.
+    /// - `access_token`: credencial do usuário cujo perfil será confrontado pelo serviço.
     /// - `student_group_id`: grupo configurado para o tenant da instituição.
     ///
     /// # Retorno
@@ -158,7 +170,7 @@ pub trait InstitutionRepository {
 /// Persistência das evidências de elegibilidade institucional.
 #[async_trait::async_trait]
 pub trait InstitutionalVerificationRepository: Send + Sync {
-    /// Busca a evidência positiva reutilizável para um UID Firebase.
+    /// Busca a evidência reutilizável para um UID Firebase, estudante ou não.
     ///
     /// # Parâmetros
     ///
@@ -167,9 +179,9 @@ pub trait InstitutionalVerificationRepository: Send + Sync {
     ///
     /// # Retorno
     ///
-    /// `Some` somente se a participação foi confirmada, o prazo é posterior ao instante
-    /// da consulta e tenant/grupo ainda correspondem à configuração institucional.
-    /// Retorna `None` para ausência, resposta negativa, expiração ou configuração
+    /// `Some` se o prazo é posterior ao instante da consulta e tenant/grupo ainda
+    /// correspondem à configuração institucional. Participação estudantil negativa
+    /// não impede a autenticação. Retorna `None` para ausência, expiração ou configuração
     /// alterada. Não renova o prazo e não consulta o Graph. O serviço ainda deve
     /// comparar o objeto Microsoft do registro com o token atual.
     ///

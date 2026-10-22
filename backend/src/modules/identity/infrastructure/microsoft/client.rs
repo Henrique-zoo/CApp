@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::modules::identity::{
     application::{
         error::AuthenticationError,
-        ports::{InstitutionalDirectory, InstitutionalProfile},
+        ports::{InstitutionalAffiliation, InstitutionalDirectory, InstitutionalProfile},
     },
     infrastructure::microsoft::dto::{
         GraphCheckMemberGroupsRequest, GraphCheckMemberGroupsResponse, GraphOrganizationsResponse,
@@ -24,6 +24,8 @@ use crate::modules::identity::{
 pub struct MicrosoftGraphClient {
     /// Cliente HTTP reutilizável; deve ser configurado para recusar redirecionamentos.
     http: Client,
+    /// Origem fixa em produção; substituída por Wiremock apenas nos testes.
+    base_url: String,
 }
 
 impl MicrosoftGraphClient {
@@ -50,7 +52,16 @@ impl MicrosoftGraphClient {
     /// # Ok::<(), reqwest::Error>(())
     /// ```
     pub fn new(http: Client) -> Self {
-        Self { http }
+        Self {
+            http,
+            base_url: "https://graph.microsoft.com/v1.0".to_owned(),
+        }
+    }
+
+    /// Usa uma origem local de teste sem alterar o construtor público.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn new_with_base_url(http: Client, base_url: String) -> Self {
+        Self { http, base_url }
     }
 
     /// Executa uma requisição interna com Bearer e timeout de cinco segundos.
@@ -116,7 +127,7 @@ impl InstitutionalDirectory for MicrosoftGraphClient {
     async fn get_tenant_id(&self, access_token: &str) -> Result<Uuid, AuthenticationError> {
         let request = self
             .http
-            .get("https://graph.microsoft.com/v1.0/organization")
+            .get(format!("{}/organization", self.base_url))
             .query(&[("$select", "id")]);
         let [organization] = self
             .send_json::<GraphOrganizationsResponse>(request, access_token)
@@ -126,11 +137,12 @@ impl InstitutionalDirectory for MicrosoftGraphClient {
         Ok(organization.id)
     }
 
-    /// Consulta `/me` selecionando ID, nome, e-mail, UPN e `jobTitle`.
+    /// Consulta `/me` selecionando ID, nome, e-mail e `jobTitle`.
     ///
-    /// Converte os campos para `InstitutionalProfile` sem persistência. `jobTitle`
-    /// vazio ou composto apenas por espaços resulta em `course_name = None`; outros
+    /// Converte os campos para `InstitutionalProfile` sem persistência. Para estudantes,
+    /// `jobTitle` vazio ou composto apenas por espaços resulta em `course_name = None`; outros
     /// valores são preservados, sem normalização ou associação a um curso local.
+    /// Não estudantes recebem `NonStudent`, sem interpretar cargos como cursos.
     /// A comparação do ID com o vínculo Firebase cabe ao serviço.
     ///
     /// # Erros
@@ -139,11 +151,12 @@ impl InstitutionalDirectory for MicrosoftGraphClient {
     async fn get_profile(
         &self,
         access_token: &str,
+        is_student: bool,
     ) -> Result<InstitutionalProfile, AuthenticationError> {
         let request = self
             .http
-            .get("https://graph.microsoft.com/v1.0/me")
-            .query(&[("$select", "id,displayName,mail,userPrincipalName,jobTitle")]);
+            .get(format!("{}/me", self.base_url))
+            .query(&[("$select", "id,displayName,mail,jobTitle")]);
         let user = self
             .send_json::<GraphUserResponse>(request, access_token)
             .await?;
@@ -152,8 +165,13 @@ impl InstitutionalDirectory for MicrosoftGraphClient {
             id: user.id,
             name: user.display_name,
             mail: user.mail,
-            user_principal_name: user.user_principal_name,
-            course_name: user.job_title.filter(|value| !value.trim().is_empty()),
+            affiliation: if is_student {
+                InstitutionalAffiliation::Student {
+                    course_name: user.job_title.filter(|value| !value.trim().is_empty()),
+                }
+            } else {
+                InstitutionalAffiliation::NonStudent
+            },
         })
     }
 
@@ -177,7 +195,7 @@ impl InstitutionalDirectory for MicrosoftGraphClient {
 
         let request = self
             .http
-            .post("https://graph.microsoft.com/v1.0/me/checkMemberGroups")
+            .post(format!("{}/me/checkMemberGroups", self.base_url))
             .json(&body);
 
         let response = self
@@ -187,3 +205,7 @@ impl InstitutionalDirectory for MicrosoftGraphClient {
         Ok(response.value.contains(&student_group_id))
     }
 }
+
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;

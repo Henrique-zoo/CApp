@@ -2,7 +2,7 @@
 //!
 //! [`verify_institutional_identity`] consulta os provedores e registra o resultado.
 //! [`authenticate_institutional_request`] valida Firebase e reutiliza uma evidência
-//! positiva vigente, sem chamar o Graph. As funções não conhecem HTTP, `AppState`,
+//! vigente, estudantil ou não, sem chamar o Graph. As funções não conhecem HTTP, `AppState`,
 //! pool SQLx ou DTOs da API; os adaptadores implementam as traits recebidas.
 //!
 //! O TTL da evidência é independente do prazo do Firebase ID token e do cache de
@@ -39,7 +39,7 @@ pub struct AuthenticatedIdentity {
     pub institution_id: Uuid,
 }
 
-/// Resultado público do caso de uso após persistir uma confirmação positiva.
+/// Resultado público após persistir a verificação de um estudante ou não estudante.
 ///
 /// O perfil vem do Graph e a validade é a mesma atribuída à evidência enviada ao
 /// repositório. A camada HTTP converte este tipo para seu próprio DTO. Não contém
@@ -67,14 +67,15 @@ pub struct InstitutionalVerificationResult {
 ///
 /// # Processamento e persistência
 ///
-/// Primeiro valida Firebase, interpreta o objeto Microsoft vinculado e confronta-o
-/// com o perfil do Graph. Consulta então o tenant, localiza a instituição e verifica
-/// o grupo configurado. Nome, e-mail e curso ausentes não impedem a verificação;
+/// Primeiro valida Firebase e interpreta o objeto Microsoft vinculado. Consulta
+/// tenant, instituição e grupo, obtém o perfil com o vínculo correspondente e
+/// confronta seu ID com o vínculo Firebase antes de persistir a evidência.
+/// Nome, e-mail e curso ausentes não impedem a verificação;
 /// `institution.status` não é usado como regra de acesso.
 ///
 /// O prazo de 24 horas começa antes das consultas ao diretório. Somente respostas
 /// conclusivas do grupo são persistidas. Uma negativa substitui a evidência anterior
-/// se for mais recente e retorna erro de vínculo; falhas de comunicação preservam
+/// se for mais recente e retorna um perfil não estudante; falhas de comunicação preservam
 /// o registro existente sem estender sua validade. A ordem de atualização usa
 /// `checked_at`; resultados concorrentes mais antigos não sobrescrevem os recentes.
 /// Não há transação distribuída entre o Graph e o PostgreSQL.
@@ -89,8 +90,7 @@ pub struct InstitutionalVerificationResult {
 ///
 /// - Credencial inválida/expirada, objeto vinculado ausente ou identidades divergentes.
 /// - `UnknownInstitution` quando o tenant não pertence ao cadastro.
-/// - `StudentMembershipRequired` após persistir uma resposta negativa conclusiva.
-/// - `InstitutionalVerificationRequired` se uma confirmação positiva não substituiu
+/// - `InstitutionalVerificationRequired` se a verificação não substituiu
 ///   um registro com início igual ou posterior.
 /// - `ProviderUnavailable` para falhas do diretório, inclusive ID de perfil inválido.
 /// - `Internal` para falha de persistência; nesse caso não há resposta de sucesso.
@@ -138,14 +138,6 @@ pub async fn verify_institutional_identity(
     // de validade por atrasos na comunicação ou na persistência.
     let checked_at = Utc::now();
 
-    let profile = directory.get_profile(microsoft_token).await?;
-    let actual_id =
-        Uuid::parse_str(&profile.id).map_err(|_| AuthenticationError::ProviderUnavailable)?;
-
-    if actual_id != expected_id {
-        return Err(AuthenticationError::IdentityMismatch);
-    }
-
     let tenant_id = directory.get_tenant_id(microsoft_token).await?;
 
     let institution = repositories
@@ -153,9 +145,17 @@ pub async fn verify_institutional_identity(
         .await?
         .ok_or(AuthenticationError::UnknownInstitution)?;
 
-    let confirmed = directory
+    let is_student = directory
         .is_student_member(microsoft_token, institution.microsoft_student_group_id)
         .await?;
+
+    let profile = directory.get_profile(microsoft_token, is_student).await?;
+    let actual_id =
+        Uuid::parse_str(&profile.id).map_err(|_| AuthenticationError::ProviderUnavailable)?;
+
+    if actual_id != expected_id {
+        return Err(AuthenticationError::IdentityMismatch);
+    }
 
     let verification = InstitutionalVerification {
         firebase_uid: identity.firebase_uid,
@@ -163,20 +163,14 @@ pub async fn verify_institutional_identity(
         institution_id: institution.id,
         microsoft_tenant_id: tenant_id,
         microsoft_student_group_id: institution.microsoft_student_group_id,
-        student_membership_confirmed: confirmed,
+        student_membership_confirmed: is_student,
         checked_at,
         expires_at: checked_at + Duration::hours(VERIFICATION_TTL_HOURS),
     };
 
     // Uma resposta negativa conclusiva também precisa substituir uma
-    // confirmação anterior, para impedir sua reutilização.
+    // confirmação estudantil anterior, atualizando o vínculo registrado.
     let saved = repositories.save(&verification).await?;
-
-    if !confirmed {
-        return Err(AuthenticationError::StudentMembershipRequired {
-            institution_name: institution.name,
-        });
-    }
 
     if !saved {
         return Err(AuthenticationError::InstitutionalVerificationRequired);
@@ -193,12 +187,12 @@ pub async fn verify_institutional_identity(
 /// # Parâmetros
 ///
 /// - `verifier`: validação Firebase; pode atualizar as chaves públicas se necessário.
-/// - `repository`: consulta da evidência positiva válida para o UID autenticado.
+/// - `repository`: consulta da evidência vigente para o UID autenticado.
 /// - `firebase_token`: ID token sem prefixo HTTP. Não recebe access token Microsoft.
 ///
 /// # Retorno
 ///
-/// UID Firebase, objeto Microsoft e instituição autorizados para a requisição.
+/// UID Firebase e instituição autenticados para a requisição.
 /// Confronta novamente o objeto vinculado e verifica a expiração após a consulta,
 /// sem atualizar o registro ou prorrogar seu prazo. Não consulta o Graph nem cria
 /// usuário interno. A identidade retornada não concede permissões administrativas.
@@ -264,3 +258,5 @@ fn microsoft_object_id(identity: &VerifiedIdentity) -> Result<Uuid, Authenticati
         .ok_or(AuthenticationError::InvalidMicrosoftId)
 }
 
+#[cfg(test)]
+mod tests;

@@ -30,3 +30,8 @@ pub mod config;
 pub mod infrastructure;
 pub mod modules;
 pub mod shared;
+
+/// Suporte opt-in aos testes de integração com provedores locais.
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub mod test_support;

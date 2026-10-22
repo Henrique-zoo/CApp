@@ -37,3 +37,6 @@ pub fn router() -> Router<AppState> {
         post(handlers::verify_institutional),
     )
 }
+
+#[cfg(test)]
+mod tests;

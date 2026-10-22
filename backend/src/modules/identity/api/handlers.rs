@@ -38,7 +38,7 @@ use crate::{
 ///
 /// # Retorno
 ///
-/// HTTP 200 com `InstitutionalVerificationResponse`, após confirmação positiva e
+/// HTTP 200 com `InstitutionalVerificationResponse`, após verificação de identidade e
 /// persistência. O prazo vem do serviço; o handler não cria sessão Firebase nem
 /// provisiona usuário. O tempo total da chamada ao serviço é limitado a 15 segundos.
 ///

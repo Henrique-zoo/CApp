@@ -9,7 +9,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::modules::identity::application::{
-    ports::InstitutionalProfile, services::authentication::InstitutionalVerificationResult,
+    ports::{InstitutionalAffiliation, InstitutionalProfile},
+    services::authentication::InstitutionalVerificationResult,
 };
 
 /// Corpo de `POST /auth/institutional/verify`.
@@ -35,8 +36,7 @@ pub(super) struct InstitutionalAuthRequest {
 ///     "microsoftObjectId": "00000000-0000-0000-0000-000000000001",
 ///     "name": "Estudante",
 ///     "email": null,
-///     "userPrincipalName": "estudante@example.edu",
-///     "courseName": null
+///     "affiliation": { "type": "student", "courseName": null }
 ///   },
 ///   "expiresAt": "2026-10-20T21:00:00Z"
 /// }
@@ -63,10 +63,32 @@ pub(super) struct InstitutionalIdentityResponse {
     pub name: Option<String>,
     /// E-mail informado pelo diretório.
     pub email: Option<String>,
-    /// Nome de entrada da conta institucional.
-    pub user_principal_name: Option<String>,
-    /// Curso informado pela instituição, quando disponível.
-    pub course_name: Option<String>,
+    /// Filiação à instituição e dados associados.
+    pub affiliation: InstitutionalAffiliationResponse,
+}
+
+/// Vínculo público com discriminador JSON `type`.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub(super) enum InstitutionalAffiliationResponse {
+    /// Estudante reconhecido pelo grupo institucional.
+    Student {
+        /// Curso externo opcional, ainda sem associação ao catálogo.
+        #[serde(rename = "courseName")]
+        course_name: Option<String>,
+    },
+    /// Usuário cuja participação no grupo estudantil não foi confirmada.
+    NonStudent,
+}
+
+impl From<InstitutionalAffiliation> for InstitutionalAffiliationResponse {
+    /// Converte o vínculo interno para o contrato JSON sem duplicar o curso.
+    fn from(affiliation: InstitutionalAffiliation) -> Self {
+        match affiliation {
+            InstitutionalAffiliation::Student { course_name } => Self::Student { course_name },
+            InstitutionalAffiliation::NonStudent => Self::NonStudent,
+        }
+    }
 }
 
 impl From<InstitutionalProfile> for InstitutionalIdentityResponse {
@@ -76,8 +98,7 @@ impl From<InstitutionalProfile> for InstitutionalIdentityResponse {
             microsoft_object_id: profile.id,
             name: profile.name,
             email: profile.mail,
-            user_principal_name: profile.user_principal_name,
-            course_name: profile.course_name,
+            affiliation: profile.affiliation.into(),
         }
     }
 }

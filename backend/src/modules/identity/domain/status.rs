@@ -14,3 +14,9 @@ pub enum CatalogStatus {
     /// Indisponível para novos usos, preservando os registros históricos.
     Inactive,
 }
+
+impl Default for CatalogStatus {
+    fn default() -> Self {
+        CatalogStatus::Active
+    }
+}

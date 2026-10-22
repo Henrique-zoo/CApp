@@ -105,6 +105,8 @@ type Keys = HashMap<String, Arc<DecodingKey>>;
 pub struct FirebaseTokenVerifier {
     /// Cliente HTTP utilizado para buscar as chaves públicas do Firebase.
     http: Client,
+    /// Endpoint público fixo em produção; testes podem usar um servidor local.
+    jwks_url: String,
     /// Regras de validação dos Firebase ID tokens.
     validation: Validation,
     /// Estado do cache; permite leitores concorrentes e escrita exclusiva.
@@ -252,6 +254,7 @@ impl FirebaseTokenVerifier {
 
         Ok(Self {
             http,
+            jwks_url: JWKS_URL.to_owned(),
             validation,
             cache: Arc::new(RwLock::new(KeyCache {
                 keys: HashMap::new(),
@@ -261,6 +264,18 @@ impl FirebaseTokenVerifier {
             })),
             refresh_lock: Arc::new(Mutex::new(())),
         })
+    }
+
+    /// Constrói um verificador com JWKS local exclusivamente para testes.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn new_with_endpoint(
+        project_id: String,
+        http: Client,
+        jwks_url: String,
+    ) -> anyhow::Result<Self> {
+        let mut verifier = Self::new(project_id, http)?;
+        verifier.jwks_url = jwks_url;
+        Ok(verifier)
     }
 
     /// Obtém uma chave pública com leituras concorrentes e atualização única.
@@ -354,7 +369,7 @@ impl FirebaseTokenVerifier {
     async fn fetch_keys(&self) -> Result<(Keys, Duration), AuthenticationError> {
         let response = self
             .http
-            .get(JWKS_URL)
+            .get(&self.jwks_url)
             .timeout(Duration::from_secs(5))
             .send()
             .await
@@ -528,3 +543,7 @@ fn provider_unavailable(error: impl Display) -> AuthenticationError {
 
     AuthenticationError::ProviderUnavailable
 }
+
+#[cfg(test)]
+#[path = "verifier_tests.rs"]
+mod tests;

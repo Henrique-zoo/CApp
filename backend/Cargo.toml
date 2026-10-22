@@ -3,6 +3,9 @@ name = "backend"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+test-support = []
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1.89"
@@ -11,7 +14,14 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "timeout"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "macros", "migrate"] }
+sqlx = { version = "0.8", features = [
+    "runtime-tokio",
+    "postgres",
+    "uuid",
+    "chrono",
+    "macros",
+    "migrate",
+] }
 jsonwebtoken = "9"
 argon2 = "0.5"
 dotenvy = "0.15"
@@ -22,7 +32,10 @@ thiserror = "2"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
 validator = { version = "0.19", features = ["derive"] }
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 
@@ -32,6 +45,8 @@ tower = "0.5"
 cucumber = "0.21"
 testcontainers = "0.28.0"
 futures = "0.3"
+mockall = "0.15"
+wiremock = "0.6"
 
 [[test]]
 name = "bdd"

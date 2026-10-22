@@ -1,7 +1,7 @@
 //! Autenticação HTTP com Firebase e confirmação institucional persistida.
 //!
 //! O parser Bearer é reutilizado pela rota de verificação. O extractor de identidade
-//! exige confirmação positiva vigente e deve ser usado pelos handlers protegidos,
+//! exige evidência vigente, inclusive de não estudantes, e pode proteger handlers,
 //! nunca pela operação que cria/renova a confirmação. Nenhuma rota atual exige o
 //! extractor; sua existência não instala proteção global no router.
 
