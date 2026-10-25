@@ -19,7 +19,7 @@ use crate::api::state::AppState;
 /// | Método e caminho | Comportamento |
 /// | --- | --- |
 /// | `GET /health` | Retorna HTTP 200 e `O servidor está saudável.` sem consultar dependências. |
-/// | `GET /ready` | Executa `SELECT 1 AS ok` no pool; retorna HTTP 200 no sucesso e HTTP 503 em erro ou timeout. |
+/// | `GET /ready` | Retorna HTTP 503 se o servidor estiver em drenagem de encerramento; caso contrário, executa `SELECT 1 AS ok` no pool retornando HTTP 200 no sucesso e HTTP 503 em erro ou timeout. |
 ///
 /// A prontidão limita a espera pela aquisição da conexão e execução da consulta
 /// a dois segundos. Sua resposta não contém corpo; falhas são registradas em
@@ -62,6 +62,13 @@ pub fn create_router() -> Router<AppState> {
         .route(
             "/ready",
             get(|State(state): State<AppState>| async move {
+                if state.is_shutting_down() {
+                    tracing::warn!(
+                        "Verificação de prontidão rejeitada: servidor em processo de encerramento."
+                    );
+                    return StatusCode::SERVICE_UNAVAILABLE;
+                }
+
                 let result = timeout(
                     Duration::from_secs(2),
                     sqlx::query("SELECT 1 AS ok").fetch_one(&state.pool),

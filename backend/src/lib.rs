@@ -2,20 +2,23 @@
 //!
 //! A biblioteca expõe o estado e o router utilizados tanto pelo servidor HTTP
 //! quanto pelos testes em memória. A inicialização do processo, a leitura de
-//! `DATABASE_URL` e a abertura do pool ficam no executável `backend`.
+//! `DATABASE_URL`, a aplicação de migrations e a abertura do pool ficam no executável `backend`.
 //!
 //! # Organização
 //!
-//! - [`api`]: composição das rotas e recursos compartilhados pelas requisições.
+//! - [`api`]: composição das rotas, recursos compartilhados e encerramento controlado.
 //! - [`modules`]: estrutura dos módulos de negócio e suas camadas.
 //! - [`infrastructure`]: migrations compartilhadas e estrutura para integrações externas.
-//! - [`config`]: espaço reservado para centralizar configurações.
+//! - [`config`]: parâmetros operacionais, ciclo de vida e configurações externas da aplicação.
 //! - [`shared`]: espaço reservado para tipos comuns aos domínios.
 //!
-//! Neste estágio, a API implementa somente `/health` e `/ready`. Os módulos de
-//! negócio ainda não implementam os comportamentos descritos no README.
-//! Consulte [`api::router::create_router`] para compor a aplicação e
-//! [`api::state::AppState`] para fornecer o pool PostgreSQL.
+//! Neste estágio, a API implementa `/health` e `/ready` e suporte a encerramento
+//! gracioso com drenagem de conexões. Os módulos de negócio ainda não implementam
+//! os comportamentos descritos no README.
+//! Consulte [`api::router::create_router`] para compor a aplicação,
+//! [`api::state::AppState`] para fornecer o pool PostgreSQL e
+//! [`api::shutdown::serve_with_graceful_shutdown`] para executar o servidor com
+//! ciclo de vida gerenciado.
 //!
 //! # Testes
 //!
