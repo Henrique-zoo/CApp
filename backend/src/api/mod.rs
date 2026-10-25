@@ -5,6 +5,10 @@
 //! o mesmo router no servidor e nos testes em memória.
 //! [`error::ApiError`] define o envelope JSON usado nos erros de autenticação.
 
+//! [`shutdown`] fornece o tratamento de sinais e a execução do encerramento
+//! controlado com drenagem de conexões e liberação de recursos.
+
 pub mod error;
 pub mod router;
+pub mod shutdown;
 pub mod state;

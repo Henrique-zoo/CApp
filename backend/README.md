@@ -480,9 +480,9 @@ Exemplos:
 
 # Configuração
 
-Atualmente o executável lê `DATABASE_URL`, `FIREBASE_PROJECT_ID` e `RUST_LOG` diretamente do ambiente.
-O módulo `src/config/` está reservado para centralizar essa configuração no futuro.
-O backend não carrega arquivos `.env` automaticamente.
+O executável lê `DATABASE_URL`, `FIREBASE_PROJECT_ID` e `RUST_LOG` do ambiente.
+O módulo `src/config/` ([`ServerConfig`](src/config/mod.rs)) carrega os parâmetros
+`BACKEND_BIND_ADDRESS` e `SHUTDOWN_TIMEOUT_SECS`.
 
 O [Compose](../compose.yaml) utiliza os valores abaixo e permite personalizá-los
 no arquivo `.env` da raiz do monorepo. As variáveis já definidas no terminal têm
@@ -495,6 +495,8 @@ precedência sobre esse arquivo.
 | `POSTGRES_PASSWORD` | `capp` | Senha local do usuário inicial. |
 | `POSTGRES_PORT` | `5432` | Porta do PostgreSQL publicada no host. |
 | `BACKEND_PORT` | `3000` | Porta da API publicada no host pelo Compose. |
+| `BACKEND_BIND_ADDRESS` | `0.0.0.0:3000` | Endereço e porta para escuta HTTP do executável. |
+| `SHUTDOWN_TIMEOUT_SECS` | `15` | Prazo máximo em segundos para drenagem de conexões durante encerramento gracioso. |
 | `RUST_LOG` | `info` | Filtro dos eventos de diagnóstico do backend. |
 | `FIREBASE_PROJECT_ID` | Sem padrão válido | Obrigatória para o backend e os runners BDD; define audiência e emissor esperados nos ID tokens. O valor de `.env.example` é um placeholder. |
 
@@ -682,7 +684,12 @@ RUST_LOG=info cargo run --locked
 Substitua `seu-project-id` pelo projeto Firebase usado pelo aplicativo. Se personalizou usuário, senha, banco ou porta, ajuste a URL desse comando.
 O `.env` da raiz é lido pelo Compose; ele não exporta variáveis para o processo
 Cargo. Mantenha esse terminal aberto enquanto usar a API e utilize `Ctrl+C` para
-encerrar o backend.
+encerrar o backend de forma controlada. O processo captura `SIGINT` (Ctrl+C) e
+`SIGTERM`, interrompe o aceite de novas conexões, marca prontidão como indisponível
+(`503` em `/ready`), drena as requisições em voo com o deadline de `SHUTDOWN_TIMEOUT_SECS`
+(padrão 15s) e fecha ordenadamente o pool PostgreSQL antes de sair. Consulte
+[`docs/operacao/politica_de_encerramento_e_recuperacao.md`](../docs/operacao/politica_de_encerramento_e_recuperacao.md)
+para detalhes do protocolo.
 
 ## Verificar a comunicação
 

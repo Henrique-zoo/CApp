@@ -5,6 +5,11 @@
 //! Firebase; não contêm identidade ou tokens de uma requisição específica.
 //! Nos testes, o adaptador PostgreSQL usa o banco associado ao cenário.
 
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 use crate::{
     infrastructure::database::PgDatabase,
     modules::identity::infrastructure::{
@@ -51,6 +56,7 @@ impl Clients {
 /// Firebase. Não cria um pool por requisição. A configuração e o encerramento
 /// dos recursos cabem ao chamador; fechar o pool original afeta seus clones.
 /// As identidades autenticadas pertencem às requisições, não a este estado.
+/// Os clones também compartilham o indicador atômico de encerramento.
 #[derive(Clone)]
 pub struct AppState {
     /// Adaptador PostgreSQL que implementa os contratos de repositório.
@@ -61,6 +67,9 @@ pub struct AppState {
 
     /// Clientes externos compartilhados, sem credenciais de usuários armazenadas.
     pub clients: Clients,
+
+    /// Indicador atômico de que o processo de encerramento gracioso foi iniciado.
+    is_shutting_down: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -107,7 +116,10 @@ impl AppState {
     ///     PgDatabase::new(pool.clone()),
     ///     Clients::new(firebase, microsoft),
     /// );
-    /// let _another_handle = state.clone();
+    /// let another_handle = state.clone();
+    /// assert!(!state.is_shutting_down());
+    /// state.mark_shutting_down();
+    /// assert!(another_handle.is_shutting_down());
     /// pool.close().await; // Fecha o pool compartilhado com os dois estados.
     /// assert!(pool.is_closed());
     /// # Ok(())
@@ -117,6 +129,26 @@ impl AppState {
         Self {
             pg_database,
             clients,
+            is_shutting_down: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Informa se o servidor iniciou o encerramento gracioso e está drenando requisições.
+    ///
+    /// Quando `true`, indica aos handlers de prontidão (como `/ready`) que a aplicação
+    /// não deve aceitar novas requisições de balanceadores de carga ou orquestradores.
+    ///
+    /// # Retorno
+    ///
+    /// `true` se [`AppState::mark_shutting_down`] já tiver sido invocado; `false` caso contrário.
+    pub fn is_shutting_down(&self) -> bool {
+        self.is_shutting_down.load(Ordering::Relaxed)
+    }
+
+    /// Sinaliza que o processo de encerramento gracioso foi iniciado.
+    ///
+    /// Essa alteração é visível imediatamente para todas as instâncias e clones deste [`AppState`].
+    pub fn mark_shutting_down(&self) {
+        self.is_shutting_down.store(true, Ordering::Relaxed);
     }
 }
