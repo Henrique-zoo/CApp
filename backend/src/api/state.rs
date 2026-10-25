@@ -3,7 +3,17 @@
 //! O pool é criado por quem inicializa a aplicação; este módulo somente o
 //! transporta entre os handlers. Nos testes, o pool pertence ao banco do cenário.
 
+use std::sync::Arc;
+
 use sqlx::PgPool;
+
+use crate::modules::news::{
+    application::{
+        ports::{NewsAuthorizationPort, NewsRepositoryPort},
+        services::NewsApplicationService,
+    },
+    infrastructure::{AllowAllNewsAuthorization, PgNewsRepository},
+};
 
 /// Estado compartilhado entre as requisições atendidas pelo router.
 ///
@@ -17,10 +27,16 @@ pub struct AppState {
     /// Pode ser acessado diretamente para executar consultas ou iniciar transações.
     /// A criação deste estado não verifica a conectividade do pool.
     pub pool: PgPool,
+
+    /// Repositório para persistência de artigos de notícias.
+    pub news_repository: Arc<dyn NewsRepositoryPort>,
+
+    /// Provedor de autorização institucional para operações de notícias.
+    pub news_authorization: Arc<dyn NewsAuthorizationPort>,
 }
 
 impl AppState {
-    /// Constrói o estado assumindo a posse de um handle do pool.
+    /// Constrói o estado assumindo a posse de um handle do pool e adaptadores padrão.
     ///
     /// A operação não realiza consultas, não abre conexões nem aplica migrations.
     /// O chamador pode fornecer um pool já conectado ou um pool de conexão tardia;
@@ -48,6 +64,40 @@ impl AppState {
     /// # }
     /// ```
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        let news_repo = Arc::new(PgNewsRepository::new(pool.clone()));
+        let news_auth = Arc::new(AllowAllNewsAuthorization);
+
+        Self {
+            pool,
+            news_repository: news_repo,
+            news_authorization: news_auth,
+        }
+    }
+
+    /// Substitui o repositório de notícias por uma implementação personalizada.
+    #[must_use]
+    pub fn with_news_repository(mut self, repository: Arc<dyn NewsRepositoryPort>) -> Self {
+        self.news_repository = repository;
+        self
+    }
+
+    /// Substitui o autorizador de notícias por uma implementação personalizada.
+    #[must_use]
+    pub fn with_news_authorization(
+        mut self,
+        authorization: Arc<dyn NewsAuthorizationPort>,
+    ) -> Self {
+        self.news_authorization = authorization;
+        self
+    }
+
+    /// Fornece o serviço de aplicação de notícias pronto para uso pelos handlers.
+    pub fn news_service(
+        &self,
+    ) -> NewsApplicationService<dyn NewsRepositoryPort, dyn NewsAuthorizationPort> {
+        NewsApplicationService::new(
+            Arc::clone(&self.news_repository),
+            Arc::clone(&self.news_authorization),
+        )
     }
 }
