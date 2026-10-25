@@ -1,8 +1,8 @@
-//! Rotas globais de saúde e prontidão do backend.
+//! Rotas globais de saúde, prontidão e módulos de negócio do backend.
 //!
 //! A composição é independente do transporte: o chamador pode servir o router
 //! com Axum ou enviar requisições em memória. Nenhuma conexão é aberta ao
-//! construir o router; o acesso ao PostgreSQL ocorre no handler de prontidão.
+//! construir o router; o acesso ao PostgreSQL ocorre nos handlers correspondentes.
 
 use std::time::Duration;
 
@@ -10,9 +10,9 @@ use axum::{Router, extract::State, routing::get};
 use reqwest::StatusCode;
 use tokio::time::timeout;
 
-use crate::api::state::AppState;
+use crate::{api::state::AppState, modules::news::api::news_routes};
 
-/// Monta as rotas globais, ainda dependentes de [`AppState`].
+/// Monta as rotas globais da aplicação, dependentes de [`AppState`].
 ///
 /// # Rotas
 ///
@@ -20,6 +20,10 @@ use crate::api::state::AppState;
 /// | --- | --- |
 /// | `GET /health` | Retorna HTTP 200 e `O servidor está saudável.` sem consultar dependências. |
 /// | `GET /ready` | Executa `SELECT 1 AS ok` no pool; retorna HTTP 200 no sucesso e HTTP 503 em erro ou timeout. |
+/// | `PATCH /news/{id}/publish` | Homologa e publica um artigo de notícia do Centro Acadêmico. |
+/// | `PATCH /news/{id}/archive` | Arquiva um artigo de notícia do Centro Acadêmico. |
+/// | `PATCH /news/{id}/submit-for-review` | Submete um rascunho de notícia para homologação. |
+/// | `GET /news/{id}` | Recupera os detalhes de um artigo de notícia existente. |
 ///
 /// A prontidão limita a espera pela aquisição da conexão e execução da consulta
 /// a dois segundos. Sua resposta não contém corpo; falhas são registradas em
@@ -81,4 +85,5 @@ pub fn create_router() -> Router<AppState> {
                 }
             }),
         )
+        .merge(news_routes())
 }
