@@ -6,6 +6,7 @@
 //! As camadas [`api`], [`application`], [`domain`] e [`infrastructure`] ainda
 //! são espaços reservados; este módulo não implementa esses comportamentos.
 
+/// Camada de API HTTP e extractors de identidade.
 pub mod api;
 pub mod application;
 pub mod domain;
