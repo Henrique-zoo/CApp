@@ -1,8 +1,8 @@
 //! Steps da especificação de administração dos integrantes da gestão (#62).
 //!
-//! Implementa o `Contexto` e as duas primeiras regras de
+//! Implementa o `Contexto` e as três primeiras regras de
 //! `features/gestao_ca/integrantes_da_gestao.feature` sobre o banco PostgreSQL
-//! isolado fornecido por [`AppWorld`]. Os cenários das regras seguintes
+//! isolado fornecido por [`AppWorld`]. Os cenários da quarta regra
 //! permanecem sinalizados com [`pending_step`] até sua ativação.
 
 use cucumber::{given, then, when};
@@ -364,6 +364,46 @@ async fn attempt_member_assignment(
     Ok(())
 }
 
+/// Verifica se o cargo informado possui a permissão de administrar integrantes da gestão.
+async fn role_has_manage_permission(pool: &PgPool, role_id: i64) -> bool {
+    sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1
+            FROM ca_role_permission
+            WHERE ca_role_id = $1 AND permission = $2
+        )",
+    )
+    .bind(role_id)
+    .bind(MANAGE_MEMBERS_PERMISSION)
+    .fetch_one(pool)
+    .await
+    .expect("deve verificar permissão administrativa do cargo")
+}
+
+/// Verifica se existe outro integrante no CA (além do `excluded_user_id`) com permissão administrativa.
+async fn has_other_member_with_manage_permission(
+    pool: &PgPool,
+    ca_id: i64,
+    excluded_user_id: i64,
+) -> bool {
+    sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1
+            FROM ca_management_member m
+            JOIN ca_role_permission p ON p.ca_role_id = m.ca_role_id
+            WHERE m.ca_id = $1
+              AND m.user_id <> $2
+              AND p.permission = $3
+        )",
+    )
+    .bind(ca_id)
+    .bind(excluded_user_id)
+    .bind(MANAGE_MEMBERS_PERMISSION)
+    .fetch_one(pool)
+    .await
+    .expect("deve verificar se há outro gestor na gestão do CA")
+}
+
 /// Valida e executa (ou recusa) a tentativa de alterar o cargo de um integrante no CA.
 async fn attempt_member_role_change(
     pool: &PgPool,
@@ -380,8 +420,8 @@ async fn attempt_member_role_change(
         return Err("permission_denied");
     }
 
-    let current_membership: Option<(i64, String)> = sqlx::query_as(
-        "SELECT m.user_id, r.name
+    let current_membership: Option<(i64, i64, String)> = sqlx::query_as(
+        "SELECT m.user_id, m.ca_role_id, r.name
          FROM ca_management_member m
          JOIN user_profile u ON u.id = m.user_id
          JOIN ca_role r ON r.id = m.ca_role_id
@@ -393,7 +433,7 @@ async fn attempt_member_role_change(
     .await
     .expect("deve consultar vínculo atual do integrante no CA");
 
-    let Some((user_id, current_role_name)) = current_membership else {
+    let Some((user_id, current_role_id, current_role_name)) = current_membership else {
         record_operation_outcome(pool, "rejected", Some("not_in_management")).await;
         return Err("not_in_management");
     };
@@ -413,6 +453,14 @@ async fn attempt_member_role_change(
     if current_role_name == new_role_name {
         record_operation_outcome(pool, "rejected", Some("already_holds_role")).await;
         return Err("already_holds_role");
+    }
+
+    if role_has_manage_permission(pool, current_role_id).await
+        && !role_has_manage_permission(pool, new_role_id).await
+        && !has_other_member_with_manage_permission(pool, ca_id, user_id).await
+    {
+        record_operation_outcome(pool, "rejected", Some("last_manager_protection")).await;
+        return Err("last_manager_protection");
     }
 
     sqlx::query(
@@ -439,6 +487,69 @@ async fn attempt_member_role_change(
     .execute(pool)
     .await
     .expect("deve registrar a alteração de cargo no histórico administrativo");
+
+    record_operation_outcome(pool, "accepted", None).await;
+    Ok(())
+}
+
+/// Valida e executa (ou recusa) a tentativa de remover um integrante da gestão do CA.
+async fn attempt_member_removal(
+    pool: &PgPool,
+    actor_email: &str,
+    student_email: &str,
+    ca_identifier: &str,
+) -> Result<(), &'static str> {
+    let ca_id = find_ca_id(pool, ca_identifier).await;
+    snapshot_ca_state(pool, ca_id).await;
+
+    if !is_actor_authorized_in_ca(pool, ca_id, actor_email).await {
+        record_operation_outcome(pool, "rejected", Some("permission_denied")).await;
+        return Err("permission_denied");
+    }
+
+    let current_membership: Option<(i64, i64, String)> = sqlx::query_as(
+        "SELECT m.user_id, m.ca_role_id, r.name
+         FROM ca_management_member m
+         JOIN user_profile u ON u.id = m.user_id
+         JOIN ca_role r ON r.id = m.ca_role_id
+         WHERE m.ca_id = $1 AND u.email = $2",
+    )
+    .bind(ca_id)
+    .bind(student_email)
+    .fetch_optional(pool)
+    .await
+    .expect("deve consultar vínculo atual do integrante no CA");
+
+    let Some((user_id, current_role_id, current_role_name)) = current_membership else {
+        record_operation_outcome(pool, "rejected", Some("not_in_management")).await;
+        return Err("not_in_management");
+    };
+
+    if role_has_manage_permission(pool, current_role_id).await
+        && !has_other_member_with_manage_permission(pool, ca_id, user_id).await
+    {
+        record_operation_outcome(pool, "rejected", Some("last_manager_protection")).await;
+        return Err("last_manager_protection");
+    }
+
+    sqlx::query("DELETE FROM ca_management_member WHERE ca_id = $1 AND user_id = $2")
+        .bind(ca_id)
+        .bind(user_id)
+        .execute(pool)
+        .await
+        .expect("deve remover o integrante da gestão do CA");
+
+    sqlx::query(
+        "INSERT INTO ca_management_history (ca_id, member_email, operation, previous_role, resulting_role, manager_email)
+         VALUES ($1, $2, 'remoção', $3, NULL, $4)",
+    )
+    .bind(ca_id)
+    .bind(student_email)
+    .bind(&current_role_name)
+    .bind(actor_email)
+    .execute(pool)
+    .await
+    .expect("deve registrar a remoção no histórico administrativo");
 
     record_operation_outcome(pool, "accepted", None).await;
     Ok(())
@@ -630,15 +741,56 @@ async fn student_has_no_management_role_in_ca(
         .expect("deve garantir que o estudante não tenha cargo de gestão no CA");
 }
 
-/// Pendente: que {string} é o único integrante de {string} com a permissão de {string}.
+/// Garante que o estudante seja o único integrante do CA com a permissão informada.
 #[given(expr = "que {string} é o único integrante de {string} com a permissão de {string}")]
 async fn student_is_sole_member_with_permission(
-    _world: &mut AppWorld,
-    _student_email: String,
-    _ca: String,
-    _permission: String,
+    world: &mut AppWorld,
+    student_email: String,
+    ca: String,
+    permission: String,
 ) {
-    pending_step("que {string} é o único integrante de {string} com a permissão de {string}");
+    let pool = world.database_pool();
+    ensure_management_schema(pool).await;
+
+    let ca_id = find_ca_id(pool, &ca).await;
+    let user_id = ensure_user_profile(pool, &student_email).await;
+
+    sqlx::query(
+        "DELETE FROM ca_management_member
+         WHERE ca_id = $1
+           AND user_id <> $2
+           AND ca_role_id IN (
+               SELECT ca_role_id
+               FROM ca_role_permission
+               WHERE permission = $3
+           )",
+    )
+    .bind(ca_id)
+    .bind(user_id)
+    .bind(&permission)
+    .execute(pool)
+    .await
+    .expect("deve remover outros integrantes com a mesma permissão no CA");
+
+    let sole_member_has_permission: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1
+            FROM ca_management_member m
+            JOIN ca_role_permission p ON p.ca_role_id = m.ca_role_id
+            WHERE m.ca_id = $1 AND m.user_id = $2 AND p.permission = $3
+        )",
+    )
+    .bind(ca_id)
+    .bind(user_id)
+    .bind(&permission)
+    .fetch_one(pool)
+    .await
+    .expect("deve verificar se o integrante possui a permissão esperada");
+
+    assert!(
+        sole_member_has_permission,
+        "o integrante {student_email} deve possuir a permissão '{permission}' em {ca}",
+    );
 }
 
 // ============================================================================
@@ -715,27 +867,31 @@ async fn actor_attempts_to_change_member_role(
     let _ = attempt_member_role_change(pool, &actor_email, &student_email, &new_role, &ca).await;
 }
 
-/// Pendente: o gestor {string} remove {string} da gestão de {string}.
+/// Executa a remoção de um integrante da gestão por um gestor autorizado.
 #[when(expr = "o gestor {string} remove {string} da gestão de {string}")]
 async fn manager_removes_member_from_management(
-    _world: &mut AppWorld,
-    _manager_email: String,
-    _student_email: String,
-    _ca: String,
+    world: &mut AppWorld,
+    manager_email: String,
+    student_email: String,
+    ca: String,
 ) {
-    pending_step("o gestor {string} remove {string} da gestão de {string}");
+    let pool = world.database_pool();
+    attempt_member_removal(pool, &manager_email, &student_email, &ca)
+        .await
+        .expect("a remoção de integrante por um gestor autorizado deve ser concluída com sucesso");
 }
 
-/// Pendente: tentativa de remover um integrante da gestão de um CA.
+/// Executa uma tentativa de remoção de integrante sujeita às validações de permissão e domínio.
 #[when(expr = "o gestor {string} tenta remover {string} da gestão de {string}")]
 #[when(expr = "{string} tenta remover {string} da gestão de {string}")]
 async fn actor_attempts_to_remove_member_from_management(
-    _world: &mut AppWorld,
-    _actor_email: String,
-    _student_email: String,
-    _ca: String,
+    world: &mut AppWorld,
+    actor_email: String,
+    student_email: String,
+    ca: String,
 ) {
-    pending_step("o gestor {string} tenta remover {string} da gestão de {string}");
+    let pool = world.database_pool();
+    let _ = attempt_member_removal(pool, &actor_email, &student_email, &ca).await;
 }
 
 // ============================================================================
@@ -847,10 +1003,10 @@ async fn student_remains_outside_management(
     );
 }
 
-/// Pendente: {string} deixa de integrar a gestão de {string}.
+/// Verifica que o estudante deixou de integrar a gestão do CA.
 #[then(expr = "{string} deixa de integrar a gestão de {string}")]
-async fn student_leaves_management(_world: &mut AppWorld, _student_email: String, _ca: String) {
-    pending_step("{string} deixa de integrar a gestão de {string}");
+async fn student_leaves_management(world: &mut AppWorld, student_email: String, ca: String) {
+    student_remains_outside_management(world, student_email, ca).await;
 }
 
 /// Verifica que a composição da gestão do CA não sofreu alterações após a tentativa.
@@ -936,15 +1092,55 @@ async fn student_receives_role_permissions(
     );
 }
 
-/// Pendente: {string} deixa de possuir as permissões do cargo {string} em {string}.
+/// Verifica que o estudante deixou de possuir as permissões associadas ao cargo no CA.
 #[then(expr = "{string} deixa de possuir as permissões do cargo {string} em {string}")]
 async fn student_loses_role_permissions(
-    _world: &mut AppWorld,
-    _student_email: String,
-    _role: String,
-    _ca: String,
+    world: &mut AppWorld,
+    student_email: String,
+    role: String,
+    ca: String,
 ) {
-    pending_step("{string} deixa de possuir as permissões do cargo {string} em {string}");
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let role_permissions: Vec<String> = sqlx::query_scalar(
+        "SELECT p.permission
+         FROM ca_role_permission p
+         JOIN ca_role r ON r.id = p.ca_role_id
+         WHERE r.ca_id = $1 AND r.name = $2
+         ORDER BY p.permission",
+    )
+    .bind(ca_id)
+    .bind(&role)
+    .fetch_all(pool)
+    .await
+    .expect("deve consultar as permissões configuradas no cargo");
+
+    assert!(
+        !role_permissions.is_empty(),
+        "o cargo {role} em {ca} deve possuir permissões configuradas",
+    );
+
+    let retained_permissions: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM ca_management_member m
+         JOIN user_profile u ON u.id = m.user_id
+         JOIN ca_role_permission p ON p.ca_role_id = m.ca_role_id
+         WHERE m.ca_id = $1
+           AND u.email = $2
+           AND p.permission = ANY($3)",
+    )
+    .bind(ca_id)
+    .bind(&student_email)
+    .bind(&role_permissions)
+    .fetch_one(pool)
+    .await
+    .expect("deve verificar se o estudante ainda detém permissões do cargo");
+
+    assert_eq!(
+        retained_permissions, 0,
+        "o estudante {student_email} não deveria manter permissões do cargo {role} em {ca}",
+    );
 }
 
 /// Verifica que o estudante possui a permissão específica indicada no CA.
@@ -1014,14 +1210,34 @@ async fn student_loses_specific_permission_in_ca(
     );
 }
 
-/// Pendente: {string} continua podendo acessar {string} como estudante.
+/// Verifica que o perfil do estudante permanece ativo e com acesso regular ao CA.
 #[then(expr = "{string} continua podendo acessar {string} como estudante")]
 async fn student_retains_regular_access_to_ca(
-    _world: &mut AppWorld,
-    _student_email: String,
-    _ca: String,
+    world: &mut AppWorld,
+    student_email: String,
+    ca: String,
 ) {
-    pending_step("{string} continua podendo acessar {string} como estudante");
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let profile_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM user_profile WHERE email = $1)")
+            .bind(&student_email)
+            .fetch_one(pool)
+            .await
+            .expect("deve verificar existência do perfil do estudante");
+
+    let ca_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM academic_center WHERE id = $1)")
+            .bind(ca_id)
+            .fetch_one(pool)
+            .await
+            .expect("deve verificar existência do Centro Acadêmico");
+
+    assert!(
+        profile_exists && ca_exists,
+        "o estudante {student_email} deve manter seu perfil ativo e o acesso regular a {ca}",
+    );
 }
 
 /// Verifica que a operação foi recusada por falta de permissão.
@@ -1072,14 +1288,14 @@ async fn operation_is_rejected_member_already_holds_role(world: &mut AppWorld) {
     assert_eq!(reason.as_deref(), Some("already_holds_role"));
 }
 
-/// Pendente: a operação é recusada informando que a gestão precisa manter ao menos um integrante com essa permissão.
+/// Verifica que a operação foi recusada para proteger o último administrador da gestão.
 #[then(
     "a operação é recusada informando que a gestão precisa manter ao menos um integrante com essa permissão"
 )]
-async fn operation_is_rejected_last_manager_protection(_world: &mut AppWorld) {
-    pending_step(
-        "a operação é recusada informando que a gestão precisa manter ao menos um integrante com essa permissão",
-    );
+async fn operation_is_rejected_last_manager_protection(world: &mut AppWorld) {
+    let (status, reason) = fetch_last_operation_outcome(world.database_pool()).await;
+    assert_eq!(status, "rejected");
+    assert_eq!(reason.as_deref(), Some("last_manager_protection"));
 }
 
 // ============================================================================

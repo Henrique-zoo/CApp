@@ -117,10 +117,9 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então a operação é recusada informando que o integrante já exerce esse cargo
       E nenhum novo registro é adicionado ao histórico administrativo de "CAER"
 
-  @pending_backend
   Regra: Um gestor autorizado pode remover integrantes, desde que a gestão continue administrável
 
-    @happy @backend @mobile
+    @happy @backend @mobile @isolated_database
     Cenário: Gestor remove um integrante da gestão
       Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
       Quando o gestor "231012345@aluno.unb.br" remove "241098765@aluno.unb.br" da gestão de "CAER"
@@ -128,7 +127,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       E "241098765@aluno.unb.br" deixa de possuir as permissões do cargo "Diretor de Comunicação" em "CAER"
       E "241098765@aluno.unb.br" continua podendo acessar "CAER" como estudante
 
-    @sad @backend @mobile
+    @sad @backend @mobile @isolated_database
     Cenário: Integrante sem permissão de administrar a gestão não pode remover integrantes
       Dado que o estudante "222033333@aluno.unb.br" exerce o cargo de "Diretor de Eventos" em "CAER"
       E o cargo "Diretor de Eventos" não possui a permissão de "Administrar integrantes da gestão"
@@ -137,14 +136,14 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então a operação é recusada por falta de permissão
       E "241098765@aluno.unb.br" permanece no cargo "Diretor de Comunicação" em "CAER"
 
-    @sad @backend @mobile
+    @sad @backend @mobile @isolated_database
     Cenário: O último integrante que administra a gestão não pode ser removido
       Dado que "231012345@aluno.unb.br" é o único integrante de "CAER" com a permissão de "Administrar integrantes da gestão"
       Quando o gestor "231012345@aluno.unb.br" tenta remover "231012345@aluno.unb.br" da gestão de "CAER"
       Então a operação é recusada informando que a gestão precisa manter ao menos um integrante com essa permissão
       E "231012345@aluno.unb.br" permanece no cargo "Presidente" em "CAER"
 
-    @sad @backend @mobile
+    @sad @backend @mobile @isolated_database
     Cenário: O último integrante que administra a gestão não pode ser movido para cargo sem essa permissão
       Dado que "231012345@aluno.unb.br" é o único integrante de "CAER" com a permissão de "Administrar integrantes da gestão"
       E o cargo "Diretor de Eventos" não possui a permissão de "Administrar integrantes da gestão"
@@ -152,7 +151,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então a operação é recusada informando que a gestão precisa manter ao menos um integrante com essa permissão
       E "231012345@aluno.unb.br" permanece no cargo "Presidente" em "CAER"
 
-    @happy @backend @mobile
+    @happy @backend @mobile @isolated_database
     Cenário: Gestor pode deixar a gestão quando outro integrante também a administra
       Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Presidente" em "CAER"
       Quando o gestor "231012345@aluno.unb.br" remove "231012345@aluno.unb.br" da gestão de "CAER"
