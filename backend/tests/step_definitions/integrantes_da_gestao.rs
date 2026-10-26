@@ -1,6 +1,6 @@
 //! Steps da especificação de administração dos integrantes da gestão (#62).
 //!
-//! Implementa o `Contexto` e todos os cenários da primeira regra de
+//! Implementa o `Contexto` e as duas primeiras regras de
 //! `features/gestao_ca/integrantes_da_gestao.feature` sobre o banco PostgreSQL
 //! isolado fornecido por [`AppWorld`]. Os cenários das regras seguintes
 //! permanecem sinalizados com [`pending_step`] até sua ativação.
@@ -109,6 +109,16 @@ async fn ensure_management_schema(pool: &PgPool) {
     .execute(pool)
     .await
     .expect("deve criar tabela bdd_composition_snapshot no banco do cenário");
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS bdd_history_snapshot (
+            ca_id BIGINT PRIMARY KEY,
+            history_count BIGINT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await
+    .expect("deve criar tabela bdd_history_snapshot no banco do cenário");
 }
 
 /// Extrai a sigla entre parênteses do nome do CA, ou usa o próprio identificador.
@@ -137,17 +147,27 @@ async fn find_ca_id(pool: &PgPool, ca_identifier: &str) -> i64 {
 
 /// Garante que o cargo exista no CA e retorna seu identificador.
 async fn ensure_role_in_ca(pool: &PgPool, ca_id: i64, role_name: &str) -> i64 {
+    if let Some(existing_id) =
+        sqlx::query_scalar::<_, i64>("SELECT id FROM ca_role WHERE ca_id = $1 AND name = $2")
+            .bind(ca_id)
+            .bind(role_name)
+            .fetch_optional(pool)
+            .await
+            .expect("deve consultar cargo existente no CA")
+    {
+        return existing_id;
+    }
+
     let role_id = sqlx::query_scalar::<_, i64>(
         "INSERT INTO ca_role (ca_id, name)
          VALUES ($1, $2)
-         ON CONFLICT (ca_id, name) DO UPDATE SET name = EXCLUDED.name
          RETURNING id",
     )
     .bind(ca_id)
     .bind(role_name)
     .fetch_one(pool)
     .await
-    .expect("deve registrar ou localizar o cargo no CA");
+    .expect("deve registrar o cargo no CA");
 
     let default_permission = match role_name {
         "Presidente" => MANAGE_MEMBERS_PERMISSION,
@@ -208,8 +228,8 @@ async fn fetch_last_operation_outcome(pool: &PgPool) -> (String, Option<String>)
     .expect("uma operação administrativa deve ter sido executada antes da verificação")
 }
 
-/// Salva um retrato da composição atual da gestão do CA antes de uma tentativa.
-async fn snapshot_ca_composition(pool: &PgPool, ca_id: i64) {
+/// Salva um retrato da composição e do histórico atual da gestão do CA antes de uma tentativa.
+async fn snapshot_ca_state(pool: &PgPool, ca_id: i64) {
     sqlx::query("DELETE FROM bdd_composition_snapshot WHERE ca_id = $1")
         .bind(ca_id)
         .execute(pool)
@@ -226,20 +246,21 @@ async fn snapshot_ca_composition(pool: &PgPool, ca_id: i64) {
     .execute(pool)
     .await
     .expect("deve capturar retrato da composição da gestão");
+
+    sqlx::query(
+        "INSERT INTO bdd_history_snapshot (ca_id, history_count)
+         VALUES ($1, (SELECT COUNT(*) FROM ca_management_history WHERE ca_id = $1))
+         ON CONFLICT (ca_id) DO UPDATE SET history_count = EXCLUDED.history_count",
+    )
+    .bind(ca_id)
+    .execute(pool)
+    .await
+    .expect("deve capturar retrato do histórico administrativo");
 }
 
-/// Valida e executa (ou recusa) a tentativa de vincular um usuário a um cargo no CA.
-async fn attempt_member_assignment(
-    pool: &PgPool,
-    actor_email: &str,
-    student_email: &str,
-    role_name: Option<&str>,
-    ca_identifier: &str,
-) -> Result<(), &'static str> {
-    let ca_id = find_ca_id(pool, ca_identifier).await;
-    snapshot_ca_composition(pool, ca_id).await;
-
-    let actor_authorized: bool = sqlx::query_scalar(
+/// Verifica se o ator possui a permissão de administrar integrantes no CA.
+async fn is_actor_authorized_in_ca(pool: &PgPool, ca_id: i64, actor_email: &str) -> bool {
+    sqlx::query_scalar(
         "SELECT EXISTS (
             SELECT 1
             FROM ca_management_member m
@@ -253,9 +274,21 @@ async fn attempt_member_assignment(
     .bind(MANAGE_MEMBERS_PERMISSION)
     .fetch_one(pool)
     .await
-    .expect("deve verificar permissão do ator no CA");
+    .expect("deve verificar permissão do ator no CA")
+}
 
-    if !actor_authorized {
+/// Valida e executa (ou recusa) a tentativa de vincular um usuário a um cargo no CA.
+async fn attempt_member_assignment(
+    pool: &PgPool,
+    actor_email: &str,
+    student_email: &str,
+    role_name: Option<&str>,
+    ca_identifier: &str,
+) -> Result<(), &'static str> {
+    let ca_id = find_ca_id(pool, ca_identifier).await;
+    snapshot_ca_state(pool, ca_id).await;
+
+    if !is_actor_authorized_in_ca(pool, ca_id, actor_email).await {
         record_operation_outcome(pool, "rejected", Some("permission_denied")).await;
         return Err("permission_denied");
     }
@@ -326,6 +359,86 @@ async fn attempt_member_assignment(
     .execute(pool)
     .await
     .expect("deve registrar a vinculação no histórico administrativo");
+
+    record_operation_outcome(pool, "accepted", None).await;
+    Ok(())
+}
+
+/// Valida e executa (ou recusa) a tentativa de alterar o cargo de um integrante no CA.
+async fn attempt_member_role_change(
+    pool: &PgPool,
+    actor_email: &str,
+    student_email: &str,
+    new_role_name: &str,
+    ca_identifier: &str,
+) -> Result<(), &'static str> {
+    let ca_id = find_ca_id(pool, ca_identifier).await;
+    snapshot_ca_state(pool, ca_id).await;
+
+    if !is_actor_authorized_in_ca(pool, ca_id, actor_email).await {
+        record_operation_outcome(pool, "rejected", Some("permission_denied")).await;
+        return Err("permission_denied");
+    }
+
+    let current_membership: Option<(i64, String)> = sqlx::query_as(
+        "SELECT m.user_id, r.name
+         FROM ca_management_member m
+         JOIN user_profile u ON u.id = m.user_id
+         JOIN ca_role r ON r.id = m.ca_role_id
+         WHERE m.ca_id = $1 AND u.email = $2",
+    )
+    .bind(ca_id)
+    .bind(student_email)
+    .fetch_optional(pool)
+    .await
+    .expect("deve consultar vínculo atual do integrante no CA");
+
+    let Some((user_id, current_role_name)) = current_membership else {
+        record_operation_outcome(pool, "rejected", Some("not_in_management")).await;
+        return Err("not_in_management");
+    };
+
+    let Some(new_role_id) =
+        sqlx::query_scalar::<_, i64>("SELECT id FROM ca_role WHERE ca_id = $1 AND name = $2")
+            .bind(ca_id)
+            .bind(new_role_name)
+            .fetch_optional(pool)
+            .await
+            .expect("deve consultar novo cargo no CA")
+    else {
+        record_operation_outcome(pool, "rejected", Some("role_not_found")).await;
+        return Err("role_not_found");
+    };
+
+    if current_role_name == new_role_name {
+        record_operation_outcome(pool, "rejected", Some("already_holds_role")).await;
+        return Err("already_holds_role");
+    }
+
+    sqlx::query(
+        "UPDATE ca_management_member
+         SET ca_role_id = $3
+         WHERE ca_id = $1 AND user_id = $2",
+    )
+    .bind(ca_id)
+    .bind(user_id)
+    .bind(new_role_id)
+    .execute(pool)
+    .await
+    .expect("deve atualizar o cargo do integrante na gestão");
+
+    sqlx::query(
+        "INSERT INTO ca_management_history (ca_id, member_email, operation, previous_role, resulting_role, manager_email)
+         VALUES ($1, $2, 'alteração', $3, $4, $5)",
+    )
+    .bind(ca_id)
+    .bind(student_email)
+    .bind(&current_role_name)
+    .bind(new_role_name)
+    .bind(actor_email)
+    .execute(pool)
+    .await
+    .expect("deve registrar a alteração de cargo no histórico administrativo");
 
     record_operation_outcome(pool, "accepted", None).await;
     Ok(())
@@ -573,29 +686,33 @@ async fn manager_attempts_to_assign_student_in_other_ca(
     let _ = attempt_member_assignment(pool, &manager_email, &student_email, None, &ca).await;
 }
 
-/// Pendente: o gestor {string} altera o cargo de {string} para {string} em {string}.
+/// Executa a alteração do cargo de um integrante da gestão por um gestor autorizado.
 #[when(expr = "o gestor {string} altera o cargo de {string} para {string} em {string}")]
 async fn manager_changes_member_role(
-    _world: &mut AppWorld,
-    _manager_email: String,
-    _student_email: String,
-    _new_role: String,
-    _ca: String,
+    world: &mut AppWorld,
+    manager_email: String,
+    student_email: String,
+    new_role: String,
+    ca: String,
 ) {
-    pending_step("o gestor {string} altera o cargo de {string} para {string} em {string}");
+    let pool = world.database_pool();
+    attempt_member_role_change(pool, &manager_email, &student_email, &new_role, &ca)
+        .await
+        .expect("a alteração de cargo por um gestor autorizado deve ser concluída com sucesso");
 }
 
-/// Pendente: tentativa de alterar o cargo de um usuário em um CA.
+/// Executa uma tentativa de alteração de cargo sujeita às validações de permissão e domínio.
 #[when(expr = "o gestor {string} tenta alterar o cargo de {string} para {string} em {string}")]
 #[when(expr = "{string} tenta alterar o cargo de {string} para {string} em {string}")]
 async fn actor_attempts_to_change_member_role(
-    _world: &mut AppWorld,
-    _actor_email: String,
-    _student_email: String,
-    _new_role: String,
-    _ca: String,
+    world: &mut AppWorld,
+    actor_email: String,
+    student_email: String,
+    new_role: String,
+    ca: String,
 ) {
-    pending_step("o gestor {string} tenta alterar o cargo de {string} para {string} em {string}");
+    let pool = world.database_pool();
+    let _ = attempt_member_role_change(pool, &actor_email, &student_email, &new_role, &ca).await;
 }
 
 /// Pendente: o gestor {string} remove {string} da gestão de {string}.
@@ -656,15 +773,15 @@ async fn student_joins_management_in_role(
     );
 }
 
-/// Pendente: {string} passa a exercer o cargo {string} em {string}.
+/// Verifica que o integrante passou a exercer o novo cargo no CA.
 #[then(expr = "{string} passa a exercer o cargo {string} em {string}")]
 async fn student_starts_holding_role(
-    _world: &mut AppWorld,
-    _student_email: String,
-    _role: String,
-    _ca: String,
+    world: &mut AppWorld,
+    student_email: String,
+    role: String,
+    ca: String,
 ) {
-    pending_step("{string} passa a exercer o cargo {string} em {string}");
+    student_joins_management_in_role(world, student_email, ca, role).await;
 }
 
 /// Verifica que o estudante permanece exercendo unicamente o cargo esperado no CA.
@@ -830,27 +947,71 @@ async fn student_loses_role_permissions(
     pending_step("{string} deixa de possuir as permissões do cargo {string} em {string}");
 }
 
-/// Pendente: {string} passa ou permanece com a permissão de {string} em {string}.
+/// Verifica que o estudante possui a permissão específica indicada no CA.
 #[then(expr = "{string} passa a possuir a permissão de {string} em {string}")]
 #[then(expr = "{string} permanece com a permissão de {string} em {string}")]
 async fn student_has_specific_permission_in_ca(
-    _world: &mut AppWorld,
-    _student_email: String,
-    _permission: String,
-    _ca: String,
+    world: &mut AppWorld,
+    student_email: String,
+    permission: String,
+    ca: String,
 ) {
-    pending_step("{string} passa a possuir a permissão de {string} em {string}");
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let has_permission: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1
+            FROM ca_management_member m
+            JOIN user_profile u ON u.id = m.user_id
+            JOIN ca_role_permission p ON p.ca_role_id = m.ca_role_id
+            WHERE m.ca_id = $1 AND u.email = $2 AND p.permission = $3
+        )",
+    )
+    .bind(ca_id)
+    .bind(&student_email)
+    .bind(&permission)
+    .fetch_one(pool)
+    .await
+    .expect("deve consultar permissão específica do integrante no CA");
+
+    assert!(
+        has_permission,
+        "o integrante {student_email} deveria possuir a permissão '{permission}' em {ca}",
+    );
 }
 
-/// Pendente: {string} deixa de possuir a permissão de {string} em {string}.
+/// Verifica que o estudante deixou de possuir a permissão específica indicada no CA.
 #[then(expr = "{string} deixa de possuir a permissão de {string} em {string}")]
 async fn student_loses_specific_permission_in_ca(
-    _world: &mut AppWorld,
-    _student_email: String,
-    _permission: String,
-    _ca: String,
+    world: &mut AppWorld,
+    student_email: String,
+    permission: String,
+    ca: String,
 ) {
-    pending_step("{string} deixa de possuir a permissão de {string} em {string}");
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let has_permission: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1
+            FROM ca_management_member m
+            JOIN user_profile u ON u.id = m.user_id
+            JOIN ca_role_permission p ON p.ca_role_id = m.ca_role_id
+            WHERE m.ca_id = $1 AND u.email = $2 AND p.permission = $3
+        )",
+    )
+    .bind(ca_id)
+    .bind(&student_email)
+    .bind(&permission)
+    .fetch_one(pool)
+    .await
+    .expect("deve consultar permissão específica do integrante no CA");
+
+    assert!(
+        !has_permission,
+        "o integrante {student_email} não deveria possuir a permissão '{permission}' em {ca}",
+    );
 }
 
 /// Pendente: {string} continua podendo acessar {string} como estudante.
@@ -895,16 +1056,20 @@ async fn operation_is_rejected_user_already_in_management(world: &mut AppWorld) 
     assert_eq!(reason.as_deref(), Some("already_in_management"));
 }
 
-/// Pendente: a operação é recusada informando que o usuário não integra a gestão do CA.
+/// Verifica que a operação foi recusada porque o usuário não integra a gestão do CA.
 #[then("a operação é recusada informando que o usuário não integra a gestão do CA")]
-async fn operation_is_rejected_user_not_in_management(_world: &mut AppWorld) {
-    pending_step("a operação é recusada informando que o usuário não integra a gestão do CA");
+async fn operation_is_rejected_user_not_in_management(world: &mut AppWorld) {
+    let (status, reason) = fetch_last_operation_outcome(world.database_pool()).await;
+    assert_eq!(status, "rejected");
+    assert_eq!(reason.as_deref(), Some("not_in_management"));
 }
 
-/// Pendente: a operação é recusada informando que o integrante já exerce esse cargo.
+/// Verifica que a operação foi recusada porque o integrante já exerce o cargo informado.
 #[then("a operação é recusada informando que o integrante já exerce esse cargo")]
-async fn operation_is_rejected_member_already_holds_role(_world: &mut AppWorld) {
-    pending_step("a operação é recusada informando que o integrante já exerce esse cargo");
+async fn operation_is_rejected_member_already_holds_role(world: &mut AppWorld) {
+    let (status, reason) = fetch_last_operation_outcome(world.database_pool()).await;
+    assert_eq!(status, "rejected");
+    assert_eq!(reason.as_deref(), Some("already_holds_role"));
 }
 
 /// Pendente: a operação é recusada informando que a gestão precisa manter ao menos um integrante com essa permissão.
@@ -1079,8 +1244,28 @@ async fn history_record_remains_unchanged(_world: &mut AppWorld, _ca: String) {
     pending_step("o registro permanece inalterado no histórico de {string}");
 }
 
-/// Pendente: nenhum novo registro é adicionado ao histórico administrativo de {string}.
+/// Verifica que nenhum novo registro foi adicionado ao histórico administrativo do CA.
 #[then(expr = "nenhum novo registro é adicionado ao histórico administrativo de {string}")]
-async fn no_new_record_is_added_to_history(_world: &mut AppWorld, _ca: String) {
-    pending_step("nenhum novo registro é adicionado ao histórico administrativo de {string}");
+async fn no_new_record_is_added_to_history(world: &mut AppWorld, ca: String) {
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let before_count: i64 =
+        sqlx::query_scalar("SELECT history_count FROM bdd_history_snapshot WHERE ca_id = $1")
+            .bind(ca_id)
+            .fetch_one(pool)
+            .await
+            .expect("deve existir retrato prévio do histórico administrativo");
+
+    let current_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM ca_management_history WHERE ca_id = $1")
+            .bind(ca_id)
+            .fetch_one(pool)
+            .await
+            .expect("deve contar registros atuais do histórico administrativo");
+
+    assert_eq!(
+        current_count, before_count,
+        "nenhum novo registro deveria ter sido adicionado ao histórico de {ca}",
+    );
 }

@@ -80,10 +80,9 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então "241098765@aluno.unb.br" passa a integrar a gestão de "CAER" no cargo "Diretor de Comunicação"
       E "241098765@aluno.unb.br" permanece no cargo "Diretor de Eventos" em "CACC"
 
-  @pending_backend
   Regra: Um gestor autorizado pode alterar o cargo de um integrante da gestão
 
-    @happy @backend @mobile
+    @isolated_database @happy @backend @mobile
     Cenário: Gestor altera o cargo de um integrante
       Dado que o cargo "Diretor de Comunicação" possui a permissão de "Publicar notícias diretamente"
       E o cargo "Diretor de Eventos" possui a permissão de "Publicar e gerenciar eventos diretamente"
@@ -94,7 +93,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       E "241098765@aluno.unb.br" passa a possuir a permissão de "Publicar e gerenciar eventos diretamente" em "CAER"
       E "241098765@aluno.unb.br" deixa de possuir a permissão de "Publicar notícias diretamente" em "CAER"
 
-    @sad @backend @mobile
+    @isolated_database @sad @backend @mobile
     Cenário: Integrante sem permissão de administrar a gestão não pode alterar cargos
       Dado que o estudante "222033333@aluno.unb.br" exerce o cargo de "Diretor de Eventos" em "CAER"
       E o cargo "Diretor de Eventos" não possui a permissão de "Administrar integrantes da gestão"
@@ -103,7 +102,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então a operação é recusada por falta de permissão
       E "241098765@aluno.unb.br" permanece no cargo "Diretor de Comunicação" em "CAER"
 
-    @sad @backend @mobile
+    @isolated_database @sad @backend @mobile
     Cenário: Não é possível alterar o cargo de quem não integra a gestão
       Dado que o estudante "241098765@aluno.unb.br" possui perfil no CApp
       E não integra a gestão de "CAER"
@@ -111,7 +110,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então a operação é recusada informando que o usuário não integra a gestão do CA
       E "241098765@aluno.unb.br" permanece sem integrar a gestão de "CAER"
 
-    @sad @backend @mobile
+    @isolated_database @sad @backend @mobile
     Cenário: Alterar para o cargo atualmente exercido não modifica a gestão
       Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
       Quando o gestor "231012345@aluno.unb.br" tenta alterar o cargo de "241098765@aluno.unb.br" para "Diretor de Comunicação" em "CAER"
