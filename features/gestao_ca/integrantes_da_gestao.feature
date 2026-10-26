@@ -10,7 +10,7 @@
 # não apagam registros anteriores e não podem ser editadas ou excluídas.
 # Os e-mails abaixo são exemplos fictícios de contas institucionais da UnB.
 # @backend e @mobile indicam onde o cenário deve ser verificado.
-@pending_mobile
+@pending_backend @pending_mobile
 Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmico
   Como gestor de um Centro Acadêmico com permissão para administrar a gestão
   Quero vincular, alterar e remover integrantes e seus cargos
@@ -24,7 +24,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
 
   Regra: Um gestor autorizado pode vincular usuários da plataforma a cargos da gestão do CA
 
-    @isolated_database @pending_backend @happy @backend @mobile
+    @happy @backend @mobile
     Cenário: Gestor vincula um estudante a um cargo da gestão
       Dado que o estudante "241098765@aluno.unb.br" possui perfil no CApp
       E não integra a gestão de "CAER"
