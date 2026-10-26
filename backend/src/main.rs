@@ -4,6 +4,7 @@
 //!
 //! - `DATABASE_URL`: obrigatória; URL de conexão PostgreSQL aceita pelo SQLx.
 //! - `RUST_LOG`: filtro opcional do `tracing`; ausente ou inválido usa `info`.
+//! - `LOG_FORMAT`: formato opcional de saída (`json`, `compact`, `pretty`, `full`); ausente usa `full` (ou `json` em produção).
 //! - Endereço HTTP: `0.0.0.0:3000`, fixo nesta implementação.
 //!
 //! As variáveis são lidas do ambiente do processo. O executável não carrega
@@ -23,7 +24,6 @@ use backend::{
     infrastructure::database::MIGRATOR,
 };
 use sqlx::postgres::PgPoolOptions;
-use tracing_subscriber::EnvFilter;
 
 /// Inicializa logs, pool PostgreSQL, migrations e servidor HTTP no runtime Tokio.
 ///
@@ -35,21 +35,12 @@ use tracing_subscriber::EnvFilter;
 ///
 /// # Erros
 ///
-/// Propaga a ausência ou invalidade de `DATABASE_URL`, erros ao conectar ao
-/// PostgreSQL, ao validar ou aplicar migrations, ao abrir o socket TCP e os
-/// erros retornados por `axum::serve`.
-///
-/// # Panics
-///
-/// A instalação do subscriber global pode falhar com panic se outro subscriber
-/// já tiver sido instalado no mesmo processo.
+/// Propaga falha ao inicializar o subscriber de telemetria, ausência ou invalidade
+/// de `DATABASE_URL`, erros ao conectar ao PostgreSQL, ao validar ou aplicar
+/// migrations, ao abrir o socket TCP e os erros retornados por `axum::serve`.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
+    backend::api::logging::init_logging()?;
 
     let db_url = env::var("DATABASE_URL").map_err(|e| match e {
         VarError::NotPresent => anyhow::anyhow!(e).context(
