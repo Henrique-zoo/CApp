@@ -1,14 +1,12 @@
 //! Steps da especificação de administração dos integrantes da gestão (#62).
 //!
-//! Implementa o `Contexto` e as três primeiras regras de
+//! Implementa o `Contexto` e todas as quatro regras de
 //! `features/gestao_ca/integrantes_da_gestao.feature` sobre o banco PostgreSQL
-//! isolado fornecido por [`AppWorld`]. Os cenários da quarta regra
-//! permanecem sinalizados com [`pending_step`] até sua ativação.
+//! isolado fornecido por [`AppWorld`].
 
 use cucumber::{given, then, when};
 use sqlx::PgPool;
 
-use super::pending_step;
 use crate::support::AppWorld;
 
 /// Permissão exigida para administrar integrantes da gestão de um CA.
@@ -89,6 +87,35 @@ async fn ensure_management_schema(pool: &PgPool) {
     .expect("deve criar tabela ca_management_history no banco do cenário");
 
     sqlx::query(
+        "CREATE OR REPLACE FUNCTION prevent_ca_management_history_modification()
+         RETURNS TRIGGER AS $$
+         BEGIN
+             RAISE EXCEPTION 'O histórico administrativo não pode ser modificado';
+         END;
+         $$ LANGUAGE plpgsql",
+    )
+    .execute(pool)
+    .await
+    .expect("deve criar função de imutabilidade do histórico administrativo");
+
+    sqlx::query(
+        "DROP TRIGGER IF EXISTS trg_immutable_ca_management_history ON ca_management_history",
+    )
+    .execute(pool)
+    .await
+    .expect("deve limpar trigger anterior de imutabilidade do histórico");
+
+    sqlx::query(
+        "CREATE TRIGGER trg_immutable_ca_management_history
+         BEFORE UPDATE OR DELETE ON ca_management_history
+         FOR EACH ROW
+         EXECUTE FUNCTION prevent_ca_management_history_modification()",
+    )
+    .execute(pool)
+    .await
+    .expect("deve criar trigger de imutabilidade do histórico administrativo");
+
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS bdd_last_operation_outcome (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             status TEXT NOT NULL,
@@ -119,6 +146,21 @@ async fn ensure_management_schema(pool: &PgPool) {
     .execute(pool)
     .await
     .expect("deve criar tabela bdd_history_snapshot no banco do cenário");
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS bdd_history_entries_snapshot (
+            id BIGINT PRIMARY KEY,
+            ca_id BIGINT NOT NULL,
+            member_email TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            previous_role TEXT,
+            resulting_role TEXT,
+            manager_email TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await
+    .expect("deve criar tabela bdd_history_entries_snapshot no banco do cenário");
 }
 
 /// Extrai a sigla entre parênteses do nome do CA, ou usa o próprio identificador.
@@ -256,6 +298,43 @@ async fn snapshot_ca_state(pool: &PgPool, ca_id: i64) {
     .execute(pool)
     .await
     .expect("deve capturar retrato do histórico administrativo");
+
+    sqlx::query("DELETE FROM bdd_history_entries_snapshot WHERE ca_id = $1")
+        .bind(ca_id)
+        .execute(pool)
+        .await
+        .expect("deve limpar retrato anterior das entradas do histórico");
+
+    sqlx::query(
+        "INSERT INTO bdd_history_entries_snapshot (
+            id, ca_id, member_email, operation, previous_role, resulting_role, manager_email
+         )
+         SELECT id, ca_id, member_email, operation, previous_role, resulting_role, manager_email
+         FROM ca_management_history
+         WHERE ca_id = $1",
+    )
+    .bind(ca_id)
+    .execute(pool)
+    .await
+    .expect("deve capturar retrato detalhado das entradas do histórico");
+}
+
+/// Localiza o e-mail de um gestor autorizado no CA para preparar pré-condições de histórico.
+async fn find_authorized_manager_in_ca(pool: &PgPool, ca_id: i64) -> String {
+    sqlx::query_scalar(
+        "SELECT u.email
+         FROM ca_management_member m
+         JOIN user_profile u ON u.id = m.user_id
+         JOIN ca_role_permission p ON p.ca_role_id = m.ca_role_id
+         WHERE m.ca_id = $1 AND p.permission = $2
+         ORDER BY m.user_id ASC
+         LIMIT 1",
+    )
+    .bind(ca_id)
+    .bind(MANAGE_MEMBERS_PERMISSION)
+    .fetch_one(pool)
+    .await
+    .expect("deve existir ao menos um gestor autorizado no CA")
 }
 
 /// Verifica se o ator possui a permissão de administrar integrantes no CA.
@@ -1302,162 +1381,471 @@ async fn operation_is_rejected_last_manager_protection(world: &mut AppWorld) {
 // Histórico (Contexto prévio, ações e verificações do histórico administrativo)
 // ============================================================================
 
-/// Pendente: que o estudante {string} foi vinculado ao cargo {string} em {string}.
+/// Prepara uma vinculação prévia do estudante ao cargo informado com registro no histórico.
 #[given(expr = "que o estudante {string} foi vinculado ao cargo {string} em {string}")]
 async fn student_was_previously_assigned_to_role(
-    _world: &mut AppWorld,
-    _student_email: String,
-    _role: String,
-    _ca: String,
+    world: &mut AppWorld,
+    student_email: String,
+    role: String,
+    ca: String,
 ) {
-    pending_step("que o estudante {string} foi vinculado ao cargo {string} em {string}");
+    let pool = world.database_pool();
+    ensure_management_schema(pool).await;
+
+    let ca_id = find_ca_id(pool, &ca).await;
+    ensure_role_in_ca(pool, ca_id, &role).await;
+    ensure_user_profile(pool, &student_email).await;
+    let manager_email = find_authorized_manager_in_ca(pool, ca_id).await;
+
+    attempt_member_assignment(pool, &manager_email, &student_email, Some(&role), &ca)
+        .await
+        .expect("deve registrar a vinculação prévia do estudante no histórico");
 }
 
-/// Pendente: posteriormente teve o cargo alterado para {string} em {string}.
+/// Prepara uma alteração subsequente de cargo para o último integrante movimentado no CA.
 #[given(expr = "posteriormente teve o cargo alterado para {string} em {string}")]
-async fn student_subsequently_had_role_changed(
-    _world: &mut AppWorld,
-    _new_role: String,
-    _ca: String,
-) {
-    pending_step("posteriormente teve o cargo alterado para {string} em {string}");
+async fn student_subsequently_had_role_changed(world: &mut AppWorld, new_role: String, ca: String) {
+    let pool = world.database_pool();
+    ensure_management_schema(pool).await;
+
+    let ca_id = find_ca_id(pool, &ca).await;
+    ensure_role_in_ca(pool, ca_id, &new_role).await;
+
+    let student_email: String = sqlx::query_scalar(
+        "SELECT member_email
+         FROM ca_management_history
+         WHERE ca_id = $1
+         ORDER BY id DESC
+         LIMIT 1",
+    )
+    .bind(ca_id)
+    .fetch_one(pool)
+    .await
+    .expect("deve existir movimentação prévia no histórico do CA");
+
+    let manager_email = find_authorized_manager_in_ca(pool, ca_id).await;
+    attempt_member_role_change(pool, &manager_email, &student_email, &new_role, &ca)
+        .await
+        .expect("deve registrar a alteração subsequente de cargo no histórico");
 }
 
-/// Pendente: que o histórico de {string} registra a remoção de {string} do cargo {string}.
+/// Prepara uma passagem anterior encerrada por remoção no histórico do CA.
 #[given(expr = "que o histórico de {string} registra a remoção de {string} do cargo {string}")]
 async fn history_contains_removal_record(
-    _world: &mut AppWorld,
-    _ca: String,
-    _student_email: String,
-    _role: String,
+    world: &mut AppWorld,
+    ca: String,
+    student_email: String,
+    role: String,
 ) {
-    pending_step("que o histórico de {string} registra a remoção de {string} do cargo {string}");
+    let pool = world.database_pool();
+    ensure_management_schema(pool).await;
+
+    let ca_id = find_ca_id(pool, &ca).await;
+    ensure_role_in_ca(pool, ca_id, &role).await;
+    ensure_user_profile(pool, &student_email).await;
+    let manager_email = find_authorized_manager_in_ca(pool, ca_id).await;
+
+    attempt_member_assignment(pool, &manager_email, &student_email, Some(&role), &ca)
+        .await
+        .expect("deve vincular o integrante antes de sua remoção histórica");
+    attempt_member_removal(pool, &manager_email, &student_email, &ca)
+        .await
+        .expect("deve registrar a remoção prévia no histórico do CA");
 }
 
-/// Pendente: que o histórico de {string} registra a vinculação de {string} ao cargo {string}.
+/// Prepara um registro de vinculação do estudante no histórico administrativo do CA.
 #[given(expr = "que o histórico de {string} registra a vinculação de {string} ao cargo {string}")]
 async fn history_contains_assignment_record(
-    _world: &mut AppWorld,
-    _ca: String,
-    _student_email: String,
-    _role: String,
+    world: &mut AppWorld,
+    ca: String,
+    student_email: String,
+    role: String,
 ) {
-    pending_step("que o histórico de {string} registra a vinculação de {string} ao cargo {string}");
+    student_was_previously_assigned_to_role(world, student_email, role, ca).await;
 }
 
-/// Pendente: o gestor {string} tenta {word} esse registro do histórico.
+/// Executa a tentativa de um gestor alterar ou excluir um registro do histórico administrativo.
 #[when(expr = "o gestor {string} tenta {word} esse registro do histórico")]
 async fn manager_attempts_to_modify_history_record(
-    _world: &mut AppWorld,
+    world: &mut AppWorld,
     _manager_email: String,
-    _action: String,
+    action: String,
 ) {
-    pending_step("o gestor {string} tenta {word} esse registro do histórico");
+    let pool = world.database_pool();
+    let (record_id, ca_id): (i64, i64) = sqlx::query_as(
+        "SELECT id, ca_id
+         FROM ca_management_history
+         ORDER BY id DESC
+         LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("deve existir um registro no histórico para a tentativa de modificação");
+
+    snapshot_ca_state(pool, ca_id).await;
+
+    let query_result = match action.as_str() {
+        "alterar" => {
+            sqlx::query(
+                "UPDATE ca_management_history
+                 SET resulting_role = 'Cargo Adulterado'
+                 WHERE id = $1",
+            )
+            .bind(record_id)
+            .execute(pool)
+            .await
+        }
+        "excluir" => {
+            sqlx::query("DELETE FROM ca_management_history WHERE id = $1")
+                .bind(record_id)
+                .execute(pool)
+                .await
+        }
+        other => panic!("ação de modificação de histórico desconhecida: {other}"),
+    };
+
+    assert!(
+        query_result.is_err(),
+        "o banco deve bloquear tentativas de {action} registros no histórico administrativo",
+    );
+    record_operation_outcome(pool, "rejected", Some("history_is_immutable")).await;
 }
 
-/// Pendente: o histórico administrativo de {string} registra a vinculação de {string} ao cargo {string}.
+/// Verifica que o histórico administrativo do CA registrou a vinculação do integrante ao cargo.
 #[then(
     expr = "o histórico administrativo de {string} registra a vinculação de {string} ao cargo {string}"
 )]
 async fn history_records_member_assignment(
-    _world: &mut AppWorld,
-    _ca: String,
-    _student_email: String,
-    _role: String,
+    world: &mut AppWorld,
+    ca: String,
+    student_email: String,
+    role: String,
 ) {
-    pending_step(
-        "o histórico administrativo de {string} registra a vinculação de {string} ao cargo {string}",
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let entry: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT operation, previous_role, resulting_role
+         FROM ca_management_history
+         WHERE ca_id = $1 AND member_email = $2
+         ORDER BY id DESC
+         LIMIT 1",
+    )
+    .bind(ca_id)
+    .bind(&student_email)
+    .fetch_optional(pool)
+    .await
+    .expect("deve consultar registro de vinculação no histórico administrativo");
+
+    assert_eq!(
+        entry,
+        Some(("vinculação".to_owned(), None, Some(role))),
+        "o histórico de {ca} deveria registrar a vinculação de {student_email}",
     );
 }
 
-/// Pendente: o histórico administrativo de {string} registra a alteração de {string} do cargo {string} para {string}.
+/// Verifica que o histórico administrativo do CA registrou a alteração de cargo do integrante.
 #[then(
     expr = "o histórico administrativo de {string} registra a alteração de {string} do cargo {string} para {string}"
 )]
 async fn history_records_role_change(
-    _world: &mut AppWorld,
-    _ca: String,
-    _student_email: String,
-    _old_role: String,
-    _new_role: String,
+    world: &mut AppWorld,
+    ca: String,
+    student_email: String,
+    old_role: String,
+    new_role: String,
 ) {
-    pending_step(
-        "o histórico administrativo de {string} registra a alteração de {string} do cargo {string} para {string}",
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let entry: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT operation, previous_role, resulting_role
+         FROM ca_management_history
+         WHERE ca_id = $1 AND member_email = $2
+         ORDER BY id DESC
+         LIMIT 1",
+    )
+    .bind(ca_id)
+    .bind(&student_email)
+    .fetch_optional(pool)
+    .await
+    .expect("deve consultar registro de alteração no histórico administrativo");
+
+    assert_eq!(
+        entry,
+        Some(("alteração".to_owned(), Some(old_role), Some(new_role))),
+        "o histórico de {ca} deveria registrar a alteração de cargo de {student_email}",
     );
 }
 
-/// Pendente: o histórico administrativo de {string} registra a remoção de {string} do cargo {string}.
+/// Verifica que o histórico administrativo do CA registrou a remoção do integrante do cargo.
 #[then(
     expr = "o histórico administrativo de {string} registra a remoção de {string} do cargo {string}"
 )]
 async fn history_records_member_removal(
-    _world: &mut AppWorld,
-    _ca: String,
-    _student_email: String,
-    _role: String,
+    world: &mut AppWorld,
+    ca: String,
+    student_email: String,
+    role: String,
 ) {
-    pending_step(
-        "o histórico administrativo de {string} registra a remoção de {string} do cargo {string}",
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let entry: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT operation, previous_role, resulting_role
+         FROM ca_management_history
+         WHERE ca_id = $1 AND member_email = $2
+         ORDER BY id DESC
+         LIMIT 1",
+    )
+    .bind(ca_id)
+    .bind(&student_email)
+    .fetch_optional(pool)
+    .await
+    .expect("deve consultar registro de remoção no histórico administrativo");
+
+    assert_eq!(
+        entry,
+        Some(("remoção".to_owned(), Some(role), None)),
+        "o histórico de {ca} deveria registrar a remoção de {student_email}",
     );
 }
 
-/// Pendente: o registro identifica o gestor {string} como responsável e a data da operação.
+/// Verifica que o último registro do histórico identifica o gestor responsável e a data da operação.
 #[then(expr = "o registro identifica o gestor {string} como responsável e a data da vinculação")]
 #[then(expr = "o registro identifica o gestor {string} como responsável e a data da alteração")]
 #[then(expr = "o registro identifica o gestor {string} como responsável e a data da remoção")]
 async fn history_record_identifies_responsible_manager_and_date(
-    _world: &mut AppWorld,
-    _manager_email: String,
+    world: &mut AppWorld,
+    manager_email: String,
 ) {
-    pending_step("o registro identifica o gestor {string} como responsável e a data da operação");
+    let pool = world.database_pool();
+
+    let (recorded_manager, has_valid_timestamp): (String, bool) = sqlx::query_as(
+        "SELECT manager_email, (occurred_at IS NOT NULL AND occurred_at <= NOW())
+         FROM ca_management_history
+         ORDER BY id DESC
+         LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("deve existir registro recente no histórico administrativo");
+
+    assert_eq!(
+        recorded_manager, manager_email,
+        "o registro do histórico deve identificar o gestor {manager_email} como responsável",
+    );
+    assert!(
+        has_valid_timestamp,
+        "o registro do histórico deve possuir a data/hora válida da operação",
+    );
 }
 
-/// Pendente: o histórico administrativo de {string} apresenta, em ordem cronológica, a vinculação, a alteração e a remoção de {string}.
+/// Verifica que o histórico apresenta a sequência cronológica de vinculação, alteração e remoção.
 #[then(
     expr = "o histórico administrativo de {string} apresenta, em ordem cronológica, a vinculação, a alteração e a remoção de {string}"
 )]
 async fn history_presents_chronological_lifecycle(
-    _world: &mut AppWorld,
-    _ca: String,
-    _student_email: String,
+    world: &mut AppWorld,
+    ca: String,
+    student_email: String,
 ) {
-    pending_step(
-        "o histórico administrativo de {string} apresenta, em ordem cronológica, a vinculação, a alteração e a remoção de {string}",
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let operations: Vec<String> = sqlx::query_scalar(
+        "SELECT operation
+         FROM ca_management_history
+         WHERE ca_id = $1 AND member_email = $2
+         ORDER BY occurred_at ASC, id ASC",
+    )
+    .bind(ca_id)
+    .bind(&student_email)
+    .fetch_all(pool)
+    .await
+    .expect("deve consultar sequência cronológica no histórico administrativo");
+
+    assert_eq!(
+        operations,
+        vec![
+            "vinculação".to_owned(),
+            "alteração".to_owned(),
+            "remoção".to_owned()
+        ],
+        "o histórico de {ca} deve apresentar vinculação, alteração e remoção em ordem cronológica",
     );
 }
 
-/// Pendente: os registros anteriores à remoção permanecem inalterados.
+/// Representa um registro do histórico administrativo para verificação de integridade.
+#[derive(Debug, PartialEq, Eq, sqlx::FromRow)]
+struct HistorySnapshotRow {
+    id: i64,
+    ca_id: i64,
+    member_email: String,
+    operation: String,
+    previous_role: Option<String>,
+    resulting_role: Option<String>,
+    manager_email: String,
+}
+
+/// Verifica que todos os registros anteriores à remoção permaneceram intactos no histórico.
 #[then("os registros anteriores à remoção permanecem inalterados")]
-async fn records_prior_to_removal_remain_unchanged(_world: &mut AppWorld) {
-    pending_step("os registros anteriores à remoção permanecem inalterados");
+async fn records_prior_to_removal_remain_unchanged(world: &mut AppWorld) {
+    let pool = world.database_pool();
+
+    let snapshot_entries: Vec<HistorySnapshotRow> = sqlx::query_as(
+        "SELECT id, ca_id, member_email, operation, previous_role, resulting_role, manager_email
+         FROM bdd_history_entries_snapshot
+         ORDER BY id ASC",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("deve ler retrato dos registros anteriores à remoção");
+
+    assert!(
+        !snapshot_entries.is_empty(),
+        "deve haver registros anteriores à remoção capturados no retrato",
+    );
+
+    let max_prior_id = snapshot_entries
+        .iter()
+        .map(|entry| entry.id)
+        .max()
+        .expect("retrato não está vazio");
+
+    let current_prior_entries: Vec<HistorySnapshotRow> = sqlx::query_as(
+        "SELECT id, ca_id, member_email, operation, previous_role, resulting_role, manager_email
+         FROM ca_management_history
+         WHERE id <= $1
+         ORDER BY id ASC",
+    )
+    .bind(max_prior_id)
+    .fetch_all(pool)
+    .await
+    .expect("deve consultar os registros anteriores à remoção no histórico atual");
+
+    assert_eq!(
+        current_prior_entries, snapshot_entries,
+        "os registros anteriores à remoção devem permanecer inalterados",
+    );
 }
 
-/// Pendente: o histórico administrativo de {string} registra a nova vinculação.
+/// Verifica que a nova vinculação foi registrada no histórico administrativo do CA.
 #[then(expr = "o histórico administrativo de {string} registra a nova vinculação")]
-async fn history_records_new_assignment(_world: &mut AppWorld, _ca: String) {
-    pending_step("o histórico administrativo de {string} registra a nova vinculação");
+async fn history_records_new_assignment(world: &mut AppWorld, ca: String) {
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let before_count: i64 =
+        sqlx::query_scalar("SELECT history_count FROM bdd_history_snapshot WHERE ca_id = $1")
+            .bind(ca_id)
+            .fetch_one(pool)
+            .await
+            .expect("deve existir retrato prévio da contagem de histórico");
+
+    let (current_count, latest_operation): (i64, String) = sqlx::query_as(
+        "SELECT
+            (SELECT COUNT(*) FROM ca_management_history WHERE ca_id = $1),
+            (SELECT operation FROM ca_management_history WHERE ca_id = $1 ORDER BY id DESC LIMIT 1)",
+    )
+    .bind(ca_id)
+    .fetch_one(pool)
+    .await
+    .expect("deve consultar a nova vinculação no histórico administrativo");
+
+    assert_eq!(current_count, before_count + 1);
+    assert_eq!(latest_operation, "vinculação");
 }
 
-/// Pendente: os registros da passagem anterior de {string} pela gestão permanecem disponíveis.
+/// Verifica que os registros da passagem anterior do estudante continuam disponíveis no histórico.
 #[then(expr = "os registros da passagem anterior de {string} pela gestão permanecem disponíveis")]
-async fn previous_tenure_records_remain_available(_world: &mut AppWorld, _student_email: String) {
-    pending_step(
-        "os registros da passagem anterior de {string} pela gestão permanecem disponíveis",
+async fn previous_tenure_records_remain_available(world: &mut AppWorld, student_email: String) {
+    let pool = world.database_pool();
+
+    let prior_snapshot: Vec<(i64, String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT id, operation, previous_role, resulting_role
+         FROM bdd_history_entries_snapshot
+         WHERE member_email = $1
+         ORDER BY id ASC",
+    )
+    .bind(&student_email)
+    .fetch_all(pool)
+    .await
+    .expect("deve ler os registros da passagem anterior no retrato");
+
+    assert!(
+        !prior_snapshot.is_empty(),
+        "devem existir registros anteriores para {student_email}",
+    );
+
+    let max_prior_id = prior_snapshot
+        .iter()
+        .map(|entry| entry.0)
+        .max()
+        .expect("retrato anterior não está vazio");
+
+    let preserved_records: Vec<(i64, String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT id, operation, previous_role, resulting_role
+         FROM ca_management_history
+         WHERE member_email = $1 AND id <= $2
+         ORDER BY id ASC",
+    )
+    .bind(&student_email)
+    .bind(max_prior_id)
+    .fetch_all(pool)
+    .await
+    .expect("deve consultar os registros anteriores preservados no histórico");
+
+    assert_eq!(
+        preserved_records, prior_snapshot,
+        "os registros da passagem anterior de {student_email} devem permanecer disponíveis",
     );
 }
 
-/// Pendente: a operação é recusada informando que o histórico administrativo não pode ser modificado.
+/// Verifica que a tentativa de modificar o histórico foi recusada por imutabilidade.
 #[then("a operação é recusada informando que o histórico administrativo não pode ser modificado")]
-async fn operation_is_rejected_history_is_immutable(_world: &mut AppWorld) {
-    pending_step(
-        "a operação é recusada informando que o histórico administrativo não pode ser modificado",
-    );
+async fn operation_is_rejected_history_is_immutable(world: &mut AppWorld) {
+    let (status, reason) = fetch_last_operation_outcome(world.database_pool()).await;
+    assert_eq!(status, "rejected");
+    assert_eq!(reason.as_deref(), Some("history_is_immutable"));
 }
 
-/// Pendente: o registro permanece inalterado no histórico de {string}.
+/// Verifica que o registro do histórico do CA permaneceu idêntico após a tentativa bloqueada.
 #[then(expr = "o registro permanece inalterado no histórico de {string}")]
-async fn history_record_remains_unchanged(_world: &mut AppWorld, _ca: String) {
-    pending_step("o registro permanece inalterado no histórico de {string}");
+async fn history_record_remains_unchanged(world: &mut AppWorld, ca: String) {
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let snapshot_entries: Vec<HistorySnapshotRow> = sqlx::query_as(
+        "SELECT id, ca_id, member_email, operation, previous_role, resulting_role, manager_email
+         FROM bdd_history_entries_snapshot
+         WHERE ca_id = $1
+         ORDER BY id ASC",
+    )
+    .bind(ca_id)
+    .fetch_all(pool)
+    .await
+    .expect("deve ler retrato dos registros do histórico do CA");
+
+    let current_entries: Vec<HistorySnapshotRow> = sqlx::query_as(
+        "SELECT id, ca_id, member_email, operation, previous_role, resulting_role, manager_email
+         FROM ca_management_history
+         WHERE ca_id = $1
+         ORDER BY id ASC",
+    )
+    .bind(ca_id)
+    .fetch_all(pool)
+    .await
+    .expect("deve ler registros atuais do histórico do CA");
+
+    assert!(
+        !current_entries.is_empty(),
+        "o histórico de {ca} deve conter o registro verificado",
+    );
+    assert_eq!(
+        current_entries, snapshot_entries,
+        "o registro no histórico de {ca} deve permanecer inalterado",
+    );
 }
 
 /// Verifica que nenhum novo registro foi adicionado ao histórico administrativo do CA.

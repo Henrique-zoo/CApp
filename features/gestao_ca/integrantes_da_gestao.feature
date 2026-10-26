@@ -158,10 +158,9 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então "231012345@aluno.unb.br" deixa de integrar a gestão de "CAER"
       E "241098765@aluno.unb.br" permanece com a permissão de "Administrar integrantes da gestão" em "CAER"
 
-  @pending_backend
   Regra: Toda mudança na composição da gestão é registrada e o histórico é preservado
 
-    @happy @backend
+    @happy @backend @isolated_database
     Cenário: Vinculação de integrante é registrada no histórico administrativo
       Dado que o estudante "241098765@aluno.unb.br" possui perfil no CApp
       E não integra a gestão de "CAER"
@@ -169,21 +168,21 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então o histórico administrativo de "CAER" registra a vinculação de "241098765@aluno.unb.br" ao cargo "Diretor de Comunicação"
       E o registro identifica o gestor "231012345@aluno.unb.br" como responsável e a data da vinculação
 
-    @happy @backend
+    @happy @backend @isolated_database
     Cenário: Alteração de cargo é registrada no histórico administrativo
       Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
       Quando o gestor "231012345@aluno.unb.br" altera o cargo de "241098765@aluno.unb.br" para "Diretor de Eventos" em "CAER"
       Então o histórico administrativo de "CAER" registra a alteração de "241098765@aluno.unb.br" do cargo "Diretor de Comunicação" para "Diretor de Eventos"
       E o registro identifica o gestor "231012345@aluno.unb.br" como responsável e a data da alteração
 
-    @happy @backend
+    @happy @backend @isolated_database
     Cenário: Remoção de integrante é registrada no histórico administrativo
       Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
       Quando o gestor "231012345@aluno.unb.br" remove "241098765@aluno.unb.br" da gestão de "CAER"
       Então o histórico administrativo de "CAER" registra a remoção de "241098765@aluno.unb.br" do cargo "Diretor de Comunicação"
       E o registro identifica o gestor "231012345@aluno.unb.br" como responsável e a data da remoção
 
-    @happy @backend @mobile
+    @happy @backend @mobile @isolated_database
     Cenário: Remoção de integrante preserva sua passagem pela gestão no histórico
       Dado que o estudante "241098765@aluno.unb.br" foi vinculado ao cargo "Diretor de Comunicação" em "CAER"
       E posteriormente teve o cargo alterado para "Diretor de Eventos" em "CAER"
@@ -191,14 +190,14 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então o histórico administrativo de "CAER" apresenta, em ordem cronológica, a vinculação, a alteração e a remoção de "241098765@aluno.unb.br"
       E os registros anteriores à remoção permanecem inalterados
 
-    @happy @backend @mobile
+    @happy @backend @mobile @isolated_database
     Cenário: Integrante removido e vinculado novamente mantém os registros anteriores
       Dado que o histórico de "CAER" registra a remoção de "241098765@aluno.unb.br" do cargo "Diretor de Comunicação"
       Quando o gestor "231012345@aluno.unb.br" vincula "241098765@aluno.unb.br" ao cargo "Diretor de Eventos" em "CAER"
       Então o histórico administrativo de "CAER" registra a nova vinculação
       E os registros da passagem anterior de "241098765@aluno.unb.br" pela gestão permanecem disponíveis
 
-    @sad @backend @mobile
+    @sad @backend @mobile @isolated_database
     Esquema do Cenário: Registros do histórico administrativo não podem ser modificados
       Dado que o histórico de "CAER" registra a vinculação de "241098765@aluno.unb.br" ao cargo "Diretor de Comunicação"
       Quando o gestor "231012345@aluno.unb.br" tenta <acao> esse registro do histórico
@@ -210,7 +209,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
         | alterar |
         | excluir |
 
-    @sad @backend @mobile
+    @sad @backend @mobile @isolated_database
     Cenário: Operação recusada não gera registro no histórico administrativo
       Dado que o estudante "222033333@aluno.unb.br" exerce o cargo de "Diretor de Eventos" em "CAER"
       E o cargo "Diretor de Eventos" não possui a permissão de "Administrar integrantes da gestão"
