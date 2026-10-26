@@ -10,7 +10,7 @@
 # não apagam registros anteriores e não podem ser editadas ou excluídas.
 # Os e-mails abaixo são exemplos fictícios de contas institucionais da UnB.
 # @backend e @mobile indicam onde o cenário deve ser verificado.
-@pending_backend @pending_mobile
+@pending_mobile
 Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmico
   Como gestor de um Centro Acadêmico com permissão para administrar a gestão
   Quero vincular, alterar e remover integrantes e seus cargos
@@ -24,7 +24,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
 
   Regra: Um gestor autorizado pode vincular usuários da plataforma a cargos da gestão do CA
 
-    @happy @backend @mobile
+    @isolated_database @happy @backend @mobile
     Cenário: Gestor vincula um estudante a um cargo da gestão
       Dado que o estudante "241098765@aluno.unb.br" possui perfil no CApp
       E não integra a gestão de "CAER"
@@ -32,7 +32,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então "241098765@aluno.unb.br" passa a integrar a gestão de "CAER" no cargo "Diretor de Comunicação"
       E "241098765@aluno.unb.br" passa a possuir as permissões do cargo "Diretor de Comunicação" em "CAER"
 
-    @sad @backend @mobile
+    @pending_backend @sad @backend @mobile
     Cenário: Integrante sem permissão de administrar a gestão não pode vincular usuários
       Dado que o estudante "222033333@aluno.unb.br" exerce o cargo de "Diretor de Eventos" em "CAER"
       E o cargo "Diretor de Eventos" não possui a permissão de "Administrar integrantes da gestão"
@@ -41,7 +41,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então a operação é recusada por falta de permissão
       E "241098765@aluno.unb.br" não passa a integrar a gestão de "CAER"
 
-    @sad @backend
+    @pending_backend @sad @backend
     Cenário: Gestor de um CA não pode vincular usuários à gestão de outro CA
       Dado que o Centro Acadêmico "Centro Acadêmico de Ciência da Computação (CACC)" está cadastrado na UnB
       E o estudante "231012345@aluno.unb.br" não possui cargo de gestão em "CACC"
@@ -50,14 +50,14 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então a operação é recusada por falta de permissão
       E "241098765@aluno.unb.br" não passa a integrar a gestão de "CACC"
 
-    @sad @backend @mobile
+    @pending_backend @sad @backend @mobile
     Cenário: Não é possível vincular um usuário sem perfil no CApp
       Dado que não existe perfil no CApp para o e-mail "209999999@aluno.unb.br"
       Quando o gestor "231012345@aluno.unb.br" tenta vincular "209999999@aluno.unb.br" ao cargo "Diretor de Comunicação" em "CAER"
       Então a operação é recusada informando que o usuário não foi encontrado
       E a composição da gestão de "CAER" permanece inalterada
 
-    @sad @backend @mobile
+    @pending_backend @sad @backend @mobile
     Cenário: Não é possível vincular um usuário a um cargo inexistente no CA
       Dado que o estudante "241098765@aluno.unb.br" possui perfil no CApp
       E o CA "CAER" não possui o cargo "Tesoureiro"
@@ -65,14 +65,14 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então a operação é recusada informando que o cargo não existe no CA
       E "241098765@aluno.unb.br" não passa a integrar a gestão de "CAER"
 
-    @sad @backend @mobile
+    @pending_backend @sad @backend @mobile
     Cenário: Usuário que já integra a gestão não recebe um segundo vínculo no mesmo CA
       Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
       Quando o gestor "231012345@aluno.unb.br" tenta vincular "241098765@aluno.unb.br" ao cargo "Diretor de Eventos" em "CAER"
       Então a operação é recusada informando que o usuário já integra a gestão do CA
       E "241098765@aluno.unb.br" permanece somente no cargo "Diretor de Comunicação" em "CAER"
 
-    @happy @backend
+    @pending_backend @happy @backend
     Cenário: Integrar a gestão de um CA não altera vínculos em outro CA
       Dado que o Centro Acadêmico "Centro Acadêmico de Ciência da Computação (CACC)" está cadastrado na UnB
       E o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Eventos" em "CACC"
@@ -80,6 +80,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então "241098765@aluno.unb.br" passa a integrar a gestão de "CAER" no cargo "Diretor de Comunicação"
       E "241098765@aluno.unb.br" permanece no cargo "Diretor de Eventos" em "CACC"
 
+  @pending_backend
   Regra: Um gestor autorizado pode alterar o cargo de um integrante da gestão
 
     @happy @backend @mobile
@@ -117,6 +118,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então a operação é recusada informando que o integrante já exerce esse cargo
       E nenhum novo registro é adicionado ao histórico administrativo de "CAER"
 
+  @pending_backend
   Regra: Um gestor autorizado pode remover integrantes, desde que a gestão continue administrável
 
     @happy @backend @mobile
@@ -158,6 +160,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então "231012345@aluno.unb.br" deixa de integrar a gestão de "CAER"
       E "241098765@aluno.unb.br" permanece com a permissão de "Administrar integrantes da gestão" em "CAER"
 
+  @pending_backend
   Regra: Toda mudança na composição da gestão é registrada e o histórico é preservado
 
     @happy @backend

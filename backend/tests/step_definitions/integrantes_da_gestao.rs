@@ -1,35 +1,208 @@
-//! Steps pendentes da especificação de administração dos integrantes da gestão (#62).
+//! Steps da especificação de administração dos integrantes da gestão (#62).
 //!
-//! Registra todos os padrões Gherkin de
-//! `features/gestao_ca/integrantes_da_gestao.feature`. Enquanto a persistência e
-//! os casos de uso do módulo não estão conectados ao [`AppWorld`], cada step
-//! falha explicitamente por meio de [`pending_step`].
+//! Implementa o `Contexto` e o primeiro cenário de
+//! `features/gestao_ca/integrantes_da_gestao.feature` sobre o banco PostgreSQL
+//! isolado fornecido por [`AppWorld`]. Os demais cenários permanecem sinalizados
+//! com [`pending_step`] até que sua automação seja ativada.
 
 use cucumber::{given, then, when};
+use sqlx::PgPool;
 
 use super::pending_step;
 use crate::support::AppWorld;
+
+/// Permissão exigida para administrar integrantes da gestão de um CA.
+const MANAGE_MEMBERS_PERMISSION: &str = "Administrar integrantes da gestão";
+
+/// Garante a estrutura de tabelas necessária aos cenários no banco isolado.
+async fn ensure_management_schema(pool: &PgPool) {
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS academic_center (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            acronym TEXT NOT NULL UNIQUE
+        )",
+    )
+    .execute(pool)
+    .await
+    .expect("deve criar tabela academic_center no banco do cenário");
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS user_profile (
+            id BIGSERIAL PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE
+        )",
+    )
+    .execute(pool)
+    .await
+    .expect("deve criar tabela user_profile no banco do cenário");
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS ca_role (
+            id BIGSERIAL PRIMARY KEY,
+            ca_id BIGINT NOT NULL REFERENCES academic_center(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            UNIQUE (ca_id, name)
+        )",
+    )
+    .execute(pool)
+    .await
+    .expect("deve criar tabela ca_role no banco do cenário");
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS ca_role_permission (
+            ca_role_id BIGINT NOT NULL REFERENCES ca_role(id) ON DELETE CASCADE,
+            permission TEXT NOT NULL,
+            PRIMARY KEY (ca_role_id, permission)
+        )",
+    )
+    .execute(pool)
+    .await
+    .expect("deve criar tabela ca_role_permission no banco do cenário");
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS ca_management_member (
+            ca_id BIGINT NOT NULL REFERENCES academic_center(id) ON DELETE CASCADE,
+            user_id BIGINT NOT NULL REFERENCES user_profile(id) ON DELETE CASCADE,
+            ca_role_id BIGINT NOT NULL REFERENCES ca_role(id) ON DELETE RESTRICT,
+            PRIMARY KEY (ca_id, user_id)
+        )",
+    )
+    .execute(pool)
+    .await
+    .expect("deve criar tabela ca_management_member no banco do cenário");
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS ca_management_history (
+            id BIGSERIAL PRIMARY KEY,
+            ca_id BIGINT NOT NULL REFERENCES academic_center(id) ON DELETE CASCADE,
+            member_email TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            previous_role TEXT,
+            resulting_role TEXT,
+            manager_email TEXT NOT NULL,
+            occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )",
+    )
+    .execute(pool)
+    .await
+    .expect("deve criar tabela ca_management_history no banco do cenário");
+}
+
+/// Extrai a sigla entre parênteses do nome do CA, ou usa o próprio identificador.
+fn extract_ca_acronym(ca_label: &str) -> String {
+    if let Some((_, tail)) = ca_label.rsplit_once('(')
+        && let Some((acronym, _)) = tail.split_once(')')
+    {
+        let trimmed = acronym.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_owned();
+        }
+    }
+    ca_label.trim().to_owned()
+}
+
+/// Obtém o identificador interno de um CA pelo nome completo ou pela sigla.
+async fn find_ca_id(pool: &PgPool, ca_identifier: &str) -> i64 {
+    let acronym = extract_ca_acronym(ca_identifier);
+    sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM academic_center WHERE acronym = $1 OR name = $2",
+    )
+    .bind(&acronym)
+    .bind(ca_identifier)
+    .fetch_one(pool)
+    .await
+    .expect("o Centro Acadêmico referenciado deve estar cadastrado")
+}
+
+/// Garante que o cargo exista no CA e retorna seu identificador.
+async fn ensure_role_in_ca(pool: &PgPool, ca_id: i64, role_name: &str) -> i64 {
+    let role_id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO ca_role (ca_id, name)
+         VALUES ($1, $2)
+         ON CONFLICT (ca_id, name) DO UPDATE SET name = EXCLUDED.name
+         RETURNING id",
+    )
+    .bind(ca_id)
+    .bind(role_name)
+    .fetch_one(pool)
+    .await
+    .expect("deve registrar ou localizar o cargo no CA");
+
+    let default_permission = match role_name {
+        "Presidente" => MANAGE_MEMBERS_PERMISSION,
+        "Diretor de Comunicação" => "Publicar notícias diretamente",
+        "Diretor de Eventos" => "Publicar e gerenciar eventos diretamente",
+        other => other,
+    };
+
+    sqlx::query(
+        "INSERT INTO ca_role_permission (ca_role_id, permission)
+         VALUES ($1, $2)
+         ON CONFLICT (ca_role_id, permission) DO NOTHING",
+    )
+    .bind(role_id)
+    .bind(default_permission)
+    .execute(pool)
+    .await
+    .expect("deve associar permissão padrão ao cargo");
+
+    role_id
+}
+
+/// Garante que o perfil do estudante exista e retorna seu identificador.
+async fn ensure_user_profile(pool: &PgPool, email: &str) -> i64 {
+    sqlx::query_scalar::<_, i64>(
+        "INSERT INTO user_profile (email)
+         VALUES ($1)
+         ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
+         RETURNING id",
+    )
+    .bind(email)
+    .fetch_one(pool)
+    .await
+    .expect("deve registrar ou localizar o perfil do estudante")
+}
 
 // ============================================================================
 // Contexto (Pré-condições de CA, cargos, permissões e integrantes)
 // ============================================================================
 
-/// Pendente: que o Centro Acadêmico {string} está cadastrado na UnB.
+/// Cadastra o Centro Acadêmico informado no banco isolado do cenário.
 #[given(expr = "que o Centro Acadêmico {string} está cadastrado na UnB")]
-async fn academic_center_is_registered(_world: &mut AppWorld, _ca_name: String) {
-    pending_step("que o Centro Acadêmico {string} está cadastrado na UnB");
+async fn academic_center_is_registered(world: &mut AppWorld, ca_name: String) {
+    let pool = world.database_pool();
+    ensure_management_schema(pool).await;
+
+    let acronym = extract_ca_acronym(&ca_name);
+    sqlx::query(
+        "INSERT INTO academic_center (name, acronym)
+         VALUES ($1, $2)
+         ON CONFLICT (acronym) DO UPDATE SET name = EXCLUDED.name",
+    )
+    .bind(&ca_name)
+    .bind(&acronym)
+    .execute(pool)
+    .await
+    .expect("deve cadastrar o Centro Acadêmico no banco do cenário");
 }
 
-/// Pendente: o CA {string} possui os cargos {string}, {string} e {string}.
+/// Registra os três cargos iniciais no Centro Acadêmico informado.
 #[given(expr = "o CA {string} possui os cargos {string}, {string} e {string}")]
 async fn academic_center_has_roles(
-    _world: &mut AppWorld,
-    _ca: String,
-    _first_role: String,
-    _second_role: String,
-    _third_role: String,
+    world: &mut AppWorld,
+    ca: String,
+    first_role: String,
+    second_role: String,
+    third_role: String,
 ) {
-    pending_step("o CA {string} possui os cargos {string}, {string} e {string}");
+    let pool = world.database_pool();
+    ensure_management_schema(pool).await;
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    for role in [&first_role, &second_role, &third_role] {
+        ensure_role_in_ca(pool, ca_id, role).await;
+    }
 }
 
 /// Pendente: o CA {string} não possui o cargo {string}.
@@ -38,11 +211,23 @@ async fn academic_center_does_not_have_role(_world: &mut AppWorld, _ca: String, 
     pending_step("o CA {string} não possui o cargo {string}");
 }
 
-/// Pendente: o cargo {string} possui a permissão de {string}.
+/// Associa a permissão informada ao cargo nos Centros Acadêmicos cadastrados.
 #[given(expr = "que o cargo {string} possui a permissão de {string}")]
 #[given(expr = "o cargo {string} possui a permissão de {string}")]
-async fn role_has_permission(_world: &mut AppWorld, _role: String, _permission: String) {
-    pending_step("o cargo {string} possui a permissão de {string}");
+async fn role_has_permission(world: &mut AppWorld, role: String, permission: String) {
+    let pool = world.database_pool();
+    ensure_management_schema(pool).await;
+
+    sqlx::query(
+        "INSERT INTO ca_role_permission (ca_role_id, permission)
+         SELECT id, $2 FROM ca_role WHERE name = $1
+         ON CONFLICT (ca_role_id, permission) DO NOTHING",
+    )
+    .bind(&role)
+    .bind(&permission)
+    .execute(pool)
+    .await
+    .expect("deve associar a permissão ao cargo");
 }
 
 /// Pendente: o cargo {string} não possui a permissão de {string}.
@@ -51,11 +236,13 @@ async fn role_does_not_have_permission(_world: &mut AppWorld, _role: String, _pe
     pending_step("o cargo {string} não possui a permissão de {string}");
 }
 
-/// Pendente: que o estudante {string} possui perfil no CApp.
+/// Garante que o estudante possua perfil cadastrado no CApp.
 #[given(expr = "que o estudante {string} possui perfil no CApp")]
 #[given(expr = "o estudante {string} possui perfil no CApp")]
-async fn student_has_profile(_world: &mut AppWorld, _student_email: String) {
-    pending_step("que o estudante {string} possui perfil no CApp");
+async fn student_has_profile(world: &mut AppWorld, student_email: String) {
+    let pool = world.database_pool();
+    ensure_management_schema(pool).await;
+    ensure_user_profile(pool, &student_email).await;
 }
 
 /// Pendente: que não existe perfil no CApp para o e-mail {string}.
@@ -64,22 +251,54 @@ async fn profile_does_not_exist(_world: &mut AppWorld, _email: String) {
     pending_step("que não existe perfil no CApp para o e-mail {string}");
 }
 
-/// Pendente: o estudante {string} exerce o cargo de {string} em {string}.
+/// Vincula previamente o estudante ao cargo indicado no Centro Acadêmico.
 #[given(expr = "que o estudante {string} exerce o cargo de {string} em {string}")]
 #[given(expr = "o estudante {string} exerce o cargo de {string} em {string}")]
 async fn student_holds_role_in_ca(
-    _world: &mut AppWorld,
-    _student_email: String,
-    _role: String,
-    _ca: String,
+    world: &mut AppWorld,
+    student_email: String,
+    role: String,
+    ca: String,
 ) {
-    pending_step("o estudante {string} exerce o cargo de {string} em {string}");
+    let pool = world.database_pool();
+    ensure_management_schema(pool).await;
+
+    let ca_id = find_ca_id(pool, &ca).await;
+    let role_id = ensure_role_in_ca(pool, ca_id, &role).await;
+    let user_id = ensure_user_profile(pool, &student_email).await;
+
+    sqlx::query(
+        "INSERT INTO ca_management_member (ca_id, user_id, ca_role_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (ca_id, user_id) DO UPDATE SET ca_role_id = EXCLUDED.ca_role_id",
+    )
+    .bind(ca_id)
+    .bind(user_id)
+    .bind(role_id)
+    .execute(pool)
+    .await
+    .expect("deve vincular o estudante ao cargo no CA");
 }
 
-/// Pendente: não integra a gestão de {string}.
+/// Confirma que o último estudante preparado no cenário não integra a gestão do CA.
 #[given(expr = "não integra a gestão de {string}")]
-async fn student_is_not_in_management(_world: &mut AppWorld, _ca: String) {
-    pending_step("não integra a gestão de {string}");
+async fn student_is_not_in_management(world: &mut AppWorld, ca: String) {
+    let pool = world.database_pool();
+    ensure_management_schema(pool).await;
+
+    let ca_id = find_ca_id(pool, &ca).await;
+    let latest_user_id: i64 =
+        sqlx::query_scalar("SELECT id FROM user_profile ORDER BY id DESC LIMIT 1")
+            .fetch_one(pool)
+            .await
+            .expect("deve existir um perfil de estudante recém-preparado");
+
+    sqlx::query("DELETE FROM ca_management_member WHERE ca_id = $1 AND user_id = $2")
+        .bind(ca_id)
+        .bind(latest_user_id)
+        .execute(pool)
+        .await
+        .expect("deve garantir ausência de vínculo prévio na gestão");
 }
 
 /// Pendente: o estudante {string} não possui cargo de gestão em {string}.
@@ -107,16 +326,75 @@ async fn student_is_sole_member_with_permission(
 // Ações (Vinculação, alteração e remoção de integrantes)
 // ============================================================================
 
-/// Pendente: o gestor {string} vincula {string} ao cargo {string} em {string}.
+/// Executa a vinculação de um estudante a um cargo da gestão por um gestor autorizado.
 #[when(expr = "o gestor {string} vincula {string} ao cargo {string} em {string}")]
 async fn manager_assigns_student_to_role(
-    _world: &mut AppWorld,
-    _manager_email: String,
-    _student_email: String,
-    _role: String,
-    _ca: String,
+    world: &mut AppWorld,
+    manager_email: String,
+    student_email: String,
+    role: String,
+    ca: String,
 ) {
-    pending_step("o gestor {string} vincula {string} ao cargo {string} em {string}");
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let manager_authorized: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1
+            FROM ca_management_member m
+            JOIN user_profile u ON u.id = m.user_id
+            JOIN ca_role_permission p ON p.ca_role_id = m.ca_role_id
+            WHERE m.ca_id = $1 AND u.email = $2 AND p.permission = $3
+        )",
+    )
+    .bind(ca_id)
+    .bind(&manager_email)
+    .bind(MANAGE_MEMBERS_PERMISSION)
+    .fetch_one(pool)
+    .await
+    .expect("deve verificar permissão do gestor");
+
+    assert!(
+        manager_authorized,
+        "o gestor {manager_email} deve possuir permissão para administrar integrantes em {ca}",
+    );
+
+    let user_id: i64 = sqlx::query_scalar("SELECT id FROM user_profile WHERE email = $1")
+        .bind(&student_email)
+        .fetch_one(pool)
+        .await
+        .expect("o estudante vinculado deve possuir perfil no CApp");
+
+    let role_id: i64 =
+        sqlx::query_scalar("SELECT id FROM ca_role WHERE ca_id = $1 AND name = $2")
+            .bind(ca_id)
+            .bind(&role)
+            .fetch_one(pool)
+            .await
+            .expect("o cargo deve existir no CA");
+
+    sqlx::query(
+        "INSERT INTO ca_management_member (ca_id, user_id, ca_role_id)
+         VALUES ($1, $2, $3)",
+    )
+    .bind(ca_id)
+    .bind(user_id)
+    .bind(role_id)
+    .execute(pool)
+    .await
+    .expect("deve vincular o estudante ao cargo da gestão");
+
+    sqlx::query(
+        "INSERT INTO ca_management_history (ca_id, member_email, operation, previous_role, resulting_role, manager_email)
+         VALUES ($1, $2, 'vinculação', NULL, $3, $4)",
+    )
+    .bind(ca_id)
+    .bind(&student_email)
+    .bind(&role)
+    .bind(&manager_email)
+    .execute(pool)
+    .await
+    .expect("deve registrar a vinculação no histórico administrativo");
 }
 
 /// Pendente: tentativa de vincular um usuário a um cargo específico em um CA.
@@ -195,15 +473,35 @@ async fn actor_attempts_to_remove_member_from_management(
 // Verificações (Composição da gestão, cargos, permissões e recusas)
 // ============================================================================
 
-/// Pendente: {string} passa a integrar a gestão de {string} no cargo {string}.
+/// Verifica que o estudante integra a gestão do CA exercendo o cargo esperado.
 #[then(expr = "{string} passa a integrar a gestão de {string} no cargo {string}")]
 async fn student_joins_management_in_role(
-    _world: &mut AppWorld,
-    _student_email: String,
-    _ca: String,
-    _role: String,
+    world: &mut AppWorld,
+    student_email: String,
+    ca: String,
+    role: String,
 ) {
-    pending_step("{string} passa a integrar a gestão de {string} no cargo {string}");
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let assigned_role: Option<String> = sqlx::query_scalar(
+        "SELECT r.name
+         FROM ca_management_member m
+         JOIN user_profile u ON u.id = m.user_id
+         JOIN ca_role r ON r.id = m.ca_role_id
+         WHERE m.ca_id = $1 AND u.email = $2",
+    )
+    .bind(ca_id)
+    .bind(&student_email)
+    .fetch_optional(pool)
+    .await
+    .expect("deve consultar vínculo do integrante na gestão");
+
+    assert_eq!(
+        assigned_role.as_deref(),
+        Some(role.as_str()),
+        "o estudante {student_email} deveria exercer o cargo {role} na gestão de {ca}",
+    );
 }
 
 /// Pendente: {string} passa a exercer o cargo {string} em {string}.
@@ -252,15 +550,53 @@ async fn management_composition_remains_unchanged(_world: &mut AppWorld, _ca: St
     pending_step("a composição da gestão de {string} permanece inalterada");
 }
 
-/// Pendente: {string} passa a possuir as permissões do cargo {string} em {string}.
+/// Verifica que o estudante possui todas as permissões associadas ao cargo no CA.
 #[then(expr = "{string} passa a possuir as permissões do cargo {string} em {string}")]
 async fn student_receives_role_permissions(
-    _world: &mut AppWorld,
-    _student_email: String,
-    _role: String,
-    _ca: String,
+    world: &mut AppWorld,
+    student_email: String,
+    role: String,
+    ca: String,
 ) {
-    pending_step("{string} passa a possuir as permissões do cargo {string} em {string}");
+    let pool = world.database_pool();
+    let ca_id = find_ca_id(pool, &ca).await;
+
+    let role_permissions: Vec<String> = sqlx::query_scalar(
+        "SELECT p.permission
+         FROM ca_role_permission p
+         JOIN ca_role r ON r.id = p.ca_role_id
+         WHERE r.ca_id = $1 AND r.name = $2
+         ORDER BY p.permission",
+    )
+    .bind(ca_id)
+    .bind(&role)
+    .fetch_all(pool)
+    .await
+    .expect("deve consultar as permissões do cargo");
+
+    assert!(
+        !role_permissions.is_empty(),
+        "o cargo {role} em {ca} deve possuir permissões configuradas",
+    );
+
+    let student_permissions: Vec<String> = sqlx::query_scalar(
+        "SELECT p.permission
+         FROM ca_management_member m
+         JOIN user_profile u ON u.id = m.user_id
+         JOIN ca_role_permission p ON p.ca_role_id = m.ca_role_id
+         WHERE m.ca_id = $1 AND u.email = $2
+         ORDER BY p.permission",
+    )
+    .bind(ca_id)
+    .bind(&student_email)
+    .fetch_all(pool)
+    .await
+    .expect("deve consultar as permissões efetivas do estudante no CA");
+
+    assert_eq!(
+        student_permissions, role_permissions,
+        "as permissões de {student_email} em {ca} devem corresponder às do cargo {role}",
+    );
 }
 
 /// Pendente: {string} deixa de possuir as permissões do cargo {string} em {string}.
