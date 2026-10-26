@@ -1,18 +1,22 @@
-//! Rotas globais de saúde e prontidão do backend.
+//! Rotas globais de saúde e prontidão do backend com observabilidade integrada.
 //!
 //! A composição é independente do transporte: o chamador pode servir o router
 //! com Axum ou enviar requisições em memória. Nenhuma conexão é aberta ao
 //! construir o router; o acesso ao PostgreSQL ocorre no handler de prontidão.
+//!
+//! O router inclui por padrão os middlewares de observabilidade:
+//! - [`crate::api::request_id::request_id_middleware`]: rastreabilidade com cabeçalho `x-request-id`.
+//! - [`crate::api::trace::create_trace_layer`]: medição de latência, códigos de status e spans estruturados.
 
 use std::time::Duration;
 
-use axum::{Router, extract::State, routing::get};
+use axum::{Router, extract::State, middleware, routing::get};
 use reqwest::StatusCode;
 use tokio::time::timeout;
 
-use crate::api::state::AppState;
+use crate::api::{request_id::request_id_middleware, state::AppState, trace::create_trace_layer};
 
-/// Monta as rotas globais, ainda dependentes de [`AppState`].
+/// Monta as rotas globais com middlewares de rastreabilidade, ainda dependentes de [`AppState`].
 ///
 /// # Rotas
 ///
@@ -20,6 +24,11 @@ use crate::api::state::AppState;
 /// | --- | --- |
 /// | `GET /health` | Retorna HTTP 200 e `O servidor está saudável.` sem consultar dependências. |
 /// | `GET /ready` | Executa `SELECT 1 AS ok` no pool; retorna HTTP 200 no sucesso e HTTP 503 em erro ou timeout. |
+///
+/// # Middlewares Instalados
+///
+/// - Propagação e injeção obrigatória do cabeçalho `x-request-id` em todas as respostas HTTP.
+/// - Spans de rastreabilidade assíncrona com `request_id`, `method`, `uri`, `status` e `latency_ms`.
 ///
 /// A prontidão limita a espera pela aquisição da conexão e execução da consulta
 /// a dois segundos. Sua resposta não contém corpo; falhas são registradas em
@@ -30,8 +39,7 @@ use crate::api::state::AppState;
 /// # Retorno
 ///
 /// Um [`Router<AppState>`] que deve receber o estado por [`Router::with_state`]
-/// antes de atender requisições. Não inicia servidor, não aplica migrations e
-/// não instala autenticação ou outros middlewares.
+/// antes de atender requisições. Não inicia servidor nem aplica migrations.
 ///
 /// # Exemplos
 ///
@@ -52,6 +60,7 @@ use crate::api::state::AppState;
 ///     .oneshot(Request::builder().uri("/health").body(Body::empty())?)
 ///     .await?;
 /// assert_eq!(response.status(), StatusCode::OK);
+/// assert!(response.headers().contains_key("x-request-id"));
 /// pool.close().await;
 /// # Ok(())
 /// # }
@@ -81,4 +90,6 @@ pub fn create_router() -> Router<AppState> {
                 }
             }),
         )
+        .layer(create_trace_layer())
+        .layer(middleware::from_fn(request_id_middleware))
 }
