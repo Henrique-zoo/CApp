@@ -32,7 +32,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então "241098765@aluno.unb.br" passa a integrar a gestão de "CAER" no cargo "Diretor de Comunicação"
       E "241098765@aluno.unb.br" passa a possuir as permissões do cargo "Diretor de Comunicação" em "CAER"
 
-    @pending_backend @sad @backend @mobile
+    @isolated_database @sad @backend @mobile
     Cenário: Integrante sem permissão de administrar a gestão não pode vincular usuários
       Dado que o estudante "222033333@aluno.unb.br" exerce o cargo de "Diretor de Eventos" em "CAER"
       E o cargo "Diretor de Eventos" não possui a permissão de "Administrar integrantes da gestão"
@@ -41,7 +41,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então a operação é recusada por falta de permissão
       E "241098765@aluno.unb.br" não passa a integrar a gestão de "CAER"
 
-    @pending_backend @sad @backend
+    @isolated_database @sad @backend
     Cenário: Gestor de um CA não pode vincular usuários à gestão de outro CA
       Dado que o Centro Acadêmico "Centro Acadêmico de Ciência da Computação (CACC)" está cadastrado na UnB
       E o estudante "231012345@aluno.unb.br" não possui cargo de gestão em "CACC"
@@ -50,14 +50,14 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então a operação é recusada por falta de permissão
       E "241098765@aluno.unb.br" não passa a integrar a gestão de "CACC"
 
-    @pending_backend @sad @backend @mobile
+    @isolated_database @sad @backend @mobile
     Cenário: Não é possível vincular um usuário sem perfil no CApp
       Dado que não existe perfil no CApp para o e-mail "209999999@aluno.unb.br"
       Quando o gestor "231012345@aluno.unb.br" tenta vincular "209999999@aluno.unb.br" ao cargo "Diretor de Comunicação" em "CAER"
       Então a operação é recusada informando que o usuário não foi encontrado
       E a composição da gestão de "CAER" permanece inalterada
 
-    @pending_backend @sad @backend @mobile
+    @isolated_database @sad @backend @mobile
     Cenário: Não é possível vincular um usuário a um cargo inexistente no CA
       Dado que o estudante "241098765@aluno.unb.br" possui perfil no CApp
       E o CA "CAER" não possui o cargo "Tesoureiro"
@@ -65,14 +65,14 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       Então a operação é recusada informando que o cargo não existe no CA
       E "241098765@aluno.unb.br" não passa a integrar a gestão de "CAER"
 
-    @pending_backend @sad @backend @mobile
+    @isolated_database @sad @backend @mobile
     Cenário: Usuário que já integra a gestão não recebe um segundo vínculo no mesmo CA
       Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
       Quando o gestor "231012345@aluno.unb.br" tenta vincular "241098765@aluno.unb.br" ao cargo "Diretor de Eventos" em "CAER"
       Então a operação é recusada informando que o usuário já integra a gestão do CA
       E "241098765@aluno.unb.br" permanece somente no cargo "Diretor de Comunicação" em "CAER"
 
-    @pending_backend @happy @backend
+    @isolated_database @happy @backend
     Cenário: Integrar a gestão de um CA não altera vínculos em outro CA
       Dado que o Centro Acadêmico "Centro Acadêmico de Ciência da Computação (CACC)" está cadastrado na UnB
       E o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Eventos" em "CACC"
