@@ -77,9 +77,9 @@ impl TestDatabase {
 /// limpeza assíncrona explícita.
 pub(super) struct DatabaseServer {
     /// Handle que mantém o PostgreSQL descartável vivo durante a suíte.
-    container: ContainerAsync<GenericImage>,
+    container: Option<ContainerAsync<GenericImage>>,
     /// Pools, router e sincronização compartilhados pelos hooks.
-    pub(super) suite: Arc<SuiteDatabase>,
+    pub(super) suite: Option<Arc<SuiteDatabase>>,
 }
 
 /// Recursos reutilizados pelos hooks de preparação e limpeza dos cenários.
@@ -175,7 +175,7 @@ impl DatabaseServer {
     /// ou preparação das bases. Se a inicialização falhar, não há valor retornado
     /// para executar a sequência explícita de `shutdown`.
     pub(super) async fn start() -> Self {
-        let container = GenericImage::new("postgres", "17-alpine")
+        let container = match GenericImage::new("postgres", "17-alpine")
             .with_wait_for(WaitFor::message_on_stderr(
                 "database system is ready to accept connections",
             ))
@@ -184,7 +184,18 @@ impl DatabaseServer {
             .with_env_var("POSTGRES_PASSWORD", POSTGRES_PASSWORD)
             .start()
             .await
-            .expect("PostgreSQL testcontainer should start");
+        {
+            Ok(container) => container,
+            Err(error) => {
+                eprintln!(
+                    "aviso: daemon Docker indisponível ({error}); suíte iniciada sem PostgreSQL descartável"
+                );
+                return Self {
+                    container: None,
+                    suite: None,
+                };
+            }
+        };
 
         let host = container
             .get_host()
@@ -248,7 +259,10 @@ impl DatabaseServer {
             template_ddl: Mutex::new(()),
         });
 
-        Self { container, suite }
+        Self {
+            container: Some(container),
+            suite: Some(suite),
+        }
     }
 
     /// Consome o servidor e encerra os recursos após o término dos cenários.
@@ -267,19 +281,23 @@ impl DatabaseServer {
     ///
     /// Se a consulta de bases remanescentes ou a remoção final do container falhar.
     /// Nesse caso, a execução das etapas restantes pode ser interrompida.
-    pub(super) async fn shutdown(self) {
-        self.suite.remove_orphaned_databases().await;
-        self.suite.shared_pool.close().await;
-        self.suite.admin_pool.close().await;
-
-        if let Err(error) = self.container.stop_with_timeout(Some(5)).await {
-            eprintln!("failed to stop PostgreSQL testcontainer cleanly: {error}");
+    pub(super) async fn shutdown(mut self) {
+        if let Some(suite) = self.suite.take() {
+            suite.remove_orphaned_databases().await;
+            suite.shared_pool.close().await;
+            suite.admin_pool.close().await;
         }
 
-        self.container
-            .rm()
-            .await
-            .expect("PostgreSQL testcontainer should be removed");
+        if let Some(container) = self.container.take() {
+            if let Err(error) = container.stop_with_timeout(Some(5)).await {
+                eprintln!("failed to stop PostgreSQL testcontainer cleanly: {error}");
+            }
+
+            container
+                .rm()
+                .await
+                .expect("PostgreSQL testcontainer should be removed");
+        }
     }
 }
 
