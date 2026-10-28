@@ -342,14 +342,16 @@ components:
       required: [error]
       properties:
         error:
-          type: object
-          required: [code, message, details]
-          properties:
-            code:
-              type: string
-              description: Identificador estável para tratamento programático; os códigos aplicáveis estão descritos em cada resposta HTTP.
-            message:
-              type: string
-              description: Mensagem pública legível, sem diagnósticos internos ou credenciais.
-            details:
-              description: Contexto público adicional ou null. Os erros atuais da rota de verificação retornam null.
+          $ref: '#/components/schemas/ApiErrorDetails'
+    ApiErrorDetails:
+      type: object
+      required: [code, message, details]
+      properties:
+        code:
+          type: string
+          description: Identificador estável para tratamento programático; os códigos aplicáveis estão descritos em cada resposta HTTP.
+        message:
+          type: string
+          description: Mensagem pública legível, sem diagnósticos internos ou credenciais.
+        details:
+          description: Contexto público adicional ou null. Os erros atuais da rota de verificação retornam null.
