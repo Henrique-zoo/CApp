@@ -1,9 +1,17 @@
-//! Camada de domínio prevista para o módulo de notícias.
+//! Camada de domínio do módulo de notícias.
 //!
-//! [`entities`], [`rules`] e [`events`] reservarão os modelos, suas invariantes
-//! e os fatos relevantes do negócio. Ainda não há regras implementadas;
-//! essa camada deve permanecer independente de HTTP e banco de dados.
+//! Encapsula entidades, regras de negócio e eventos de ciclo de vida
+//! relacionados à publicação e gestão de notícias nos Centros Acadêmicos.
+//!
+//! Esta camada é estritamente isolada de detalhes de transporte (HTTP)
+//! e de mecanismos de armazenamento (SQL / persistência).
 
 pub mod entities;
 pub mod events;
 pub mod rules;
+
+pub use entities::{NewsArticle, NewsStatus};
+pub use events::{
+    NewsArticleArchivedEvent, NewsArticlePublishedEvent, NewsArticleSubmittedForReviewEvent,
+};
+pub use rules::NewsDomainError;

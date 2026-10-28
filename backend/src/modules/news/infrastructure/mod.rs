@@ -1,6 +1,11 @@
-//! Camada de persistência prevista para o módulo de notícias.
+//! Camada de infraestrutura do módulo de notícias.
 //!
-//! [`repository`] reserva os adaptadores de acesso aos dados desse domínio.
-//! Ainda não existem consultas ou implementações de repositório.
+//! Contém os repositórios em memória e PostgreSQL, bem como os adaptadores
+//! para resolução de permissões e governança nos Centros Acadêmicos.
 
 pub mod repository;
+
+pub use repository::{
+    AllowAllNewsAuthorization, InMemoryNewsRepository, PgNewsRepository,
+    StaticRoleNewsAuthorization,
+};
