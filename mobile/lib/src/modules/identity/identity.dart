@@ -60,3 +60,5 @@ export 'application/errors/session_identity_changed_exception.dart'
     show SessionIdentityChangedException;
 export 'application/errors/session_cache_write_exception.dart'
     show SessionCacheWriteException;
+export 'application/errors/session_cache_removal_exception.dart'
+    show SessionCacheRemovalException;

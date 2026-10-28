@@ -35,6 +35,17 @@
 /// a persistência falhar, a entrada continua permitida e a operação lança
 /// SessionCacheWriteException com o resultado confirmado e o diagnóstico original.
 ///
+/// ## Saída e limpeza local
+///
+/// signOut encerra a autenticação antes de remover o cache da conta. A ausência
+/// de UID já bloqueia a área principal, mas a entrada permanece ocupada até
+/// concluir a tentativa de remoção. Falha do provedor preserva a identidade
+/// efetivamente observada e seu diagnóstico, sem simular sucesso.
+///
+/// Se somente a limpeza falhar, publica SessionSignedOut com o aviso e lança
+/// SessionCacheRemovalException. O cache remanescente não autentica a conta.
+/// Eventos ou conclusões de outra sessão não podem atualizar o contexto atual.
+///
 /// ## Validade e concorrência
 ///
 /// O controlador calcula SessionState.access e agenda a expiração. refresh
@@ -55,13 +66,14 @@
 ///
 /// O proprietário chama dispose para invalidar operações, cancelar o timer e a
 /// inscrição e fechar o stream. O encerramento é compartilhado e não aguarda
-/// todo I/O externo ou local pendente. Logout coordenado e remoção de cache
-/// não são implementados por esta biblioteca.
+/// todo I/O externo ou local pendente. Descarte não substitui signOut e não
+/// solicita logout ou limpeza de dados no provedor.
 library;
 
 import 'dart:async';
 
 import 'errors/identity_exception.dart';
+import 'errors/session_cache_removal_exception.dart';
 import 'errors/session_cache_write_exception.dart';
 import 'errors/session_identity_changed_exception.dart';
 import 'institutional_auth_service.dart';
@@ -89,8 +101,9 @@ typedef SessionClock = DateTime Function();
 /// numa sequência A/B/A. Operações locais são serializadas, mas I/O já iniciado
 /// não é cancelado ou revertido por troca de conta.
 ///
-/// O proprietário encerra a instância com [dispose]. Logout coordenado e
-/// provisionamento de usuário no backend não são implementados aqui.
+/// [signOut] encerra a autenticação e tenta remover o cache dessa conta.
+/// O proprietário encerra a instância com [dispose], sem executar logout.
+/// Provisionamento de usuário no backend não é implementado aqui.
 final class SessionController {
   /// Conecta contratos referentes à mesma autenticação.
   ///
@@ -117,6 +130,9 @@ final class SessionController {
   Timer? _expirationTimer;
   SessionState _state = const SessionRestoring();
   _VerificationOperation? _activeVerification;
+
+  /// Contexto de saída, preservado durante a emissão esperada de UID nulo.
+  _SignOutOperation? _activeSignOut;
 
   /// Fila de disponibilidade do armazenamento; cada falha fica no seu Future.
   Future<void> _storeTurn = Future<void>.value();
@@ -193,6 +209,70 @@ final class SessionController {
     return _runVerification(renewal: true);
   }
 
+  /// Encerra a autenticação e remove o cache somente da conta correspondente.
+  ///
+  /// Exige restauração concluída, uma conta autenticada e ausência de outra
+  /// operação; violações lançam [StateError]. Marca signingOut antes de aguardar
+  /// o provedor, impedindo chamadas simultâneas e novos logins durante a limpeza.
+  ///
+  /// Primeiro solicita logout à [AuthSession]. Sua emissão de UID nulo mantém
+  /// a saída em andamento. Depois serializa a remoção com o restante do I/O
+  /// local, evitando que uma escrita anterior recrie o registro após a limpeza.
+  ///
+  /// Conclui sem valor quando ambas as etapas terminam. Falhas do provedor ficam
+  /// no estado e propagam com causa e pilha. Se apenas a remoção falhar, mantém
+  /// o usuário deslogado e lança [SessionCacheRemovalException] com o diagnóstico.
+  /// Troca de conta ou descarte lança [SessionIdentityChangedException] sem
+  /// publicar resultados na nova sessão. Efeitos já iniciados não são revertidos.
+  ///
+  /// Não revoga tokens de outros dispositivos nem remove evidências do backend.
+  Future<void> signOut() async {
+    _requireReadyForOperation(requiresAuthentication: true);
+    final previous = _state as SessionSignedIn;
+    final operation = _SignOutOperation(
+      firebaseUid: previous.firebaseUid,
+      revision: ++_revision,
+    );
+    _activeSignOut = operation;
+    _emit(
+      SessionSignedIn(
+        firebaseUid: previous.firebaseUid,
+        verification: previous.verification,
+        cacheLoadResult: previous.cacheLoadResult,
+        operation: SessionOperation.signingOut,
+      ),
+    );
+
+    try {
+      await _authSession.signOut();
+      _requireSignedOutOperation(operation);
+      try {
+        await _withStore(() async {
+          _requireSignedOutOperation(operation);
+          await _sessionStore.remove(operation.firebaseUid);
+        });
+      } on SessionIdentityChangedException {
+        rethrow;
+      } on Exception catch (error, stackTrace) {
+        Error.throwWithStackTrace(
+          SessionCacheRemovalException(
+            firebaseUid: operation.firebaseUid,
+            cause: error,
+            causeStackTrace: stackTrace,
+          ),
+          stackTrace,
+        );
+      }
+      _requireSignedOutOperation(operation);
+      _emit(const SessionSignedOut());
+    } on Exception catch (error, stackTrace) {
+      _publishSignOutFailure(operation, error, stackTrace);
+      rethrow;
+    } finally {
+      if (identical(_activeSignOut, operation)) _activeSignOut = null;
+    }
+  }
+
   /// Reavalia identidade e validade ao retomar a aplicação.
   ///
   /// Não consulta o backend, abre login ou remove cache. Antes da primeira
@@ -215,7 +295,7 @@ final class SessionController {
   Future<InstitutionalVerificationResult> _runVerification({
     required bool renewal,
   }) async {
-    _requireReadyForVerification(renewal: renewal);
+    _requireReadyForOperation(requiresAuthentication: renewal);
     final previous = _state;
     final operation = _VerificationOperation(
       renewal: renewal,
@@ -314,18 +394,20 @@ final class SessionController {
     }
   }
 
-  /// Confere restauração, exclusão mútua e identidade antes de iniciar.
+  /// Confere restauração, exclusão mútua e identidade antes de uma operação.
   ///
-  /// Uma mudança de UID é sincronizada antes de lançar a sinalização de contexto
-  /// alterado. Renovação também exige [SessionSignedIn].
-  void _requireReadyForVerification({required bool renewal}) {
+  /// [requiresAuthentication] exige conta conhecida para renovação ou saída.
+  /// Divergência de UID é sincronizada antes de sinalizar contexto alterado.
+  void _requireReadyForOperation({required bool requiresAuthentication}) {
     if (_disposed) throw StateError('O controlador já foi encerrado');
     if (!_started ||
         !_receivedUser ||
         _state.access == SessionAccess.restorationFailed) {
       throw StateError('A autenticação inicial ainda não foi restaurada');
     }
-    if (_activeVerification != null || _state.isBusy) {
+    if (_activeVerification != null ||
+        _activeSignOut != null ||
+        _state.isBusy) {
       throw StateError('Já existe uma operação de sessão em andamento');
     }
     final actualUid = _authSession.currentUserId;
@@ -333,8 +415,8 @@ final class SessionController {
       _onUserChanged(actualUid);
       throw const SessionIdentityChangedException();
     }
-    if (renewal && _state is! SessionSignedIn) {
-      throw StateError('A renovação exige uma conta autenticada');
+    if (requiresAuthentication && _state is! SessionSignedIn) {
+      throw StateError('A operação exige uma conta autenticada');
     }
   }
 
@@ -346,6 +428,16 @@ final class SessionController {
   void _onUserChanged(String? firebaseUid) {
     if (_disposed) return;
     if (_receivedUser && firebaseUid == _currentUid) return;
+    final signOut = _activeSignOut;
+    if (signOut != null &&
+        firebaseUid == null &&
+        _currentUid == signOut.firebaseUid &&
+        _revision == signOut.revision) {
+      _receivedUser = true;
+      _currentUid = null;
+      _emit(const SessionSignedOut(operation: SessionOperation.signingOut));
+      return;
+    }
     _receivedUser = true;
     _currentUid = firebaseUid;
     final revision = ++_revision;
@@ -367,6 +459,7 @@ final class SessionController {
     }
 
     _activeVerification = null;
+    _activeSignOut = null;
     if (firebaseUid == null) {
       _emit(const SessionSignedOut());
       return;
@@ -426,6 +519,61 @@ final class SessionController {
     final current = _state;
     final details = SessionFailureDetails(cause: error, stackTrace: stackTrace);
     final failure = _classifyFailure(error, current);
+    if (current is SessionSignedIn) {
+      _emit(
+        SessionSignedIn(
+          firebaseUid: current.firebaseUid,
+          verification: current.verification,
+          cacheLoadResult: current.cacheLoadResult,
+          failure: failure,
+          failureDetails: details,
+        ),
+      );
+    } else if (current is SessionSignedOut) {
+      _emit(SessionSignedOut(failure: failure, failureDetails: details));
+    }
+  }
+
+  /// Exige a mesma saída e confirma a ausência efetiva de conta no provedor.
+  ///
+  /// Sincroniza eventos atrasados pelo UID consultado. Revisões impedem que
+  /// uma sequência A/B/A reaproveite conclusões do logout anterior.
+  void _requireSignedOutOperation(_SignOutOperation operation) {
+    if (_disposed || !identical(_activeSignOut, operation)) {
+      throw const SessionIdentityChangedException();
+    }
+    final actualUid = _authSession.currentUserId;
+    if (actualUid != _currentUid) _onUserChanged(actualUid);
+    if (!identical(_activeSignOut, operation) ||
+        _revision != operation.revision ||
+        _currentUid != null ||
+        actualUid != null) {
+      throw const SessionIdentityChangedException();
+    }
+  }
+
+  /// Preserva uma falha de saída na identidade efetivamente observada.
+  ///
+  /// Uma falha do provedor não fabrica logout. Uma falha exclusiva da limpeza
+  /// conserva o estado deslogado. Conclusões de contextos antigos são ignoradas.
+  void _publishSignOutFailure(
+    _SignOutOperation operation,
+    Exception error,
+    StackTrace stackTrace,
+  ) {
+    if (_disposed || !identical(_activeSignOut, operation)) return;
+    final actualUid = _authSession.currentUserId;
+    if (actualUid != _currentUid) _onUserChanged(actualUid);
+    if (!identical(_activeSignOut, operation) ||
+        _revision != operation.revision) {
+      return;
+    }
+
+    final failure = error is SessionCacheRemovalException
+        ? SessionFailure.cacheRemovalFailed
+        : SessionFailure.signOutFailed;
+    final details = SessionFailureDetails(cause: error, stackTrace: stackTrace);
+    final current = _state;
     if (current is SessionSignedIn) {
       _emit(
         SessionSignedIn(
@@ -529,6 +677,7 @@ final class SessionController {
     if (error is! Exception) Error.throwWithStackTrace(error, stackTrace);
     ++_revision;
     _activeVerification = null;
+    _activeSignOut = null;
     _currentUid = null;
     _receivedUser = false;
     _emit(SessionRestorationFailed(cause: error, stackTrace: stackTrace));
@@ -608,6 +757,7 @@ final class SessionController {
     _disposed = true;
     ++_revision;
     _activeVerification = null;
+    _activeSignOut = null;
     _expirationTimer?.cancel();
     try {
       await _authSubscription?.cancel();
@@ -615,6 +765,18 @@ final class SessionController {
       await _changes.close();
     }
   }
+}
+
+/// Identidade e revisão de uma saída, incluindo a limpeza após UID nulo.
+final class _SignOutOperation {
+  /// Captura a conta cuja autenticação e cache serão encerrados.
+  const _SignOutOperation({required this.firebaseUid, required this.revision});
+
+  /// Conta cujo registro local será removido.
+  final String firebaseUid;
+
+  /// Geração que invalida conclusões após troca de conta ou descarte.
+  final int revision;
 }
 
 /// Contexto de uma tentativa, distinto mesmo quando o UID se repete.

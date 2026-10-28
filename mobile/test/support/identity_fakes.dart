@@ -39,6 +39,12 @@ final class FakeAuthSession implements AuthSession {
   String? _uid;
   final _changes = StreamController<String?>.broadcast(sync: true);
 
+  /// Quantidade de solicitações explícitas de logout ao provedor.
+  int signOutCalls = 0;
+
+  /// Substitui a saída para simular demora, falha ou eventos atrasados.
+  Future<void> Function()? onSignOut;
+
   /// Identidade consultada sincronamente pela operação.
   @override
   String? get currentUserId => _uid;
@@ -67,7 +73,14 @@ final class FakeAuthSession implements AuthSession {
 
   /// Encerra a identidade simulada e publica ausência de conta.
   @override
-  Future<void> signOut() async => setUserId(null);
+  Future<void> signOut() async {
+    signOutCalls++;
+    if (onSignOut != null) {
+      await onSignOut!();
+      return;
+    }
+    setUserId(null);
+  }
 
   /// Libera o emissor pertencente ao teste.
   Future<void> close() => _changes.close();
@@ -153,11 +166,17 @@ final class FakeSessionStore implements SessionStore {
   /// Quantidade de tentativas de gravação.
   int saveCalls = 0;
 
+  /// Registros cuja remoção foi solicitada, inclusive tentativas malsucedidas.
+  final removedUids = <String>[];
+
   /// Substitui a leitura para simular I/O pendente.
   Future<SessionCacheLoadResult> Function(String uid)? onLoad;
 
   /// Substitui a etapa de gravação antes de atualizar o registro.
   Future<void> Function(String uid, InstitutionalVerification value)? onSave;
+
+  /// Substitui a remoção antes de alterar o registro em memória.
+  Future<void> Function(String uid)? onRemove;
 
   /// Registra o UID e mantém distintos os resultados da leitura.
   @override
@@ -181,6 +200,8 @@ final class FakeSessionStore implements SessionStore {
   /// Remove somente o registro solicitado.
   @override
   Future<void> remove(String firebaseUid) async {
+    removedUids.add(firebaseUid);
+    await onRemove?.call(firebaseUid);
     results.remove(firebaseUid);
   }
 }

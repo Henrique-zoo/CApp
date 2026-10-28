@@ -52,8 +52,8 @@ abstract interface class AuthSession {
   ///
   /// Após o sucesso, [watchUserId] deve emitir null.
   ///
-  /// A limpeza do cache institucional exige coordenação separada; o controlador
-  /// atual ainda não implementa uma operação pública de logout com essa limpeza.
+  /// A limpeza do cache institucional pertence à operação de saída coordenada
+  /// pelo SessionController, depois do sucesso desta chamada ao provedor.
   /// Falhas de encerramento são propagadas ao chamador.
   ///
   /// Concluir o Future representa o encerramento local informado pelo provedor.

@@ -22,8 +22,9 @@
 ///
 /// Os modelos não consultam relógio e não executam efeitos colaterais. O prazo é
 /// avaliado pelo controlador, enquanto autenticação e autorização efetivas de
-/// requisições continuam pertencendo ao backend. Estados reservados para logout
-/// não significam que já exista uma operação coordenada de saída.
+/// requisições continuam pertencendo ao backend. Durante o logout, a operação
+/// permanece ocupada até terminar a tentativa de limpeza local, mesmo depois
+/// de o provedor informar ausência da conta.
 library;
 
 import 'models/institutional_verification.dart';
@@ -64,8 +65,8 @@ final class SessionFailureDetails {
 
 /// Operação atualmente coordenada pelo controlador da sessão.
 ///
-/// Alguns valores descrevem operações previstas; sua presença não significa que
-/// o controlador já implemente cada fluxo, como logout coordenado.
+/// A atividade é independente do destino: uma conta já deslogada pode continuar
+/// em signingOut enquanto a coordenação tenta remover seu cache local.
 enum SessionOperation {
   /// Nenhuma operação em andamento.
   idle,
@@ -91,8 +92,8 @@ enum SessionOperation {
 /// A apresentação transforma essas categorias em mensagens.
 /// Exceções técnicas não devem ser exibidas diretamente ao usuário.
 /// O controlador classifica as falhas normalizadas dos adaptadores e preserva
-/// sua causa em SessionFailureDetails. A categoria de logout está reservada
-/// para o fluxo coordenado de saída, que ainda não é implementado.
+/// sua causa em SessionFailureDetails. Falha de limpeza após logout não implica
+/// que a autenticação permaneça ativa.
 enum SessionFailure {
   /// Uma operação externa foi cancelada, sem implicar logout.
   operationCancelled,
@@ -129,6 +130,9 @@ enum SessionFailure {
 
   /// A verificação foi concluída, mas não pôde ser persistida.
   cacheWriteFailed,
+
+  /// A autenticação foi encerrada, mas a remoção do cache local falhou.
+  cacheRemovalFailed,
 }
 
 /// Estado observável do fluxo de sessão.

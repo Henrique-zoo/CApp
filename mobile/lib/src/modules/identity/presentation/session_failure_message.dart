@@ -10,9 +10,10 @@
 /// explicitamente marcada como pública na fronteira. Na sua ausência, a mensagem
 /// vem de IdentityFailureKind. A causa técnica não é convertida em texto público.
 ///
-/// Para um estado de sessão, a causa classificada tem prioridade sobre o resumo
-/// SessionFailure. Uma evidência presente com entrada exigida e sem operação
-/// pode gerar a orientação de autenticar novamente por expiração.
+/// A operação de saída possui mensagens próprias para não orientar um novo
+/// login quando o problema foi encerrar a conta. Nas demais operações, a causa
+/// classificada tem prioridade sobre o resumo SessionFailure. Uma evidência
+/// presente com entrada exigida e sem operação pode indicar expiração.
 ///
 /// ## Limites
 ///
@@ -60,10 +61,18 @@ String identityFailureMessage(IdentityException failure) {
 
 /// Obtém a mensagem da falha ou da necessidade de renovar a entrada.
 ///
-/// Uma causa classificada tem prioridade sobre o resumo. Retorna nulo apenas
-/// quando não há mensagem; não remove ou converte o diagnóstico em nulo.
+/// A falha de saída e a limpeza posterior possuem mensagens específicas.
+/// Nas demais operações, a causa classificada tem prioridade sobre o resumo.
+/// Retorna nulo apenas quando não há mensagem, sem apagar o diagnóstico.
 /// A expiração usa o destino publicado pelo controlador, sem outro relógio.
 String? sessionFailureMessage(SessionState state) {
+  if (state.failure == SessionFailure.signOutFailed) {
+    return 'Não foi possível sair da conta. Tente novamente.';
+  }
+  if (state.failure == SessionFailure.cacheRemovalFailed) {
+    return 'Você saiu da conta, mas não foi possível remover os dados '
+        'salvos neste dispositivo.';
+  }
   final cause = state.failureDetails?.cause;
   if (cause is IdentityException) return identityFailureMessage(cause);
   if (cause is SessionCacheWriteException) {
@@ -84,6 +93,9 @@ String? sessionFailureMessage(SessionState state) {
         'Não foi possível recuperar os dados salvos. Entre novamente.',
       SessionFailure.cacheWriteFailed =>
         'Não foi possível salvar os dados neste dispositivo.',
+      SessionFailure.cacheRemovalFailed =>
+        'Você saiu da conta, mas não foi possível remover os dados '
+            'salvos neste dispositivo.',
       SessionFailure.serviceUnavailable =>
         'O serviço está temporariamente indisponível. Tente mais tarde.',
       SessionFailure.authenticationObservationFailed =>

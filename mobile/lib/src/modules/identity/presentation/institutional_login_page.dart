@@ -158,7 +158,13 @@ class InstitutionalLoginPage extends StatelessWidget {
         height: 20,
         excludeFromSemantics: true,
       ),
-      label: Text(state.isBusy ? 'Entrando...' : 'Entrar com Microsoft'),
+      label: Text(
+        state.operation == SessionOperation.signingOut
+            ? 'Saindo...'
+            : state.isBusy
+            ? 'Entrando...'
+            : 'Entrar com Microsoft',
+      ),
       style: FilledButton.styleFrom(
         backgroundColor: const Color(0xFF2F2F2F),
         foregroundColor: Colors.white,
