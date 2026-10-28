@@ -10,7 +10,7 @@ use backend::modules::events::{
         UpdateEventCommand,
     },
     domain::{EventDomainError, EventRegistrationInfo},
-    infrastructure::PostgresEventRepository,
+    infrastructure::{PostgresEventAuthorizationService, PostgresEventRepository},
 };
 use chrono::{DateTime, NaiveDateTime, Utc};
 use cucumber::{gherkin::Step, given, then, when};
@@ -328,6 +328,25 @@ fn map_application_error_reason(error: &EventApplicationError) -> &'static str {
     }
 }
 
+/// Sincroniza a permissão do ator na tabela de autorização de eventos (`ca_event_permissions`).
+async fn sync_actor_event_permission(pool: &PgPool, ca_id: i64, actor_email: &str) {
+    let auth_service = PostgresEventAuthorizationService::new(pool.clone());
+    let ca_uuid = ca_uuid_from_id(ca_id);
+    let actor_uuid = author_uuid_from_email(pool, actor_email).await;
+
+    if is_actor_authorized_for_events(pool, ca_id, actor_email).await {
+        auth_service
+            .grant_direct_event_permission(ca_uuid, actor_uuid)
+            .await
+            .expect("deve conceder permissão direta de eventos no serviço de autorização");
+    } else {
+        auth_service
+            .revoke_direct_event_permission(ca_uuid, actor_uuid)
+            .await
+            .expect("deve revogar permissão direta de eventos no serviço de autorização");
+    }
+}
+
 /// Valida e executa a criação de um evento (como publicado ou rascunho) no CA via [`EventService`].
 async fn attempt_event_creation(
     pool: &PgPool,
@@ -337,27 +356,11 @@ async fn attempt_event_creation(
     target_status: &str,
 ) -> Result<i64, &'static str> {
     let ca_id = find_ca_id(pool, ca_identifier).await;
+    sync_actor_event_permission(pool, ca_id, actor_email).await;
 
-    if !is_actor_authorized_for_events(pool, ca_id, actor_email).await {
-        record_event_operation_outcome(pool, "rejected", Some("permission_denied")).await;
-        return Err("permission_denied");
-    }
-
-    if input.title.trim().is_empty() {
-        record_event_operation_outcome(pool, "rejected", Some("missing:título")).await;
-        return Err("missing:título");
-    }
-    if input.description.trim().is_empty() {
-        record_event_operation_outcome(pool, "rejected", Some("missing:descrição")).await;
-        return Err("missing:descrição");
-    }
     if input.starts_at.trim().is_empty() {
         record_event_operation_outcome(pool, "rejected", Some("missing:início")).await;
         return Err("missing:início");
-    }
-    if input.location.trim().is_empty() {
-        record_event_operation_outcome(pool, "rejected", Some("missing:local")).await;
-        return Err("missing:local");
     }
 
     let starts_at = parse_scenario_datetime(&input.starts_at);
@@ -367,7 +370,10 @@ async fn attempt_event_creation(
         parse_scenario_datetime(&input.ends_at)
     };
 
-    let service = EventService::new(PostgresEventRepository::new(pool.clone()));
+    let service = EventService::with_authorizer(
+        PostgresEventRepository::new(pool.clone()),
+        PostgresEventAuthorizationService::new(pool.clone()),
+    );
     let command = CreateEventCommand {
         academic_center_id: ca_uuid_from_id(ca_id),
         author_id: author_uuid_from_email(pool, actor_email).await,
@@ -424,11 +430,7 @@ async fn attempt_direct_publication(
     ca_identifier: &str,
 ) -> Result<i64, &'static str> {
     let ca_id = find_ca_id(pool, ca_identifier).await;
-
-    if !is_actor_authorized_for_events(pool, ca_id, actor_email).await {
-        record_event_operation_outcome(pool, "rejected", Some("permission_denied")).await;
-        return Err("permission_denied");
-    }
+    sync_actor_event_permission(pool, ca_id, actor_email).await;
 
     let domain_event_id: Option<Uuid> =
         sqlx::query_scalar("SELECT domain_event_id FROM ca_event WHERE ca_id = $1 AND title = $2")
@@ -439,17 +441,30 @@ async fn attempt_direct_publication(
             .expect("deve localizar o evento em rascunho no CA");
 
     let published_at = if let Some(domain_id) = domain_event_id {
-        let service = EventService::new(PostgresEventRepository::new(pool.clone()));
-        let published = service
+        let service = EventService::with_authorizer(
+            PostgresEventRepository::new(pool.clone()),
+            PostgresEventAuthorizationService::new(pool.clone()),
+        );
+        match service
             .publish_event_directly(PublishEventCommand {
                 event_id: domain_id,
                 academic_center_id: Some(ca_uuid_from_id(ca_id)),
                 actor_id: Some(author_uuid_from_email(pool, actor_email).await),
             })
             .await
-            .expect("deve publicar diretamente no EventService");
-        published.published_at
+        {
+            Ok(published) => published.published_at,
+            Err(error) => {
+                let reason = map_application_error_reason(&error);
+                record_event_operation_outcome(pool, "rejected", Some(reason)).await;
+                return Err(reason);
+            }
+        }
     } else {
+        if !is_actor_authorized_for_events(pool, ca_id, actor_email).await {
+            record_event_operation_outcome(pool, "rejected", Some("permission_denied")).await;
+            return Err("permission_denied");
+        }
         Some(Utc::now())
     };
 
@@ -508,27 +523,11 @@ async fn attempt_event_edit(
 ) -> Result<i64, &'static str> {
     let ca_id = find_ca_id(pool, ca_identifier).await;
     snapshot_event_before_edit(pool, ca_id, original_title).await;
+    sync_actor_event_permission(pool, ca_id, actor_email).await;
 
-    if !is_actor_authorized_for_events(pool, ca_id, actor_email).await {
-        record_event_operation_outcome(pool, "rejected", Some("permission_denied")).await;
-        return Err("permission_denied");
-    }
-
-    if input.title.trim().is_empty() {
-        record_event_operation_outcome(pool, "rejected", Some("missing:título")).await;
-        return Err("missing:título");
-    }
-    if input.description.trim().is_empty() {
-        record_event_operation_outcome(pool, "rejected", Some("missing:descrição")).await;
-        return Err("missing:descrição");
-    }
     if input.starts_at.trim().is_empty() {
         record_event_operation_outcome(pool, "rejected", Some("missing:início")).await;
         return Err("missing:início");
-    }
-    if input.location.trim().is_empty() {
-        record_event_operation_outcome(pool, "rejected", Some("missing:local")).await;
-        return Err("missing:local");
     }
 
     let starts_at = parse_scenario_datetime(&input.starts_at);
@@ -547,7 +546,10 @@ async fn attempt_event_edit(
             .expect("deve localizar o evento a ser editado no CA");
 
     if let Some(domain_id) = domain_event_id {
-        let service = EventService::new(PostgresEventRepository::new(pool.clone()));
+        let service = EventService::with_authorizer(
+            PostgresEventRepository::new(pool.clone()),
+            PostgresEventAuthorizationService::new(pool.clone()),
+        );
         let command = UpdateEventCommand {
             event_id: domain_id,
             academic_center_id: Some(ca_uuid_from_id(ca_id)),
@@ -565,6 +567,9 @@ async fn attempt_event_edit(
             record_event_operation_outcome(pool, "rejected", Some(reason)).await;
             return Err(reason);
         }
+    } else if !is_actor_authorized_for_events(pool, ca_id, actor_email).await {
+        record_event_operation_outcome(pool, "rejected", Some("permission_denied")).await;
+        return Err("permission_denied");
     } else if ends_at <= starts_at {
         record_event_operation_outcome(pool, "rejected", Some("invalid_period")).await;
         return Err("invalid_period");

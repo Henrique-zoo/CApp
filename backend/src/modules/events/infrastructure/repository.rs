@@ -6,8 +6,10 @@ use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::modules::events::{
-    application::{EventApplicationError, EventRepository},
-    domain::{Event, EventPublicationStatus, EventRegistrationInfo},
+    application::{EventApplicationError, EventAuthorizationPort, EventRepository},
+    domain::{
+        DIRECT_EVENT_MANAGEMENT_PERMISSION, Event, EventPublicationStatus, EventRegistrationInfo,
+    },
 };
 
 /// Representação de uma linha da tabela `events` no PostgreSQL.
@@ -294,5 +296,84 @@ impl EventRepository for PostgresEventRepository {
 
         row.map(Event::from)
             .ok_or(EventApplicationError::NotFound(event.id))
+    }
+}
+
+/// Adaptador PostgreSQL de controle de acesso e autorização administrativa sobre eventos do CA.
+#[derive(Debug, Clone)]
+pub struct PostgresEventAuthorizationService {
+    pool: PgPool,
+}
+
+impl PostgresEventAuthorizationService {
+    /// Constrói o serviço PostgreSQL de autorização de eventos baseado em [`PgPool`].
+    pub const fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// Concede a permissão [`DIRECT_EVENT_MANAGEMENT_PERMISSION`] a `user_id` na gestão de `academic_center_id`.
+    pub async fn grant_direct_event_permission(
+        &self,
+        academic_center_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), EventApplicationError> {
+        sqlx::query(
+            "INSERT INTO ca_event_permissions (academic_center_id, user_id, permission)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (academic_center_id, user_id, permission) DO NOTHING",
+        )
+        .bind(academic_center_id)
+        .bind(user_id)
+        .bind(DIRECT_EVENT_MANAGEMENT_PERMISSION)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+        Ok(())
+    }
+
+    /// Revoga a permissão [`DIRECT_EVENT_MANAGEMENT_PERMISSION`] de `user_id` em `academic_center_id`.
+    pub async fn revoke_direct_event_permission(
+        &self,
+        academic_center_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), EventApplicationError> {
+        sqlx::query(
+            "DELETE FROM ca_event_permissions
+             WHERE academic_center_id = $1 AND user_id = $2 AND permission = $3",
+        )
+        .bind(academic_center_id)
+        .bind(user_id)
+        .bind(DIRECT_EVENT_MANAGEMENT_PERMISSION)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl EventAuthorizationPort for PostgresEventAuthorizationService {
+    async fn can_manage_and_publish_directly(
+        &self,
+        user_id: Uuid,
+        academic_center_id: Uuid,
+    ) -> Result<bool, EventApplicationError> {
+        let has_permission: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+                SELECT 1
+                FROM ca_event_permissions
+                WHERE academic_center_id = $1
+                  AND user_id = $2
+                  AND permission = $3
+            )",
+        )
+        .bind(academic_center_id)
+        .bind(user_id)
+        .bind(DIRECT_EVENT_MANAGEMENT_PERMISSION)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        Ok(has_permission)
     }
 }

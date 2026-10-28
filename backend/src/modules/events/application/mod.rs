@@ -9,4 +9,7 @@ pub mod services;
 
 pub use commands::{CreateEventCommand, PublishEventCommand, UpdateEventCommand};
 pub use queries::{GetEventByIdQuery, ListCaEventsQuery};
-pub use services::{EventApplicationError, EventRepository, EventService};
+pub use services::{
+    AllowAllEventAuthorization, EventApplicationError, EventAuthorizationPort, EventRepository,
+    EventService, StaticEventAuthorization,
+};
