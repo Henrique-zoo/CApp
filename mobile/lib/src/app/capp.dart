@@ -21,12 +21,16 @@
 /// um aviso informativo, sem transformar a resposta bem-sucedida em recusa.
 /// Falha exclusiva de persistência acrescenta um aviso e preserva a entrada na
 /// execução atual.
+/// A ação de saída é injetada na Home. Falhas esperadas são apresentadas pelo
+/// estado; a composição acompanha o Future sem depender do contexto da tela
+/// depois que o logout troca o ramo da navegação.
 ///
 /// A biblioteca não calcula validade, chama backend ou infere permissões gerais
 /// a partir do vínculo estudantil. As funcionalidades principais do produto
 /// podem ser compostas a partir desta área.
 library;
 
+import 'package:capp/src/presentation/presentation.dart';
 import 'package:flutter/material.dart';
 
 import '../modules/identity/identity.dart';
@@ -48,6 +52,27 @@ class CApp extends StatelessWidget {
   /// Fonte do estado e das operações de entrada.
   final SessionController sessionController;
 
+  /// Solicita saída apenas para uma conta conhecida e sem outra operação.
+  ///
+  /// O controlador publica os diagnósticos das falhas esperadas. Contextos
+  /// obsoletos e limpeza parcialmente concluída não geram Futures sem tratamento
+  /// no callback do botão. Exceções sem diagnóstico publicado e Errors propagam.
+  Future<void> _signOut() async {
+    final current = sessionController.state;
+    if (current is! SessionSignedIn || current.isBusy) return;
+    try {
+      await sessionController.signOut();
+    } on SessionIdentityChangedException {
+      // A operação deixou de pertencer à conta que originou o clique.
+    } on SessionCacheRemovalException {
+      // A autenticação já terminou; a entrada apresenta o aviso de limpeza.
+    } on Exception catch (error, stackTrace) {
+      if (!identical(sessionController.state.failureDetails?.cause, error)) {
+        Error.throwWithStackTrace(error, stackTrace);
+      }
+    }
+  }
+
   /// Monta o gate e a navegação correspondente ao ramo selecionado.
   ///
   /// [context] identifica a posição deste widget na árvore.
@@ -62,7 +87,22 @@ class CApp extends StatelessWidget {
       entryBuilder: (_, state) => _buildApplication(
         InstitutionalLoginPage(controller: sessionController, state: state),
       ),
-      signedInBuilder: (_, state) => _buildApplication(_buildHome(state)),
+      signedInBuilder: (_, state) {
+        final cause = state.failureDetails?.cause;
+        final warning =
+            cause is SessionCacheWriteException ||
+                state.failure == SessionFailure.signOutFailed
+            ? cause
+            : null;
+
+        return _buildApplication(
+          TemporaryWarning(
+            warningId: warning,
+            message: warning == null ? null : sessionFailureMessage(state),
+            child: HomePage(state: state, onSignOut: _signOut),
+          ),
+        );
+      },
       restorationFailedBuilder: (_, state) => _buildApplication(
         const Scaffold(
           body: SafeArea(
@@ -86,56 +126,6 @@ class CApp extends StatelessWidget {
   /// [home] pertence ao ramo atual do gate. Quando esse ramo muda,
   /// sua subárvore e seu Navigator são descartados.
   Widget _buildApplication(Widget home) {
-    return MaterialApp(
-      title: 'CApp',
-      theme: createDarkTheme(),
-      home: home,
-    );
-  }
-
-  /// Constrói o ponto inicial da área principal autenticada.
-  ///
-  /// [state] é fornecido pelo ramo do gate que exige verificação válida.
-  /// Por esse contrato, seu perfil está disponível nesta construção.
-  ///
-  /// O vínculo não estudantil gera uma mensagem informativa e não impede
-  /// a montagem desta área. As funcionalidades principais podem ser
-  /// acrescentadas a partir desta tela.
-  ///
-  /// Falha exclusiva de persistência é apresentada sem desfazer a entrada
-  /// já permitida pela resposta válida do backend.
-  Widget _buildHome(SessionSignedIn state) {
-    final profile = state.verification!.profile;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('CApp')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            Text(
-              profile.name == null
-                  ? 'Bem-vindo ao CApp'
-                  : 'Olá, ${profile.name}',
-            ),
-            if (profile.affiliation is NonStudentAffiliation) ...[
-              const SizedBox(height: 16),
-              const Text(
-                'Você não foi reconhecido como estudante da sua '
-                'instituição. Isso significa que você não terá acesso '
-                'a diversas funcionalidades exclusivas de estudantes.',
-              ),
-            ],
-            if (state.failure == SessionFailure.cacheWriteFailed) ...[
-              const SizedBox(height: 16),
-              const Text(
-                'Não foi possível salvar seus dados neste dispositivo. '
-                'Pode ser necessário entrar novamente ao reabrir o app.',
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
+    return MaterialApp(title: 'CApp', theme: createDarkTheme(), home: home);
   }
 }

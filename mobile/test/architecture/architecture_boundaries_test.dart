@@ -55,6 +55,10 @@ void main() {
   test('apresentação não conhece transporte, Firebase ou preferências', () {
     final identity = Directory('lib/src/modules/identity').absolute.uri
         .toString();
+    final sharedPresentation = File('lib/src/presentation/presentation.dart')
+        .absolute
+        .uri
+        .toString();
     for (final source in _sources('lib/src/modules/identity/presentation')) {
       for (final uri in _directives(source)) {
         if (uri.startsWith('dart:') ||
@@ -63,6 +67,7 @@ void main() {
           continue;
         }
         final target = _target(source, uri);
+        if (target == sharedPresentation) continue;
         expect(
           target.startsWith(identity),
           isTrue,
@@ -76,6 +81,25 @@ void main() {
       }
     }
   });
+
+  test(
+    'apresentação compartilhada depende somente de Flutter e de si própria',
+    () {
+      final root = Directory('lib/src/presentation').absolute.uri.toString();
+      for (final source in _sources('lib/src/presentation')) {
+        for (final uri in _directives(source)) {
+          if (uri.startsWith('dart:') || uri.startsWith('package:flutter/')) {
+            continue;
+          }
+          expect(
+            _target(source, uri).startsWith(root),
+            isTrue,
+            reason: '${source.path} depende de $uri',
+          );
+        }
+      }
+    },
+  );
 
   test('transporte compartilhado não conhece módulos de negócio', () {
     for (final source in _sources('lib/src/infrastructure/backend')) {

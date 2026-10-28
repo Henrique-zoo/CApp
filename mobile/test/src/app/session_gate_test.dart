@@ -156,7 +156,7 @@ void main() {
         ),
       );
       await tester.pump();
-      final context = tester.element(find.text('Olá, Pessoa Exemplo'));
+      final context = tester.element(find.text('Pessoa Exemplo'));
       unawaited(
         Navigator.of(context).push(
           MaterialPageRoute<void>(
