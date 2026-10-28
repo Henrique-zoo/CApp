@@ -19,6 +19,13 @@
 ///
 /// O provedor solicita User.Read, sem fixar um tenant. Na web, utiliza popup;
 /// nas plataformas nativas com suporte, utiliza o provedor do SDK.
+/// prompt=select_account solicita a escolha explícita de conta, interrompendo
+/// a seleção automática por SSO. Depois da escolha, a Microsoft ainda pode
+/// aproveitar sua sessão existente sem solicitar novamente a senha.
+///
+/// No Android, o SDK Firebase apresenta a autenticação em uma Custom Tab do
+/// navegador. A aparência dessa janela pertence ao SDK e ao navegador instalado;
+/// esta biblioteca não cria uma WebView ou apaga os cookies do provedor.
 /// O resultado precisa conter um access token Microsoft não vazio.
 /// Reautenticação exige uma conta existente, que será novamente conferida
 /// pelo caso de uso e pelo controlador.
@@ -176,9 +183,18 @@ final class FirebaseMicrosoftAuth implements MicrosoftSignIn, AuthSession {
     }
   }
 
-  /// Solicita o escopo delegado necessário à verificação, sem fixar tenant.
-  MicrosoftAuthProvider _createProvider() =>
-      MicrosoftAuthProvider()..addScope('User.Read');
+  /// Solicita o escopo delegado e a escolha de conta, sem fixar um tenant.
+  ///
+  /// A configuração é compartilhada por login e reautenticação. select_account
+  /// permite confirmar uma conta lembrada ou indicar outra, sem exigir senha
+  /// a cada interação. Na reautenticação, o SDK e o caso de uso continuam
+  /// exigindo a mesma identidade; a troca de conta requer encerrar a anterior.
+  ///
+  /// Não altera a restauração de uma sessão já válida, a persistência Firebase
+  /// ou os cookies do navegador. A construção não abre a interface do provedor.
+  MicrosoftAuthProvider _createProvider() => MicrosoftAuthProvider()
+    ..addScope('User.Read')
+    ..setCustomParameters(const {'prompt': 'select_account'});
 
   /// Exige o access token da resposta sem registrar seu conteúdo.
   String _extractAccessToken(UserCredential result) {
