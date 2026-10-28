@@ -746,13 +746,39 @@ impl Event {
         }
     }
 
-    /// Atualiza a configuração de inscrição do evento preservando sua consistência com o período.
+    /// Atualiza a configuração de inscrição do evento preservando a contagem de inscritos já confirmados
+    /// e validando sua consistência com o período e com as inscrições ativas.
     pub fn configure_registration(
         &mut self,
-        registration: EventRegistrationInfo,
+        mut registration: EventRegistrationInfo,
     ) -> Result<(), EventDomainError> {
+        if registration.confirmed_registrations == 0
+            && self.registration.confirmed_registrations > 0
+        {
+            registration.confirmed_registrations = self.registration.confirmed_registrations;
+        }
         registration.validate(self.ends_at)?;
         self.registration = registration;
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    /// Atualiza os parâmetros configuráveis de inscrição (`requires_registration`, `max_capacity` e
+    /// `registration_deadline`) preservando o total atual de participantes já inscritos.
+    pub fn update_registration_settings(
+        &mut self,
+        requires_registration: bool,
+        max_capacity: Option<u32>,
+        registration_deadline: Option<DateTime<Utc>>,
+    ) -> Result<(), EventDomainError> {
+        let updated = EventRegistrationInfo {
+            requires_registration,
+            max_capacity,
+            confirmed_registrations: self.registration.confirmed_registrations,
+            registration_deadline,
+        };
+        updated.validate(self.ends_at)?;
+        self.registration = updated;
         self.updated_at = Utc::now();
         Ok(())
     }

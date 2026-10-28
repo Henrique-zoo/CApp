@@ -10,7 +10,7 @@ use axum::{Router, extract::State, routing::get};
 use reqwest::StatusCode;
 use tokio::time::timeout;
 
-use crate::api::state::AppState;
+use crate::{api::state::AppState, modules::events};
 
 /// Monta as rotas globais, ainda dependentes de [`AppState`].
 ///
@@ -81,4 +81,5 @@ pub fn create_router() -> Router<AppState> {
                 }
             }),
         )
+        .merge(events::api::router())
 }
