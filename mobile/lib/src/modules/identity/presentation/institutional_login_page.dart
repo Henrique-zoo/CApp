@@ -30,6 +30,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/svg.dart';
 
 import '../application/errors/identity_exception.dart';
 import '../application/errors/session_cache_write_exception.dart';
@@ -99,8 +100,11 @@ class InstitutionalLoginPage extends StatelessWidget {
     final message = sessionFailureMessage(state);
     return Scaffold(
       appBar: AppBar(title: const Text('Entrar no CApp')),
-      body: SafeArea(
-        child: Center(
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.all(24),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          heightFactor: 1,
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: ConstrainedBox(
@@ -110,15 +114,10 @@ class InstitutionalLoginPage extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
-                    'Entre com sua conta Microsoft para acessar o CApp.',
+                    'Entre com sua conta institucional da Microsoft para acessar o CApp.',
                   ),
                   const SizedBox(height: 24),
-                  FilledButton(
-                    onPressed: state.isBusy ? null : _signIn,
-                    child: Text(
-                      state.isBusy ? 'Entrando...' : 'Entrar com Microsoft',
-                    ),
-                  ),
+                  _buildSignInButton(),
                   if (message != null) ...[
                     const SizedBox(height: 16),
                     Semantics(
@@ -136,6 +135,40 @@ class InstitutionalLoginPage extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Constrói o botão de entrada com identificação visual da Microsoft.
+  ///
+  /// O estado ocupado desabilita novas interações e altera o texto.
+  /// A ação utiliza [_signIn], que mantém as verificações da sessão.
+  ///
+  /// O logo preserva suas cores originais. Sua descrição semântica é omitida
+  /// porque o texto do botão já identifica o provedor.
+  ///
+  /// O arquivo deve existir e estar declarado no pubspec.yaml para que
+  /// o Flutter consiga carregá-lo.
+  Widget _buildSignInButton() {
+    return FilledButton.icon(
+      onPressed: state.isBusy ? null : _signIn,
+      icon: SvgPicture.asset(
+        'assets/branding/microsoft.svg',
+        width: 20,
+        height: 20,
+        excludeFromSemantics: true,
+      ),
+      label: Text(state.isBusy ? 'Entrando...' : 'Entrar com Microsoft'),
+      style: FilledButton.styleFrom(
+        backgroundColor: const Color(0xFF2F2F2F),
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: const Color(0xFF252525),
+        disabledForegroundColor: const Color(0xFFAAAAAA),
+        minimumSize: const Size(0, 52),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        side: const BorderSide(color: Color(0xFF666666)),
+        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
       ),
     );
   }

@@ -32,6 +32,7 @@ import 'package:flutter/material.dart';
 import '../modules/identity/identity.dart';
 import '../modules/identity/identity_widgets.dart';
 import 'session_gate.dart';
+import 'theme.dart';
 
 /// Apresenta a interface correspondente à situação atual da sessão.
 ///
@@ -87,9 +88,7 @@ class CApp extends StatelessWidget {
   Widget _buildApplication(Widget home) {
     return MaterialApp(
       title: 'CApp',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
+      theme: createDarkTheme(),
       home: home,
     );
   }

@@ -57,7 +57,9 @@ void main() {
         .toString();
     for (final source in _sources('lib/src/modules/identity/presentation')) {
       for (final uri in _directives(source)) {
-        if (uri.startsWith('dart:') || uri.startsWith('package:flutter/')) {
+        if (uri.startsWith('dart:') ||
+            uri.startsWith('package:flutter/') ||
+            uri.startsWith('package:flutter_svg/')) {
           continue;
         }
         final target = _target(source, uri);
