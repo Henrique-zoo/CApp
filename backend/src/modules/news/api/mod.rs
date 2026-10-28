@@ -16,12 +16,14 @@ use crate::api::state::AppState;
 /// Cria e configura o router Axum com todos os endpoints do módulo de notícias.
 ///
 /// Rotas registradas:
+/// - `GET /news`: lista notícias publicadas do Centro Acadêmico ativo (`?ca_id={ca_id}`).
 /// - `PATCH /news/{id}/publish`: homologa e publica o artigo.
 /// - `PATCH /news/{id}/archive`: arquiva o artigo.
 /// - `PATCH /news/{id}/submit-for-review`: submete o artigo para revisão da gestão.
-/// - `GET /news/{id}`: consulta os detalhes do artigo.
+/// - `GET /news/{id}`: consulta os detalhes de uma notícia publicada.
 pub fn news_routes() -> Router<AppState> {
     Router::new()
+        .route("/news", get(handlers::list_published_news_handler))
         .route("/news/{id}/publish", patch(handlers::publish_news_handler))
         .route("/news/{id}/archive", patch(handlers::archive_news_handler))
         .route(

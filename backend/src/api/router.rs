@@ -20,10 +20,11 @@ use crate::{api::state::AppState, modules::news::api::news_routes};
 /// | --- | --- |
 /// | `GET /health` | Retorna HTTP 200 e `O servidor está saudável.` sem consultar dependências. |
 /// | `GET /ready` | Executa `SELECT 1 AS ok` no pool; retorna HTTP 200 no sucesso e HTTP 503 em erro ou timeout. |
+/// | `GET /news` | Lista apenas as notícias publicadas do Centro Acadêmico ativo (`?ca_id={ca_id}`). |
 /// | `PATCH /news/{id}/publish` | Homologa e publica um artigo de notícia do Centro Acadêmico. |
 /// | `PATCH /news/{id}/archive` | Arquiva um artigo de notícia do Centro Acadêmico. |
 /// | `PATCH /news/{id}/submit-for-review` | Submete um rascunho de notícia para homologação. |
-/// | `GET /news/{id}` | Recupera os detalhes de um artigo de notícia existente. |
+/// | `GET /news/{id}` | Recupera os detalhes de uma notícia publicada existente. |
 ///
 /// A prontidão limita a espera pela aquisição da conexão e execução da consulta
 /// a dois segundos. Sua resposta não contém corpo; falhas são registradas em

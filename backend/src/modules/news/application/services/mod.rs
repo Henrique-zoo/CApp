@@ -16,7 +16,11 @@ use crate::modules::news::{
             SubmitForReviewNewsArticleUseCase,
         },
         ports::{NewsAuthorizationPort, NewsRepositoryPort},
-        queries::{GetNewsArticleQuery, GetNewsArticleUseCase},
+        queries::{
+            GetNewsArticleQuery, GetNewsArticleUseCase, GetPublishedNewsDetailQuery,
+            GetPublishedNewsDetailUseCase, ListPublishedNewsByCaQuery,
+            ListPublishedNewsByCaUseCase,
+        },
     },
     domain::NewsArticle,
 };
@@ -31,6 +35,8 @@ where
     archive_use_case: ArchiveNewsArticleUseCase<R, A>,
     submit_use_case: SubmitForReviewNewsArticleUseCase<R, A>,
     get_use_case: GetNewsArticleUseCase<R>,
+    list_published_use_case: ListPublishedNewsByCaUseCase<R>,
+    get_published_detail_use_case: GetPublishedNewsDetailUseCase<R>,
 }
 
 impl<R, A> NewsApplicationService<R, A>
@@ -54,6 +60,10 @@ where
                 Arc::clone(&authorization),
             ),
             get_use_case: GetNewsArticleUseCase::new(Arc::clone(&repository)),
+            list_published_use_case: ListPublishedNewsByCaUseCase::new(Arc::clone(&repository)),
+            get_published_detail_use_case: GetPublishedNewsDetailUseCase::new(Arc::clone(
+                &repository,
+            )),
         }
     }
 
@@ -85,6 +95,28 @@ where
     pub async fn get_news_by_id(&self, news_id: Uuid) -> Result<NewsArticle, NewsApplicationError> {
         self.get_use_case
             .execute(GetNewsArticleQuery { news_id })
+            .await
+    }
+
+    /// Executa a listagem pública de notícias publicadas para o Centro Acadêmico informado.
+    pub async fn list_published_news_by_ca(
+        &self,
+        ca_id: Uuid,
+    ) -> Result<Vec<NewsArticle>, NewsApplicationError> {
+        self.list_published_use_case
+            .execute(ListPublishedNewsByCaQuery { ca_id })
+            .await
+    }
+
+    /// Executa a consulta de detalhes de uma notícia publicada.
+    ///
+    /// Retorna [`NewsApplicationError::NotFound`] se o artigo não existir ou não estiver publicado.
+    pub async fn get_published_news_detail(
+        &self,
+        news_id: Uuid,
+    ) -> Result<NewsArticle, NewsApplicationError> {
+        self.get_published_detail_use_case
+            .execute(GetPublishedNewsDetailQuery { news_id })
             .await
     }
 }
