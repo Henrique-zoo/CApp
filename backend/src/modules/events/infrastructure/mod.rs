@@ -1,6 +1,8 @@
-//! Camada de persistência prevista para o módulo de eventos.
+//! Camada de persistência e autorização do módulo de eventos.
 //!
-//! [`repository`] reserva os adaptadores de acesso aos dados desse domínio.
-//! Ainda não existem consultas ou implementações de repositório.
+//! [`repository`] disponibiliza os adaptadores PostgreSQL [`PostgresEventRepository`]
+//! e [`PostgresEventAuthorizationService`].
 
 pub mod repository;
+
+pub use repository::{PostgresEventAuthorizationService, PostgresEventRepository};

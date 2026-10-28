@@ -7,6 +7,7 @@
 //! `bdd_infrastructure`, sem serem registrados nesta suíte.
 
 mod autenticacao_institucional;
+mod criacao_edicao_eventos;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///
