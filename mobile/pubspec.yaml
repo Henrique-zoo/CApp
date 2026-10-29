@@ -91,6 +91,30 @@ flutter:
   assets:
     - assets/branding/microsoft.svg
 
+  fonts:
+    - family: Inter
+      fonts:
+        # Texto corrente e citações em notícias, eventos e respostas do FAQ.
+        - asset: assets/fonts/inter/Inter-Regular.otf
+          weight: 400
+        - asset: assets/fonts/inter/Inter-Italic.otf
+          weight: 400
+          style: italic
+        # Controles, rótulos e títulos de seções.
+        - asset: assets/fonts/inter/Inter-Medium.otf
+          weight: 500
+        - asset: assets/fonts/inter/Inter-SemiBold.otf
+          weight: 600
+        # Títulos e ênfase editorial, inclusive negrito combinado com itálico.
+        - asset: assets/fonts/inter/Inter-Bold.otf
+          weight: 700
+        - asset: assets/fonts/inter/Inter-BoldItalic.otf
+          weight: 700
+          style: italic
+        # Destaques pontuais, como títulos de banners e números de indicadores.
+        - asset: assets/fonts/inter/Inter-ExtraBold.otf
+          weight: 800
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg
