@@ -19,8 +19,13 @@
 /// ## Criação, início e encerramento
 ///
 /// create constrói o grafo depois do bootstrap, sem autenticar ou consultar o
-/// backend. start registra o acompanhamento da sessão, cuja restauração é
-/// assíncrona. AppRoot recebe a composição iniciada e solicita seu dispose.
+/// backend. start registra o acompanhamento da sessão e solicita uma consulta de
+/// prontidão em paralelo. Ambos publicam resultados assíncronos independentes.
+/// AppRoot recebe a composição iniciada e solicita seu dispose.
+///
+/// A consulta GET /ready informa disponibilidade ao usuário, sem condicionar
+/// restauração, login ou acesso ao perfil válido em cache. Não consulta /health
+/// e não repete sondagens ao retornar do navegador Microsoft.
 ///
 /// A composição possui o controlador e o transporte, mas não o aplicativo Firebase
 /// global. O encerramento é compartilhado entre chamadas: aguarda o controlador
@@ -37,8 +42,9 @@ import '../modules/identity/identity.dart';
 import '../modules/identity/infrastructure/backend/backend_institutional_identity_gateway.dart';
 import '../modules/identity/infrastructure/firebase/firebase_microsoft_auth.dart';
 import '../modules/identity/infrastructure/preferences/preferences_session_store.dart';
+import 'backend_readiness_controller.dart';
 
-/// Proprietário do transporte e do controlador compartilhados.
+/// Proprietário do transporte e dos controladores compartilhados.
 ///
 /// Deve ser criado depois do binding Flutter e do bootstrap Firebase.
 /// O chamador inicia com [start] e assume [dispose], normalmente por AppRoot.
@@ -50,6 +56,7 @@ final class AppDependencies {
   AppDependencies._({
     required this._backendApi,
     required this.sessionController,
+    required this.backendReadinessController,
   });
 
   final BackendApi _backendApi;
@@ -58,6 +65,13 @@ final class AppDependencies {
   ///
   /// Construir a composição não inicia seu acompanhamento.
   final SessionController sessionController;
+
+  /// Diagnóstico global de prontidão, independente da coordenação da sessão.
+  ///
+  /// A consulta inicial é solicitada por [start]; a interface pode pedir nova
+  /// tentativa. A composição possui o controlador e interrompe suas notificações
+  /// antes de fechar o transporte, ignorando conclusões tardias.
+  final BackendReadinessController backendReadinessController;
 
   /// Future compartilhado da primeira solicitação de encerramento.
   Future<void>? _disposeFuture;
@@ -87,6 +101,9 @@ final class AppDependencies {
     );
     return AppDependencies._(
       backendApi: backendApi,
+      backendReadinessController: BackendReadinessController(
+        checkReadiness: backendApi.monitoring.getReadiness,
+      ),
       sessionController: SessionController(
         authSession: firebaseMicrosoftAuth,
         sessionStore: sessionStore,
@@ -95,21 +112,24 @@ final class AppDependencies {
     );
   }
 
-  /// Registra o acompanhamento sem aguardar a restauração inicial.
+  /// Inicia a sessão e a consulta de prontidão sem aguardar os resultados.
   ///
-  /// O estado publicado informa a conclusão ou falha. Chamadas repetidas
-  /// seguem a guarda do controlador. Lança StateError depois de solicitar
-  /// encerramento; outras falhas síncronas não capturadas propagam.
+  /// Cada controlador publica sua conclusão ou falha independentemente. Chamadas
+  /// repetidas preservam as guardas de início e não repetem a consulta automática.
+  /// Lança StateError depois de solicitar encerramento; outras falhas síncronas
+  /// não capturadas propagam. Falha de prontidão não desfaz a restauração local.
   void start() {
     if (_disposeFuture != null) {
       throw StateError('As dependências estão sendo ou já foram encerradas');
     }
     sessionController.start();
+    backendReadinessController.start();
   }
 
   /// Solicita encerramento e compartilha seu resultado entre chamadas.
   ///
-  /// Aguarda o controlador e fecha o transporte mesmo se aquele falhar.
+  /// Interrompe notificações de prontidão, aguarda o controlador de sessão e
+  /// fecha o transporte mesmo se aquele falhar. Não aguarda a consulta de rede.
   /// Não executa logout, remove cache ou desfaz efeitos no backend.
   /// O proprietário deve aguardar ou acompanhar a falha do Future.
   Future<void> dispose() => _disposeFuture ??= _disposeResources();
@@ -119,6 +139,7 @@ final class AppDependencies {
   /// Falhas propagam; se o fechamento do transporte também lançar no finally,
   /// essa última exceção substitui a anterior segundo a semântica do Dart.
   Future<void> _disposeResources() async {
+    backendReadinessController.dispose();
     try {
       await sessionController.dispose();
     } finally {

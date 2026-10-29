@@ -6,12 +6,14 @@
 ///
 /// ## Configuração e uso
 ///
-/// A construção define URL base, timeouts e FirebaseBearerInterceptor. A fachada
-/// identity é criada no primeiro acesso e utiliza o mesmo Dio. Construir a
-/// composição ou acessar uma fachada não faz I/O.
+/// A construção define URL base, timeouts e FirebaseBearerInterceptor. As fachadas
+/// identity e monitoring são criadas no primeiro acesso, compartilhando a mesma
+/// instância de Dio. Construir a composição ou acessar uma fachada não faz I/O.
 ///
 /// Cada endpoint escolhe se exige credencial por meio do marcador firebaseAuth.
 /// O interceptor consulta o provedor de ID token somente para requisições marcadas.
+/// A composição solicita prontidão em paralelo à sessão na abertura. A sondagem
+/// não condiciona o login; saúde continua disponível para consultas explícitas.
 ///
 /// ## Limites e ciclo de vida
 ///
@@ -28,6 +30,7 @@ import 'package:dio/dio.dart';
 
 import 'auth/firebase_bearer_interceptor.dart';
 import 'identity/identity.dart';
+import 'monitoring/monitoring.dart';
 
 /// Fachada e ponto de configuração das operações HTTP do backend CApp.
 ///
@@ -71,6 +74,10 @@ final class BackendApi {
   /// Operações de verificação da identidade institucional.
   /// A criação tardia só encapsula o transporte; nenhuma chamada ocorre no acesso.
   late final IdentityApi identity = IdentityApi(_dio);
+
+  /// Verificações públicas de saúde e prontidão do backend.
+  /// A composição consulta prontidão na abertura, sem bloquear login ou cache.
+  late final MonitoringApi monitoring = MonitoringApi(_dio);
 
   /// Libera recursos do cliente quando ele deixa de ser utilizado.
   ///

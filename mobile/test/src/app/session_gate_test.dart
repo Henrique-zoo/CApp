@@ -146,13 +146,17 @@ void main() {
     tester,
   ) async {
     final h = IdentityHarness(uid: 'user-a');
+    final readiness = BackendReadinessController(checkReadiness: () async {});
     try {
       h.store.results['user-a'] = SessionCacheFound(testVerification());
       h.controller.start();
       await tester.pumpWidget(
         SessionLifecycleObserver(
           controller: h.controller,
-          child: CApp(sessionController: h.controller),
+          child: CApp(
+            sessionController: h.controller,
+            backendReadinessController: readiness,
+          ),
         ),
       );
       await tester.pump();
@@ -181,6 +185,7 @@ void main() {
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.runAsync(h.dispose);
+      readiness.dispose();
     }
   });
 }

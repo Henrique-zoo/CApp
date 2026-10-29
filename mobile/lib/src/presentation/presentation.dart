@@ -5,6 +5,8 @@
 ///
 /// WarningBox apresenta um aviso incorporado ao layout.
 /// TemporaryWarning apresenta ocorrências por meio de um SnackBar temporário.
+/// StatusBanner reserva espaço para progresso ou aviso, preservando a interface
+/// abaixo dele e oferecendo nova tentativa quando um callback é fornecido.
 ///
 /// Os componentes recebem dados de apresentação. A interpretação de falhas
 /// e a produção das mensagens continuam pertencendo aos seus módulos.
@@ -15,3 +17,4 @@ library;
 
 export 'widgets/warning_box.dart' show WarningBox;
 export 'widgets/temporary_warning.dart' show TemporaryWarning;
+export 'widgets/status_banner.dart' show StatusBanner;

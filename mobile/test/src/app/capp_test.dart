@@ -17,13 +17,25 @@ import '../../support/identity_fakes.dart';
 
 /// Registra os cenários que atravessam a composição de widgets da aplicação.
 void main() {
+  late BackendReadinessController readiness;
+
+  setUp(() {
+    readiness = BackendReadinessController(checkReadiness: () async {});
+  });
+  tearDown(() => readiness.dispose());
+
   testWidgets('não estudante entra sem uma etapa manual de verificação', (
     tester,
   ) async {
     final h = IdentityHarness();
     try {
       h.controller.start();
-      await tester.pumpWidget(CApp(sessionController: h.controller));
+      await tester.pumpWidget(
+        CApp(
+          sessionController: h.controller,
+          backendReadinessController: readiness,
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Entrar com Microsoft'));
       await tester.pumpAndSettle();
@@ -46,7 +58,12 @@ void main() {
     try {
       h.store.onSave = (_, _) async => throw Exception('gravação indisponível');
       h.controller.start();
-      await tester.pumpWidget(CApp(sessionController: h.controller));
+      await tester.pumpWidget(
+        CApp(
+          sessionController: h.controller,
+          backendReadinessController: readiness,
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Entrar com Microsoft'));
       await tester.pumpAndSettle();
@@ -70,7 +87,12 @@ void main() {
     h.store.results['user-a'] = SessionCacheFound(testVerification());
     try {
       h.controller.start();
-      await tester.pumpWidget(CApp(sessionController: h.controller));
+      await tester.pumpWidget(
+        CApp(
+          sessionController: h.controller,
+          backendReadinessController: readiness,
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Pessoa Exemplo'), findsOneWidget);
 
@@ -106,7 +128,12 @@ void main() {
       };
       try {
         h.controller.start();
-        await tester.pumpWidget(CApp(sessionController: h.controller));
+        await tester.pumpWidget(
+          CApp(
+            sessionController: h.controller,
+            backendReadinessController: readiness,
+          ),
+        );
         await tester.pumpAndSettle();
         final button = tester.widget<TextButton>(
           find.widgetWithText(TextButton, 'Sair'),
@@ -153,7 +180,12 @@ void main() {
     h.store.onRemove = (_) async => throw Exception('remoção indisponível');
     try {
       h.controller.start();
-      await tester.pumpWidget(CApp(sessionController: h.controller));
+      await tester.pumpWidget(
+        CApp(
+          sessionController: h.controller,
+          backendReadinessController: readiness,
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Sair'));
       await tester.pumpAndSettle();

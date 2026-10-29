@@ -14,6 +14,11 @@
 /// Cada builder monta seu próprio MaterialApp e Navigator dentro do ramo
 /// identificado pelo gate. Quando o destino ou a conta muda, a navegação anterior
 /// é descartada junto com sua subárvore.
+/// O builder de cada MaterialApp também apresenta a consulta global de prontidão:
+/// progresso enquanto pendente e aviso persistente com nova tentativa em falha.
+/// Essa informação não muda o destino da sessão nem bloqueia a interface.
+/// BackendReadinessNotice traduz o diagnóstico; o componente visual é consumido
+/// pela fachada da apresentação compartilhada, sem depender de controladores.
 ///
 /// ## Área principal atual
 ///
@@ -35,22 +40,34 @@ import 'package:flutter/material.dart';
 
 import '../modules/identity/identity.dart';
 import '../modules/identity/identity_widgets.dart';
+import 'backend_readiness_notice.dart';
+import 'backend_readiness_controller.dart';
 import 'session_gate.dart';
 import 'theme.dart';
 
 /// Apresenta a interface correspondente à situação atual da sessão.
 ///
-/// Recebe um controlador já iniciado. Não cria adaptadores, inicia serviços
+/// Recebe controladores já iniciados. Não cria adaptadores, inicia serviços
 /// ou assume o encerramento da composição.
 ///
 /// A área principal somente é montada após restauração de cache válido
 /// ou conclusão bem-sucedida da verificação no backend.
 class CApp extends StatelessWidget {
-  /// Cria a interface com o controlador compartilhado da aplicação.
-  const CApp({super.key, required this.sessionController});
+  /// Recebe os controladores já iniciados e pertencentes à composição.
+  ///
+  /// A sessão seleciona o destino. A prontidão informa o resultado da consulta
+  /// inicial, sem participar da autorização ou iniciar operações neste widget.
+  const CApp({
+    super.key,
+    required this.sessionController,
+    required this.backendReadinessController,
+  });
 
   /// Fonte do estado e das operações de entrada.
   final SessionController sessionController;
+
+  /// Diagnóstico observado por todas as telas, inclusive rotas internas.
+  final BackendReadinessController backendReadinessController;
 
   /// Solicita saída apenas para uma conta conhecida e sem outra operação.
   ///
@@ -126,6 +143,14 @@ class CApp extends StatelessWidget {
   /// [home] pertence ao ramo atual do gate. Quando esse ramo muda,
   /// sua subárvore e seu Navigator são descartados.
   Widget _buildApplication(Widget home) {
-    return MaterialApp(title: 'CApp', theme: createDarkTheme(), home: home);
+    return MaterialApp(
+      title: 'CApp',
+      theme: createDarkTheme(),
+      builder: (context, child) => BackendReadinessNotice(
+        controller: backendReadinessController,
+        child: child!,
+      ),
+      home: home,
+    );
   }
 }

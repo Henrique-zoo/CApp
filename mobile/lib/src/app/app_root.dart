@@ -7,7 +7,8 @@
 /// ## Montagem e substituição
 ///
 /// O proprietário monta SessionLifecycleObserver ao redor de CApp. O observador
-/// informa retomadas ao controlador, e CApp apresenta o destino da sessão.
+/// informa retomadas ao controlador, e CApp apresenta o destino da sessão e o
+/// diagnóstico independente de prontidão recebido da mesma composição.
 /// Nenhum desses passos recria os adaptadores a cada build.
 ///
 /// Reconstruções com a mesma composição preservam a subárvore. Uma composição
@@ -94,18 +95,22 @@ class _AppRootState extends State<AppRoot> {
     }
   }
 
-  /// Monta a interface com o controlador da composição atual.
+  /// Monta a interface com os controladores da composição atual.
   ///
   /// A identidade da composição preserva a interface em reconstruções
   /// normais e a recria quando as dependências são substituídas.
   ///
-  /// O controlador já deve estar iniciado pelo chamador.
+  /// Ambos os controladores já devem estar iniciados pelo chamador.
   @override
   Widget build(BuildContext context) {
     return SessionLifecycleObserver(
       key: ObjectKey(widget.dependencies),
       controller: widget.dependencies.sessionController,
-      child: CApp(sessionController: widget.dependencies.sessionController),
+      child: CApp(
+        sessionController: widget.dependencies.sessionController,
+        backendReadinessController:
+            widget.dependencies.backendReadinessController,
+      ),
     );
   }
 
