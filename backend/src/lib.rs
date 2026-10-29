@@ -12,11 +12,6 @@
 //! - [`config`]: espaço reservado para centralizar configurações.
 //! - [`shared`]: espaço reservado para tipos comuns aos domínios.
 //!
-//! Neste estágio, a API implementa somente `/health` e `/ready`. Os módulos de
-//! negócio ainda não implementam os comportamentos descritos no README.
-//! Consulte [`api::router::create_router`] para compor a aplicação e
-//! [`api::state::AppState`] para fornecer o pool PostgreSQL.
-//!
 //! # Testes
 //!
 //! Os alvos `bdd` e `bdd_infrastructure` utilizam esta biblioteca com PostgreSQL

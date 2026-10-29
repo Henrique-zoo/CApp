@@ -1,4 +1,5 @@
-//! Espaço reservado para serviços de aplicação do módulo de Centros Acadêmicos.
-//!
-//! Ainda não possui serviços. Sua responsabilidade prevista é coordenar
-//! regras de domínio, persistência e integrações durante os casos de uso.
+//! Serviços de aplicação para coordenação de fluxos de Centros Acadêmicos.
+
+pub mod authorization_service;
+
+pub use authorization_service::AuthorizationService;
