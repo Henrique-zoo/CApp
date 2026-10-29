@@ -4,7 +4,11 @@
 //! antes dos steps e os liberam ao término. Respostas e resultados pertencem
 //! a cada cenário, mesmo quando o pool consultivo é compartilhado.
 
-use std::{collections::HashSet, fmt};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    sync::Arc,
+};
 
 use axum::{
     Router,
@@ -20,6 +24,13 @@ use uuid::Uuid;
 use super::{
     database::{SuiteDatabase, TestDatabase},
     results::{TestDatabaseMutation, TestResponse},
+};
+use backend::{
+    api::{router::create_router, state::AppState},
+    modules::news::{
+        domain::{NewsArticle, NewsStatus},
+        infrastructure::InMemoryNewsRepository,
+    },
 };
 
 /// Contexto independente criado pelo Cucumber para cada cenário.
@@ -51,6 +62,8 @@ pub(crate) struct AppWorld {
     pub(crate) request_count: usize,
     /// Gerenciamento em memória e regras do mural de notícias (#77).
     pub(crate) news_fixture: NewsFixture,
+    /// Contexto e repositório para os cenários de visualização de notícias (#78).
+    pub(crate) news_viewing: NewsViewingFixture,
 }
 
 impl fmt::Debug for AppWorld {
@@ -77,6 +90,7 @@ impl fmt::Debug for AppWorld {
             .field("last_response", &self.last_response)
             .field("request_count", &self.request_count)
             .field("news_fixture", &self.news_fixture)
+            .field("news_viewing", &self.news_viewing)
             .finish()
     }
 }
@@ -124,6 +138,25 @@ impl AppWorld {
         let (database, app) = suite.prepare_scenario(isolated).await;
         self.database = Some(database);
         self.app = Some(app);
+    }
+
+    /// Substitui o router da aplicação associado ao World por uma instância configurada.
+    pub(crate) fn set_app(&mut self, app: Router) {
+        self.app = Some(app);
+    }
+
+    /// Assegura que o router do World esteja configurado com o repositório em memória do cenário (#78).
+    pub(crate) fn ensure_news_viewing_app(&mut self) {
+        if !self.news_viewing.app_configured {
+            let repo = Arc::new(InMemoryNewsRepository::with_articles(
+                self.news_viewing.articles.clone(),
+            ));
+            self.news_viewing.repository = Arc::clone(&repo);
+            let pool = self.database_pool().clone();
+            let state = AppState::new(pool).with_news_repository(repo);
+            self.app = Some(create_router().with_state(state));
+            self.news_viewing.app_configured = true;
+        }
     }
 
     /// Retira do World os recursos usados pelo cenário e libera seu banco.
@@ -493,5 +526,124 @@ impl NewsFixture {
         self.articles.iter().any(|a| {
             a.id == article_id && a.ca_name == ca_name && a.status == NewsStatusState::Publicada
         })
+    }
+}
+
+/// Contexto e repositório de notícias para os cenários de visualização (#78).
+#[derive(Clone)]
+pub(crate) struct NewsViewingFixture {
+    /// Nome do Centro Acadêmico atualmente ativo no cenário.
+    pub(crate) active_ca_name: Option<String>,
+    /// Mapeamento de nomes de Centros Acadêmicos para seus UUIDs determinísticos.
+    pub(crate) ca_mapping: HashMap<String, Uuid>,
+    /// Mapeamento de títulos de notícias para seus UUIDs gerados no cenário.
+    pub(crate) article_mapping: HashMap<String, Uuid>,
+    /// Coleção de artigos de notícias acumulados antes da inicialização do router.
+    pub(crate) articles: Vec<NewsArticle>,
+    /// Repositório em memória associado ao router da aplicação.
+    pub(crate) repository: Arc<InMemoryNewsRepository>,
+    /// Título da última notícia cadastrada no cenário.
+    pub(crate) last_title: Option<String>,
+    /// Indica se o router já foi configurado para este cenário.
+    pub(crate) app_configured: bool,
+}
+
+impl Default for NewsViewingFixture {
+    fn default() -> Self {
+        Self {
+            active_ca_name: None,
+            ca_mapping: HashMap::new(),
+            article_mapping: HashMap::new(),
+            articles: Vec::new(),
+            repository: Arc::new(InMemoryNewsRepository::new()),
+            last_title: None,
+            app_configured: false,
+        }
+    }
+}
+
+impl fmt::Debug for NewsViewingFixture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NewsViewingFixture")
+            .field("active_ca_name", &self.active_ca_name)
+            .field("ca_mapping", &self.ca_mapping)
+            .field("article_mapping", &self.article_mapping)
+            .field("article_count", &self.articles.len())
+            .field("last_title", &self.last_title)
+            .field("app_configured", &self.app_configured)
+            .finish()
+    }
+}
+
+impl NewsViewingFixture {
+    /// Obtém ou gera deterministicamente o identificador único para o Centro Acadêmico.
+    pub(crate) fn get_or_create_ca_id(&mut self, ca_name: &str) -> Uuid {
+        *self
+            .ca_mapping
+            .entry(ca_name.to_string())
+            .or_insert_with(Uuid::new_v4)
+    }
+
+    /// Define o Centro Acadêmico ativo para o cenário atual.
+    pub(crate) fn set_active_ca(&mut self, ca_name: &str) -> Uuid {
+        self.active_ca_name = Some(ca_name.to_string());
+        self.get_or_create_ca_id(ca_name)
+    }
+
+    /// Retorna o identificador único do Centro Acadêmico ativo.
+    pub(crate) fn active_ca_id(&mut self) -> Uuid {
+        let ca_name = self
+            .active_ca_name
+            .clone()
+            .unwrap_or_else(|| "CA de Computação".to_string());
+        self.get_or_create_ca_id(&ca_name)
+    }
+
+    /// Adiciona um artigo de notícia ao cenário com metadados e status especificados.
+    pub(crate) fn add_article(
+        &mut self,
+        ca_name: &str,
+        title: &str,
+        body: &str,
+        status: NewsStatus,
+        published_at: Option<DateTime<Utc>>,
+    ) -> Uuid {
+        let ca_id = self.get_or_create_ca_id(ca_name);
+        let id = Uuid::new_v4();
+        let author_id = Uuid::new_v4();
+        let now = Utc::now();
+        let article = NewsArticle::reconstruct(
+            id,
+            ca_id,
+            author_id,
+            title.to_string(),
+            body.to_string(),
+            status,
+            1,
+            now,
+            published_at,
+            None,
+        );
+
+        self.articles.push(article);
+        self.article_mapping.insert(title.to_string(), id);
+        self.last_title = Some(title.to_string());
+        id
+    }
+
+    /// Atualiza o conteúdo da última notícia registrada no cenário.
+    pub(crate) fn update_last_article_body(&mut self, body: &str) {
+        if let Some(article) = self
+            .last_title
+            .as_ref()
+            .and_then(|title| self.articles.iter_mut().find(|a| &a.title == title))
+        {
+            article.body = body.to_string();
+        }
+    }
+
+    /// Recupera o identificador de uma notícia pelo seu título.
+    pub(crate) fn get_article_id(&self, title: &str) -> Option<Uuid> {
+        self.article_mapping.get(title).copied()
     }
 }
