@@ -1,7 +1,10 @@
-//! Camada HTTP prevista para o módulo de Centros Acadêmicos.
+//! Camada de API prevista para o módulo de Centros Acadêmicos.
 //!
-//! [`dto`] reservará os contratos de entrada e saída; [`handlers`] adaptará
-//! as requisições aos casos de uso. Ainda não existem endpoints registrados aqui.
+//! Contém os extratores, middlewares e adaptadores HTTP para controle de acesso ao CA.
 
 pub mod dto;
 pub mod handlers;
+
+pub use crate::api::auth::{
+    ActiveCaContext, AuthorizationErrorResponse, RequirePermission, require_permission_middleware,
+};
