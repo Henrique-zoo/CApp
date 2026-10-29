@@ -5,7 +5,7 @@ final loginSteps = <StepDefinition>[
   // GIVEN / DADO
   // Preparação das condições iniciais
   // -----------------------------------------
-  pendingStep(r'^o estudante iniciou o login institucional$'),
+  pendingStep(r'^que o estudante iniciou o login institucional$'),
 
   // -----------------------------------------
   // WHEN / QUANDO
@@ -40,7 +40,15 @@ final loginSteps = <StepDefinition>[
   ),
 
   pendingStep(
-    r'^o aplicativo informa que é necessário utilizar uma conta institucional da UnB$',
+    r'^o aplicativo informa que é necessário utilizar uma conta institucional$',
+  ),
+
+  pendingStep(
+    r'^o aplicativo informa que a instituição do usuário ainda não está cadastrada no CApp$',
+  ),
+
+  pendingStep(
+    r'^o aplicativo informa que o usuário não foi reconhecido como aluno da instituição "([^"]+)"$',
   ),
 
   pendingStep(r'^o estudante pode iniciar uma nova tentativa de login$'),

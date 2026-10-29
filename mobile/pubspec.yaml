@@ -56,6 +56,8 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  copy_with_extension: ^18.0.0
+  flutter_svg: ^2.3.0
 
 dev_dependencies:
   flutter_test:
@@ -74,6 +76,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  copy_with_extension_gen: ^18.0.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -84,6 +87,33 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/branding/microsoft.svg
+
+  fonts:
+    - family: Inter
+      fonts:
+        # Texto corrente e citações em notícias, eventos e respostas do FAQ.
+        - asset: assets/fonts/inter/Inter-Regular.otf
+          weight: 400
+        - asset: assets/fonts/inter/Inter-Italic.otf
+          weight: 400
+          style: italic
+        # Controles, rótulos e títulos de seções.
+        - asset: assets/fonts/inter/Inter-Medium.otf
+          weight: 500
+        - asset: assets/fonts/inter/Inter-SemiBold.otf
+          weight: 600
+        # Títulos e ênfase editorial, inclusive negrito combinado com itálico.
+        - asset: assets/fonts/inter/Inter-Bold.otf
+          weight: 700
+        - asset: assets/fonts/inter/Inter-BoldItalic.otf
+          weight: 700
+          style: italic
+        # Destaques pontuais, como títulos de banners e números de indicadores.
+        - asset: assets/fonts/inter/Inter-ExtraBold.otf
+          weight: 800
 
   # To add assets to your application, add an assets section, like this:
   # assets:

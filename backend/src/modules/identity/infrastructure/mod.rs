@@ -1,6 +1,10 @@
-//! Camada de persistência prevista para o módulo de identidade institucional.
+//! Adaptadores externos usados pelos casos de uso de identidade.
 //!
-//! [`repository`] reserva os adaptadores de acesso aos dados desse domínio.
-//! Ainda não existem consultas ou implementações de repositório.
+//! [`firebase`] valida Firebase ID tokens; [`microsoft`] consulta o Graph;
+//! [`repository`] implementa os contratos de persistência sobre o `PgDatabase`
+//! compartilhado. Esses módulos dependem dos contratos de aplicação, sem expor
+//! SQLx, Reqwest ou os DTOs dos provedores nas assinaturas desses contratos.
 
+pub mod firebase;
+pub mod microsoft;
 pub mod repository;
