@@ -106,6 +106,18 @@ Componentes como gates pertencem à composição visual quando escolhem entre
 áreas da aplicação. Eles apresentam uma decisão publicada pela aplicação;
 a política que produz essa decisão permanece no controlador ou caso de uso.
 
+Widgets de ligação em app/ também podem observar coordenações globais e traduzir
+seus estados em dados visuais e callbacks. A aparência reutilizável pertence a
+src/presentation/ e é consumida pela sua fachada. Esses componentes compartilhados
+não importam app/, controladores dos módulos ou clientes HTTP. Ser global não é,
+por si só, motivo para colocar a implementação visual na raiz de composição.
+
+Coordenações técnicas globais podem receber operações como callbacks quando isso
+expressar todo o contrato necessário. Não precisam ocupar um módulo de domínio.
+SDKs de serviços externos e clientes de infraestrutura continuam conectados em
+AppDependencies; os demais componentes de app/ usam as APIs públicas dos módulos
+e da apresentação, além do framework e das bibliotecas de navegação e estado.
+
 ## Dependências e APIs dos módulos
 
 As setas abaixo representam dependências de código, não a ordem de execução:
@@ -292,12 +304,18 @@ test/
 ├── src/
 │   ├── app/
 │   │   ├── capp_test.dart
-│   │   └── session_gate_test.dart
+│   │   ├── session_gate_test.dart
+│   │   ├── backend_readiness_controller_test.dart
+│   │   └── backend_readiness_notice_test.dart
 │   ├── infrastructure/backend/
 │   │   ├── auth/
 │   │   │   └── firebase_bearer_interceptor_test.dart
-│   │   └── identity/
-│   │       └── identity_api_test.dart
+│   │   ├── identity/
+│   │   │   └── identity_api_test.dart
+│   │   └── monitoring/
+│   │       └── monitoring_api_test.dart
+│   ├── presentation/widgets/
+│   │   └── status_banner_test.dart
 │   └── modules/identity/
 │       ├── application/
 │       │   ├── institutional_auth_service_test.dart
@@ -338,7 +356,9 @@ compartilhados ficam em support/ e não fazem parte da implementação distribu�
 [architecture_boundaries_test.dart](test/architecture/architecture_boundaries_test.dart)
 verifica as diretivas de importação e exportação do módulo atual: aplicação
 independente, apresentação sem adaptadores, transporte sem dependência dos módulos
-e fachadas com exportações de suas respectivas camadas. Novos módulos devem
+ou de app, composição visual por fachadas e exportações das respectivas camadas.
+As importações de SDKs externos e clientes de infraestrutura em app ficam na raiz
+de composição AppDependencies. Novos módulos devem
 receber verificações equivalentes. Os diretórios, por si só, não impõem esses
 limites, e essas verificações não substituem a autorização das operações.
 
