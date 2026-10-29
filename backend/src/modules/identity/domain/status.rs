@@ -6,17 +6,12 @@
 /// O derive não cria o tipo no banco; isso é responsabilidade da migration.
 /// Este estado não comprova vínculo estudantil e não é usado atualmente como
 /// critério de autorização pelo serviço de autenticação.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "catalog_status", rename_all = "lowercase")]
 pub enum CatalogStatus {
     /// Disponível para novos usos.
+    #[default]
     Active,
     /// Indisponível para novos usos, preservando os registros históricos.
     Inactive,
-}
-
-impl Default for CatalogStatus {
-    fn default() -> Self {
-        CatalogStatus::Active
-    }
 }

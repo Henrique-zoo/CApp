@@ -146,10 +146,8 @@ impl KeyCache {
     ) -> Result<Option<Arc<DecodingKey>>, AuthenticationError> {
         let fresh = now < self.valid_until;
 
-        if fresh {
-            if let Some(key) = self.keys.get(kid) {
-                return Ok(Some(Arc::clone(key)));
-            }
+        if fresh && let Some(key) = self.keys.get(kid) {
+            return Ok(Some(Arc::clone(key)));
         }
 
         if now < self.refresh_after {
@@ -516,10 +514,10 @@ fn cache_ttl(headers: &HeaderMap) -> Duration {
             return Duration::ZERO;
         }
 
-        if let Some((name, value)) = directive.split_once('=') {
-            if name.trim().eq_ignore_ascii_case("max-age") {
-                max_age = value.trim().trim_matches('"').parse().unwrap_or(0);
-            }
+        if let Some((name, value)) = directive.split_once('=')
+            && name.trim().eq_ignore_ascii_case("max-age")
+        {
+            max_age = value.trim().trim_matches('"').parse().unwrap_or(0);
         }
     }
 

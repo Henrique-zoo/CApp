@@ -219,7 +219,7 @@ async fn authentication_errors_have_stable_public_codes() {
         }
         let body = response_json(response).await;
         assert_eq!(body["error"]["code"], code);
-        assert!(body["error"]["message"].as_str().unwrap().len() > 0);
+        assert!(!body["error"]["message"].as_str().unwrap().is_empty());
         assert!(body["error"]["details"].is_null());
     }
 }

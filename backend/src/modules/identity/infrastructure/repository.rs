@@ -47,7 +47,7 @@ impl InstitutionRepository for PgDatabase {
         &self,
         tenant_id: Uuid,
     ) -> Result<Option<Institution>, InstitutionRepositoryError> {
-        Ok(sqlx::query_as(&format!(
+        Ok(sqlx::query_as(
             "
             SELECT
                 id, name, acronym,
@@ -56,8 +56,8 @@ impl InstitutionRepository for PgDatabase {
                 status
             FROM institution
             WHERE institution.microsoft_tenant_id = $1::uuid
-            "
-        ))
+            ",
+        )
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await
