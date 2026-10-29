@@ -4,20 +4,33 @@
 //! antes dos steps e os liberam ao término. Respostas e resultados pertencem
 //! a cada cenário, mesmo quando o pool consultivo é compartilhado.
 
-use std::fmt;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    sync::Arc,
+};
 
 use axum::{
     Router,
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
+use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use sqlx::PgPool;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 use super::{
     database::{SuiteDatabase, TestDatabase},
     results::{TestDatabaseMutation, TestResponse},
+};
+use backend::{
+    api::{router::create_router, state::AppState},
+    modules::news::{
+        domain::{NewsArticle, NewsStatus},
+        infrastructure::InMemoryNewsRepository,
+    },
 };
 
 /// Contexto independente criado pelo Cucumber para cada cenário.
@@ -47,6 +60,10 @@ pub(crate) struct AppWorld {
     /// Inclui chamadas via `get_json` e aumenta antes de construir a requisição;
     /// uma URI inválida ou falha de leitura também pode incrementar o contador.
     pub(crate) request_count: usize,
+    /// Gerenciamento em memória e regras do mural de notícias (#77).
+    pub(crate) news_fixture: NewsFixture,
+    /// Contexto e repositório para os cenários de visualização de notícias (#78).
+    pub(crate) news_viewing: NewsViewingFixture,
 }
 
 impl fmt::Debug for AppWorld {
@@ -72,6 +89,8 @@ impl fmt::Debug for AppWorld {
             .field("last_database_mutation", &self.last_database_mutation)
             .field("last_response", &self.last_response)
             .field("request_count", &self.request_count)
+            .field("news_fixture", &self.news_fixture)
+            .field("news_viewing", &self.news_viewing)
             .finish()
     }
 }
@@ -119,6 +138,25 @@ impl AppWorld {
         let (database, app) = suite.prepare_scenario(isolated).await;
         self.database = Some(database);
         self.app = Some(app);
+    }
+
+    /// Substitui o router da aplicação associado ao World por uma instância configurada.
+    pub(crate) fn set_app(&mut self, app: Router) {
+        self.app = Some(app);
+    }
+
+    /// Assegura que o router do World esteja configurado com o repositório em memória do cenário (#78).
+    pub(crate) fn ensure_news_viewing_app(&mut self) {
+        if !self.news_viewing.app_configured {
+            let repo = Arc::new(InMemoryNewsRepository::with_articles(
+                self.news_viewing.articles.clone(),
+            ));
+            self.news_viewing.repository = Arc::clone(&repo);
+            let pool = self.database_pool().clone();
+            let state = AppState::new(pool).with_news_repository(repo);
+            self.app = Some(create_router().with_state(state));
+            self.news_viewing.app_configured = true;
+        }
     }
 
     /// Retira do World os recursos usados pelo cenário e libera seu banco.
@@ -223,5 +261,389 @@ impl AppWorld {
         assert_eq!(response.status, StatusCode::OK);
 
         serde_json::from_str(&response.body).expect("response should match the expected JSON shape")
+    }
+}
+
+/// Situação editorial de um artigo de notícia no mural do Centro Acadêmico.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NewsStatusState {
+    /// Registrada como solicitação / rascunho, pendente de validação por um administrador.
+    Solicitacao,
+    /// Homologada e publicada no mural do Centro Acadêmico.
+    Publicada,
+    /// Rejeitada pela moderação ou administração do Centro Acadêmico.
+    Rejeitada,
+}
+
+/// Representação em memória de um artigo de notícia no contexto de testes BDD.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NewsArticleState {
+    /// Identificador estável do artigo de notícia.
+    pub(crate) id: Uuid,
+    /// Centro Acadêmico ao qual a notícia pertence.
+    pub(crate) ca_name: String,
+    /// Identificador ou e-mail do autor responsável.
+    pub(crate) author: String,
+    /// Título da notícia divulgado no mural.
+    pub(crate) title: String,
+    /// Conteúdo textual do artigo.
+    pub(crate) body: String,
+    /// Situação editorial atual.
+    pub(crate) status: NewsStatusState,
+    /// Instante em que o registro inicial foi criado.
+    pub(crate) created_at: DateTime<Utc>,
+    /// Instante em que o artigo foi efetivamente publicado, se aplicável.
+    pub(crate) published_at: Option<DateTime<Utc>>,
+}
+
+/// Fixture e gerenciamento de estado em memória para os cenários de notícias (#77).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NewsFixture {
+    /// Identificador do usuário em foco no cenário (ex.: e-mail institucional).
+    pub(crate) current_user: String,
+    /// Centro Acadêmico do qual o usuário faz parte no cenário.
+    pub(crate) user_ca: Option<String>,
+    /// Centros Acadêmicos nos quais o usuário possui permissão de edição.
+    pub(crate) edit_permissions: HashSet<String>,
+    /// Centros Acadêmicos nos quais o usuário possui permissão de publicação direta.
+    pub(crate) direct_publish_permissions: HashSet<String>,
+    /// Artigos de notícias persistidos em memória.
+    pub(crate) articles: Vec<NewsArticleState>,
+    /// Indica se a última operação de criação, edição ou publicação foi aceita.
+    pub(crate) last_operation_succeeded: Option<bool>,
+    /// Identificador da última notícia criada ou editada.
+    pub(crate) last_created_article_id: Option<Uuid>,
+    /// Notícia alvo selecionada para ações subsequentes no cenário.
+    pub(crate) target_article_id: Option<Uuid>,
+    /// Listagem de notícias publicadas formada na última consulta.
+    pub(crate) published_listing: Option<Vec<NewsArticleState>>,
+}
+
+impl Default for NewsFixture {
+    fn default() -> Self {
+        Self {
+            current_user: "estudante.unb@aluno.unb.br".to_string(),
+            user_ca: None,
+            edit_permissions: HashSet::new(),
+            direct_publish_permissions: HashSet::new(),
+            articles: Vec::new(),
+            last_operation_succeeded: None,
+            last_created_article_id: None,
+            target_article_id: None,
+            published_listing: None,
+        }
+    }
+}
+
+/// Valida se uma cadeia textual representa título ou conteúdo aceitável.
+///
+/// Rejeita strings vazias, contendo apenas espaços ou marcadores de template
+/// do Gherkin (ex.: `<titulo>` ou `<conteudo>`).
+pub(crate) fn is_valid_news_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.starts_with('<') && trimmed.ends_with('>') {
+        return false;
+    }
+    true
+}
+
+impl NewsFixture {
+    /// Associa o usuário atual ao Centro Acadêmico especificado.
+    pub(crate) fn set_user_ca(&mut self, ca_name: impl Into<String>) {
+        self.user_ca = Some(ca_name.into());
+    }
+
+    /// Retorna o Centro Acadêmico do usuário ou o padrão didático.
+    pub(crate) fn get_effective_ca(&self) -> String {
+        self.user_ca
+            .clone()
+            .unwrap_or_else(|| "CA de Computação".to_string())
+    }
+
+    /// Configura a permissão de edição do usuário para determinado CA.
+    pub(crate) fn set_can_edit(&mut self, ca_name: impl Into<String>, allowed: bool) {
+        let ca = ca_name.into();
+        if allowed {
+            self.edit_permissions.insert(ca);
+        } else {
+            self.edit_permissions.remove(&ca);
+        }
+    }
+
+    /// Configura a permissão de publicação direta do usuário para determinado CA.
+    pub(crate) fn set_can_publish_directly(&mut self, ca_name: impl Into<String>, allowed: bool) {
+        let ca = ca_name.into();
+        if allowed {
+            self.direct_publish_permissions.insert(ca);
+        } else {
+            self.direct_publish_permissions.remove(&ca);
+        }
+    }
+
+    /// Cria uma nova notícia no Centro Acadêmico como solicitação.
+    pub(crate) fn create_news(&mut self, ca_name: &str, title: &str, body: &str) {
+        if !is_valid_news_text(title) || !is_valid_news_text(body) {
+            self.last_operation_succeeded = Some(false);
+            return;
+        }
+
+        let id = Uuid::new_v4();
+        let article = NewsArticleState {
+            id,
+            ca_name: ca_name.to_string(),
+            author: self.current_user.clone(),
+            title: title.to_string(),
+            body: body.to_string(),
+            status: NewsStatusState::Solicitacao,
+            created_at: Utc::now(),
+            published_at: None,
+        };
+
+        self.articles.push(article);
+        self.last_created_article_id = Some(id);
+        self.target_article_id = Some(id);
+        self.last_operation_succeeded = Some(true);
+    }
+
+    /// Cadastra uma notícia pré-existente no cenário.
+    pub(crate) fn add_existing_article(
+        &mut self,
+        ca_name: &str,
+        title: &str,
+        body: &str,
+        status: NewsStatusState,
+        published_at: Option<DateTime<Utc>>,
+    ) -> Uuid {
+        let id = Uuid::new_v4();
+        let article = NewsArticleState {
+            id,
+            ca_name: ca_name.to_string(),
+            author: self.current_user.clone(),
+            title: title.to_string(),
+            body: body.to_string(),
+            status,
+            created_at: Utc::now(),
+            published_at,
+        };
+
+        self.articles.push(article);
+        self.target_article_id = Some(id);
+        id
+    }
+
+    /// Atualiza o título e o conteúdo de um artigo existente.
+    pub(crate) fn update_article(&mut self, old_title: &str, new_title: &str, new_body: &str) {
+        let article_idx = self
+            .target_article_id
+            .and_then(|id| self.articles.iter().position(|a| a.id == id))
+            .or_else(|| self.articles.iter().position(|a| a.title == old_title));
+
+        let Some(idx) = article_idx else {
+            self.last_operation_succeeded = Some(false);
+            return;
+        };
+
+        let ca_name = self.articles[idx].ca_name.clone();
+        if !self.edit_permissions.contains(&ca_name) {
+            self.last_operation_succeeded = Some(false);
+            return;
+        }
+
+        if !is_valid_news_text(new_title) || !is_valid_news_text(new_body) {
+            self.last_operation_succeeded = Some(false);
+            return;
+        }
+
+        self.articles[idx].title = new_title.to_string();
+        self.articles[idx].body = new_body.to_string();
+        self.last_operation_succeeded = Some(true);
+        self.target_article_id = Some(self.articles[idx].id);
+    }
+
+    /// Publica diretamente um artigo existente.
+    pub(crate) fn publish_directly(&mut self, title: Option<&str>) {
+        let article_idx = title
+            .and_then(|t| self.articles.iter().position(|a| a.title == t))
+            .or_else(|| {
+                self.target_article_id
+                    .and_then(|id| self.articles.iter().position(|a| a.id == id))
+            });
+
+        let Some(idx) = article_idx else {
+            self.last_operation_succeeded = Some(false);
+            return;
+        };
+
+        let ca_name = self.articles[idx].ca_name.clone();
+        if !self.direct_publish_permissions.contains(&ca_name) {
+            self.last_operation_succeeded = Some(false);
+            return;
+        }
+
+        if !is_valid_news_text(&self.articles[idx].title)
+            || !is_valid_news_text(&self.articles[idx].body)
+        {
+            self.last_operation_succeeded = Some(false);
+            return;
+        }
+
+        self.articles[idx].status = NewsStatusState::Publicada;
+        self.articles[idx].published_at = Some(Utc::now());
+        self.last_operation_succeeded = Some(true);
+        self.target_article_id = Some(self.articles[idx].id);
+    }
+
+    /// Consulta e forma a listagem de notícias publicadas para o CA informado.
+    pub(crate) fn form_published_listing(&mut self, ca_name: &str) {
+        let published: Vec<NewsArticleState> = self
+            .articles
+            .iter()
+            .filter(|a| a.ca_name == ca_name && a.status == NewsStatusState::Publicada)
+            .cloned()
+            .collect();
+        self.published_listing = Some(published);
+    }
+
+    /// Recupera o artigo criado mais recentemente ou o alvo atual.
+    pub(crate) fn get_current_article(&self) -> Option<&NewsArticleState> {
+        self.target_article_id
+            .and_then(|id| self.articles.iter().find(|a| a.id == id))
+            .or_else(|| self.articles.last())
+    }
+
+    /// Verifica se um artigo específico está presente na listagem publicada formada.
+    pub(crate) fn published_listing_contains(&self, article_id: Uuid) -> bool {
+        self.published_listing
+            .as_ref()
+            .is_some_and(|listing| listing.iter().any(|a| a.id == article_id))
+    }
+
+    /// Verifica se a notícia está publicada e disponível aos usuários de um CA.
+    pub(crate) fn is_published_for_ca(&self, article_id: Uuid, ca_name: &str) -> bool {
+        self.articles.iter().any(|a| {
+            a.id == article_id && a.ca_name == ca_name && a.status == NewsStatusState::Publicada
+        })
+    }
+}
+
+/// Contexto e repositório de notícias para os cenários de visualização (#78).
+#[derive(Clone)]
+pub(crate) struct NewsViewingFixture {
+    /// Nome do Centro Acadêmico atualmente ativo no cenário.
+    pub(crate) active_ca_name: Option<String>,
+    /// Mapeamento de nomes de Centros Acadêmicos para seus UUIDs determinísticos.
+    pub(crate) ca_mapping: HashMap<String, Uuid>,
+    /// Mapeamento de títulos de notícias para seus UUIDs gerados no cenário.
+    pub(crate) article_mapping: HashMap<String, Uuid>,
+    /// Coleção de artigos de notícias acumulados antes da inicialização do router.
+    pub(crate) articles: Vec<NewsArticle>,
+    /// Repositório em memória associado ao router da aplicação.
+    pub(crate) repository: Arc<InMemoryNewsRepository>,
+    /// Título da última notícia cadastrada no cenário.
+    pub(crate) last_title: Option<String>,
+    /// Indica se o router já foi configurado para este cenário.
+    pub(crate) app_configured: bool,
+}
+
+impl Default for NewsViewingFixture {
+    fn default() -> Self {
+        Self {
+            active_ca_name: None,
+            ca_mapping: HashMap::new(),
+            article_mapping: HashMap::new(),
+            articles: Vec::new(),
+            repository: Arc::new(InMemoryNewsRepository::new()),
+            last_title: None,
+            app_configured: false,
+        }
+    }
+}
+
+impl fmt::Debug for NewsViewingFixture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NewsViewingFixture")
+            .field("active_ca_name", &self.active_ca_name)
+            .field("ca_mapping", &self.ca_mapping)
+            .field("article_mapping", &self.article_mapping)
+            .field("article_count", &self.articles.len())
+            .field("last_title", &self.last_title)
+            .field("app_configured", &self.app_configured)
+            .finish()
+    }
+}
+
+impl NewsViewingFixture {
+    /// Obtém ou gera deterministicamente o identificador único para o Centro Acadêmico.
+    pub(crate) fn get_or_create_ca_id(&mut self, ca_name: &str) -> Uuid {
+        *self
+            .ca_mapping
+            .entry(ca_name.to_string())
+            .or_insert_with(Uuid::new_v4)
+    }
+
+    /// Define o Centro Acadêmico ativo para o cenário atual.
+    pub(crate) fn set_active_ca(&mut self, ca_name: &str) -> Uuid {
+        self.active_ca_name = Some(ca_name.to_string());
+        self.get_or_create_ca_id(ca_name)
+    }
+
+    /// Retorna o identificador único do Centro Acadêmico ativo.
+    pub(crate) fn active_ca_id(&mut self) -> Uuid {
+        let ca_name = self
+            .active_ca_name
+            .clone()
+            .unwrap_or_else(|| "CA de Computação".to_string());
+        self.get_or_create_ca_id(&ca_name)
+    }
+
+    /// Adiciona um artigo de notícia ao cenário com metadados e status especificados.
+    pub(crate) fn add_article(
+        &mut self,
+        ca_name: &str,
+        title: &str,
+        body: &str,
+        status: NewsStatus,
+        published_at: Option<DateTime<Utc>>,
+    ) -> Uuid {
+        let ca_id = self.get_or_create_ca_id(ca_name);
+        let id = Uuid::new_v4();
+        let author_id = Uuid::new_v4();
+        let now = Utc::now();
+        let article = NewsArticle::reconstruct(
+            id,
+            ca_id,
+            author_id,
+            title.to_string(),
+            body.to_string(),
+            status,
+            1,
+            now,
+            published_at,
+            None,
+        );
+
+        self.articles.push(article);
+        self.article_mapping.insert(title.to_string(), id);
+        self.last_title = Some(title.to_string());
+        id
+    }
+
+    /// Atualiza o conteúdo da última notícia registrada no cenário.
+    pub(crate) fn update_last_article_body(&mut self, body: &str) {
+        if let Some(article) = self
+            .last_title
+            .as_ref()
+            .and_then(|title| self.articles.iter_mut().find(|a| &a.title == title))
+        {
+            article.body = body.to_string();
+        }
+    }
+
+    /// Recupera o identificador de uma notícia pelo seu título.
+    pub(crate) fn get_article_id(&self, title: &str) -> Option<Uuid> {
+        self.article_mapping.get(title).copied()
     }
 }
