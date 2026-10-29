@@ -22,16 +22,19 @@ use backend::{
         },
         state::AppState,
     },
-    domain::{Permission, Role, Scope},
-    modules::ca::application::{
-        ports::{
-            AuthorizationServiceError, AuthorizationServicePort, RoleAssignmentRepositoryPort,
-            RoleRepositoryPort,
+    modules::ca::{
+        application::{
+            ports::{
+                AuthorizationServiceError, AuthorizationServicePort, RoleAssignmentRepositoryPort,
+                RoleRepositoryPort,
+            },
+            services::authorization_service::{
+                AuthorizationService, CACC_DIDACTIC_ID, CAER_DIDACTIC_ID,
+                DIRETOR_COMUNICACAO_USER_ID, DIRETOR_EVENTOS_USER_ID, PRESIDENTE_CAER_USER_ID,
+                STUDENT_WITHOUT_ROLE_USER_ID,
+            },
         },
-        services::authorization_service::{
-            AuthorizationService, CACC_DIDACTIC_ID, CAER_DIDACTIC_ID, DIRETOR_COMUNICACAO_USER_ID,
-            DIRETOR_EVENTOS_USER_ID, PRESIDENTE_CAER_USER_ID, STUDENT_WITHOUT_ROLE_USER_ID,
-        },
+        domain::entities::{Permission, Role, Scope},
     },
 };
 use serde_json::Value;
