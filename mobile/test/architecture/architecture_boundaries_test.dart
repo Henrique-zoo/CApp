@@ -1,6 +1,8 @@
 /// Regressões das fronteiras de importação do módulo e da composição.
 ///
 /// Impede reintroduzir SDKs e transporte na aplicação e na apresentação.
+/// A composição visual usa fachadas; a raiz de dependências concentra as
+/// implementações concretas. A infraestrutura compartilhada não depende de app.
 library;
 
 import 'dart:io';
@@ -101,13 +103,56 @@ void main() {
     },
   );
 
-  test('transporte compartilhado não conhece módulos de negócio', () {
-    for (final source in _sources('lib/src/infrastructure/backend')) {
+  test('infraestrutura compartilhada não conhece app ou módulos', () {
+    final root = Directory('lib/src/infrastructure').absolute.uri.toString();
+    for (final source in _sources('lib/src/infrastructure')) {
       for (final uri in _directives(source)) {
+        if (uri.startsWith('dart:') ||
+            (uri.startsWith('package:') && !uri.startsWith('package:capp/'))) {
+          continue;
+        }
         expect(
-          _target(source, uri).contains('/modules/'),
-          isFalse,
+          _target(source, uri).startsWith(root),
+          isTrue,
           reason: '${source.path} depende de $uri',
+        );
+      }
+    }
+  });
+
+  test('app usa fachadas e concentra integrações na raiz de composição', () {
+    final root = Directory('lib/src/app').absolute.uri.toString();
+    final composition = File('lib/src/app/app_dependencies.dart').absolute.uri
+        .toString();
+    final presentation = File('lib/src/presentation/presentation.dart')
+        .absolute
+        .uri
+        .toString();
+    final modules = Directory('lib/src/modules').absolute.uri.toString();
+
+    for (final source in _sources('lib/src/app')) {
+      if (source.absolute.uri.toString() == composition) continue;
+      for (final uri in _directives(source)) {
+        if (uri.startsWith('dart:') ||
+            uri.startsWith('package:flutter/') ||
+            uri.startsWith('package:go_router/') ||
+            uri.startsWith('package:flutter_riverpod/')) {
+          continue;
+        }
+        final target = _target(source, uri);
+        if (target.startsWith(root) || target == presentation) continue;
+
+        final relative = target.startsWith(modules)
+            ? target.substring(modules.length).split('/')
+            : <String>[];
+        final publicModuleApi =
+            relative.length == 2 &&
+            (relative[1] == '${relative[0]}.dart' ||
+                relative[1] == '${relative[0]}_widgets.dart');
+        expect(
+          publicModuleApi,
+          isTrue,
+          reason: '${source.path} depende diretamente de $uri',
         );
       }
     }
