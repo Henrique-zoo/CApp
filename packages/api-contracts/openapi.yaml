@@ -34,7 +34,7 @@ paths:
       description: Não consulta PostgreSQL, Firebase ou Microsoft Graph.
       security: []
       responses:
-        '200':
+        "200":
           description: O processo HTTP está respondendo.
           content:
             text/plain:
@@ -54,9 +54,9 @@ paths:
         disponibilidade dos provedores de autenticação. As respostas não têm corpo.
       security: []
       responses:
-        '200':
+        "200":
           description: Consulta ao PostgreSQL concluída.
-        '503':
+        "503":
           description: Erro de comunicação com PostgreSQL ou tempo limite excedido.
 
   /auth/institutional/verify:
@@ -87,50 +87,50 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InstitutionalAuthRequest'
+              $ref: "#/components/schemas/InstitutionalAuthRequest"
             example:
-              microsoftAccessToken: '<MICROSOFT_ACCESS_TOKEN>'
+              microsoftAccessToken: "<MICROSOFT_ACCESS_TOKEN>"
       responses:
-        '200':
+        "200":
           description: Identidade verificada e evidência institucional persistida.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InstitutionalVerificationResponse'
+                $ref: "#/components/schemas/InstitutionalVerificationResponse"
               examples:
                 student:
                   summary: Estudante com curso informado pelo diretório
                   value:
                     profile:
-                      microsoftObjectId: '00000000-0000-0000-0000-000000000001'
+                      microsoftObjectId: "00000000-0000-0000-0000-000000000001"
                       name: Pessoa Exemplo
                       email: pessoa@instituicao.example
                       affiliation:
                         type: student
                         courseName: Engenharia de Software
-                    expiresAt: '2026-10-22T12:00:00Z'
+                    expiresAt: "2026-10-22T12:00:00Z"
                 studentWithoutOptionalData:
                   summary: Estudante sem nome, e-mail ou curso informado
                   value:
                     profile:
-                      microsoftObjectId: '00000000-0000-0000-0000-000000000002'
+                      microsoftObjectId: "00000000-0000-0000-0000-000000000002"
                       name: null
                       email: null
                       affiliation:
                         type: student
                         courseName: null
-                    expiresAt: '2026-10-22T12:00:00Z'
+                    expiresAt: "2026-10-22T12:00:00Z"
                 nonStudent:
                   summary: Pessoa sem participação no grupo estudantil
                   value:
                     profile:
-                      microsoftObjectId: '00000000-0000-0000-0000-000000000003'
+                      microsoftObjectId: "00000000-0000-0000-0000-000000000003"
                       name: Pessoa Exemplo
                       email: null
                       affiliation:
                         type: nonStudent
-                    expiresAt: '2026-10-22T12:00:00Z'
-        '400':
+                    expiresAt: "2026-10-22T12:00:00Z"
+        "400":
           description: |
             bad_request — JSON ausente, malformado, de tipo incompatível ou
             rejeitado pelo extractor (inclusive Content-Type inadequado ou limite
@@ -139,13 +139,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
               example:
                 error:
                   code: bad_request
                   message: Requisição inválida
                   details: null
-        '401':
+        "401":
           description: |
             Credenciais inválidas. Códigos possíveis:
             - unauthorized: Authorization ausente, repetido ou Bearer malformado;
@@ -162,7 +162,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
               examples:
                 missingCredentials:
                   value:
@@ -194,7 +194,7 @@ paths:
                       code: identity_mismatch
                       message: As identidades autenticadas não correspondem
                       details: null
-        '403':
+        "403":
           description: |
             unknown_institution — o tenant Microsoft não corresponde a uma
             instituição cadastrada.
@@ -206,7 +206,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
               examples:
                 unknownInstitution:
                   value:
@@ -220,18 +220,18 @@ paths:
                       code: institutional_verification_required
                       message: É necessário verificar novamente seu vínculo institucional.
                       details: null
-        '500':
+        "500":
           description: internal_server_error — falha interna, inclusive de persistência.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
               example:
                 error:
                   code: internal_server_error
                   message: Erro interno do servidor
                   details: null
-        '503':
+        "503":
           description: |
             authentication_provider_unavailable — falha de comunicação, resposta
             inesperada ou indisponibilidade de Firebase/JWKS ou Microsoft Graph.
@@ -239,7 +239,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
               examples:
                 providerUnavailable:
                   value:
@@ -282,7 +282,7 @@ components:
       required: [profile, expiresAt]
       properties:
         profile:
-          $ref: '#/components/schemas/InstitutionalIdentityResponse'
+          $ref: "#/components/schemas/InstitutionalIdentityResponse"
         expiresAt:
           type: string
           format: date-time
@@ -298,25 +298,25 @@ components:
         microsoftObjectId:
           type: string
           description: Identificador de objeto Microsoft validado como UUID; não é o UID Firebase nem um ID interno do CApp.
-          examples: ['00000000-0000-0000-0000-000000000001']
+          examples: ["00000000-0000-0000-0000-000000000001"]
         name:
-          type: [string, 'null']
+          type: [string, "null"]
           description: displayName fornecido pela instituição, ou null se ausente.
         email:
-          type: [string, 'null']
+          type: [string, "null"]
           description: mail fornecido pelo diretório Microsoft, ou null se ausente; não há fallback para userPrincipalName.
         affiliation:
-          $ref: '#/components/schemas/InstitutionalAffiliation'
+          $ref: "#/components/schemas/InstitutionalAffiliation"
     InstitutionalAffiliation:
       description: Vínculo determinado pela participação no grupo estudantil configurado para a instituição.
       oneOf:
-        - $ref: '#/components/schemas/StudentAffiliation'
-        - $ref: '#/components/schemas/NonStudentAffiliation'
+        - $ref: "#/components/schemas/StudentAffiliation"
+        - $ref: "#/components/schemas/NonStudentAffiliation"
       discriminator:
         propertyName: type
         mapping:
-          student: '#/components/schemas/StudentAffiliation'
-          nonStudent: '#/components/schemas/NonStudentAffiliation'
+          student: "#/components/schemas/StudentAffiliation"
+          nonStudent: "#/components/schemas/NonStudentAffiliation"
     StudentAffiliation:
       type: object
       additionalProperties: false
@@ -326,7 +326,7 @@ components:
           type: string
           const: student
         courseName:
-          type: [string, 'null']
+          type: [string, "null"]
           description: jobTitle do estudante, ou null; ainda não representa associação ao catálogo interno de cursos.
     NonStudentAffiliation:
       type: object
@@ -342,7 +342,7 @@ components:
       required: [error]
       properties:
         error:
-          $ref: '#/components/schemas/ApiErrorDetails'
+          $ref: "#/components/schemas/ApiErrorDetails"
     ApiErrorDetails:
       type: object
       required: [code, message, details]
