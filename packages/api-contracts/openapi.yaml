@@ -76,6 +76,11 @@ paths:
         quando a participação estudantil foi confirmada. Nome, e-mail e curso
         podem estar ausentes e são serializados como null.
 
+        A resposta inclui institution com o identificador interno, o nome e a
+        sigla do cadastro institucional do CApp. A sigla pode ser null. Esse resumo
+        não expõe tenant ou grupo Microsoft e não concede permissões nem comprova,
+        por si só, vínculo estudantil; o vínculo está em profile.affiliation.
+
         Não exige uma verificação institucional anterior. O serviço tem timeout
         total de 15 segundos; o cancelamento não garante desfazer uma gravação
         já concluída. Esta operação não cria o usuário interno do CApp.
@@ -108,9 +113,13 @@ paths:
                       affiliation:
                         type: student
                         courseName: Engenharia de Software
+                    institution:
+                      id: "10000000-0000-4000-8000-000000000001"
+                      name: Instituição Exemplo
+                      acronym: IE
                     expiresAt: "2026-10-22T12:00:00Z"
                 studentWithoutOptionalData:
-                  summary: Estudante sem nome, e-mail ou curso informado
+                  summary: Estudante sem nome, e-mail ou curso informado e instituição sem sigla
                   value:
                     profile:
                       microsoftObjectId: "00000000-0000-0000-0000-000000000002"
@@ -119,6 +128,10 @@ paths:
                       affiliation:
                         type: student
                         courseName: null
+                    institution:
+                      id: "10000000-0000-4000-8000-000000000002"
+                      name: Outra Instituição Exemplo
+                      acronym: null
                     expiresAt: "2026-10-22T12:00:00Z"
                 nonStudent:
                   summary: Pessoa sem participação no grupo estudantil
@@ -129,6 +142,10 @@ paths:
                       email: null
                       affiliation:
                         type: nonStudent
+                    institution:
+                      id: "10000000-0000-4000-8000-000000000001"
+                      name: Instituição Exemplo
+                      acronym: IE
                     expiresAt: "2026-10-22T12:00:00Z"
         "400":
           description: |
@@ -279,10 +296,12 @@ components:
             são rejeitadas; o backend não aplica trim antes de consultar o provedor.
     InstitutionalVerificationResponse:
       type: object
-      required: [profile, expiresAt]
+      required: [profile, institution, expiresAt]
       properties:
         profile:
           $ref: "#/components/schemas/InstitutionalIdentityResponse"
+        institution:
+          $ref: "#/components/schemas/InstitutionSummaryResponse"
         expiresAt:
           type: string
           format: date-time
@@ -291,6 +310,24 @@ components:
             após o início das consultas institucionais. Não é a expiração do token
             Firebase e não substitui a validação no servidor. A resposta não inclui
             um campo ttl separado.
+    InstitutionSummaryResponse:
+      type: object
+      description: |
+        Resumo público da instituição identificada na verificação institucional.
+        Os dados vêm do cadastro do CApp; tenant e grupo Microsoft não são expostos.
+        Sua presença não comprova vínculo estudantil nem concede permissões.
+      required: [id, name, acronym]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único da instituição no CApp; não é o tenant Microsoft.
+        name:
+          type: string
+          description: Nome da instituição registrado no cadastro do CApp.
+        acronym:
+          type: [string, "null"]
+          description: Sigla cadastrada, como UnB; o campo é retornado como null quando ausente.
     InstitutionalIdentityResponse:
       type: object
       required: [microsoftObjectId, name, email, affiliation]

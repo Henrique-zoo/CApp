@@ -12,6 +12,7 @@ use crate::{
             ports::{InstitutionalAffiliation, InstitutionalProfile},
             services::authentication::InstitutionalVerificationResult,
         },
+        domain::{CatalogStatus, entities::institution::Institution},
         infrastructure::{firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient},
     },
 };
@@ -23,6 +24,7 @@ use axum::{
 };
 use serde_json::{Value, json};
 use tower::ServiceExt;
+use uuid::Uuid;
 
 /// Converte o corpo da resposta em JSON para verificar o contrato público.
 async fn response_json(response: axum::response::Response) -> Value {
@@ -164,13 +166,34 @@ fn verification_json_preserves_affiliation_and_expiry() {
                     mail: None,
                     affiliation,
                 },
+                institution: Institution {
+                    id: Uuid::from_u128(0x12345678_1234_4234_8234_123456789abc),
+                    name: "institution-name".into(),
+                    acronym: None,
+                    microsoft_tenant_id: Uuid::new_v4(),
+                    microsoft_student_group_id: Uuid::new_v4(),
+                    status: CatalogStatus::Active,
+                },
                 expires_at,
             });
         assert_eq!(
             serde_json::to_value(response).unwrap(),
-            json!({"profile": {
-            "microsoftObjectId":"microsoft-id", "name":null, "email":null, "affiliation":expected
-        }, "expiresAt":"2026-10-21T12:00:00Z"})
+            json!(
+                {
+                    "profile": {
+                        "microsoftObjectId": "microsoft-id",
+                        "name": null,
+                        "email": null,
+                        "affiliation": expected
+                    },
+                    "institution": {
+                        "id": "12345678-1234-4234-8234-123456789abc",
+                        "name": "institution-name",
+                        "acronym": null
+                    },
+                    "expiresAt":"2026-10-21T12:00:00Z"
+                }
+            )
         );
     }
 }
