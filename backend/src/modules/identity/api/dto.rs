@@ -7,10 +7,14 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
+use uuid::Uuid;
 
-use crate::modules::identity::application::{
-    ports::{InstitutionalAffiliation, InstitutionalProfile},
-    services::authentication::InstitutionalVerificationResult,
+use crate::modules::identity::{
+    application::{
+        ports::{InstitutionalAffiliation, InstitutionalProfile},
+        services::authentication::InstitutionalVerificationResult,
+    },
+    domain::entities::institution::Institution,
 };
 
 /// Corpo de `POST /auth/institutional/verify`.
@@ -49,6 +53,8 @@ pub(super) struct InstitutionalAuthRequest {
 pub(super) struct InstitutionalVerificationResponse {
     /// Perfil Microsoft retornado pela verificação, sem provisionamento interno.
     pub profile: InstitutionalIdentityResponse,
+
+    pub institution: InstitutionSummaryResponse,
     /// Prazo UTC atribuído à evidência persistida; serializado como `expiresAt`.
     pub expires_at: DateTime<Utc>,
 }
@@ -107,8 +113,41 @@ impl From<InstitutionalVerificationResult> for InstitutionalVerificationResponse
     /// Converte perfil e validade sem recalcular o prazo ou duplicar strings.
     fn from(result: InstitutionalVerificationResult) -> Self {
         Self {
-            profile: InstitutionalIdentityResponse::from(result.profile),
+            profile: result.profile.into(),
+            institution: result.institution.into(),
             expires_at: result.expires_at,
+        }
+    }
+}
+
+/// Resumo público da instituição identificada na verificação institucional.
+///
+/// Expõe os dados necessários para identificar e apresentar a instituição ao
+/// cliente. Omite a configuração da integração Microsoft, como tenant e grupo
+/// de estudantes.
+///
+/// O identificador pertence ao cadastro interno do CApp. A presença deste resumo
+/// não comprova vínculo estudantil nem concede permissões; o vínculo é informado
+/// separadamente no perfil retornado pela verificação.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstitutionSummaryResponse {
+    /// Identificador único da instituição no CApp, serializado como UUID textual.
+    pub id: Uuid,
+
+    /// Nome da instituição registrado no cadastro do CApp.
+    pub name: String,
+
+    /// Sigla cadastrada, como `UnB`; serializada como `null` quando ausente.
+    pub acronym: Option<String>,
+}
+
+impl From<Institution> for InstitutionSummaryResponse {
+    fn from(institution: Institution) -> Self {
+        Self {
+            id: institution.id,
+            name: institution.name,
+            acronym: institution.acronym,
         }
     }
 }

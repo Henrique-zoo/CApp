@@ -20,7 +20,9 @@ use crate::modules::identity::{
             InstitutionalVerificationRepository, VerifiedIdentity,
         },
     },
-    domain::entities::institutional_verification::InstitutionalVerification,
+    domain::entities::{
+        institution::Institution, institutional_verification::InstitutionalVerification,
+    },
 };
 
 /// Prazo de reutilização da confirmação institucional.
@@ -48,6 +50,8 @@ pub struct AuthenticatedIdentity {
 pub struct InstitutionalVerificationResult {
     /// Perfil externo obtido e associado à identidade autenticada nesta operação.
     pub profile: InstitutionalProfile,
+    /// Instituição associada ao usuário.
+    pub institution: Institution,
     /// Fim da validade da confirmação institucional, em UTC.
     ///
     /// Não é a expiração da sessão Firebase. O cliente pode usá-lo para antecipar a
@@ -178,6 +182,7 @@ pub async fn verify_institutional_identity(
 
     Ok(InstitutionalVerificationResult {
         profile,
+        institution,
         expires_at: verification.expires_at,
     })
 }
