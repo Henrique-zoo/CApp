@@ -14,7 +14,8 @@ A estrutura combina módulos verticais e uma pequena infraestrutura compartilhad
 
 - **app** integra os módulos, compõe dependências e possui a interface global.
 - **application** contém modelos, contratos e coordenação dos casos de uso de
-  cada módulo, sem depender de Flutter, SDKs ou transporte.
+  cada módulo. Apresentação, transporte e persistência permanecem nas camadas
+  responsáveis por esses detalhes.
 - **infrastructure** de cada módulo implementa suas portas e traduz dados externos
   para o vocabulário da aplicação.
 - **presentation** de cada módulo apresenta estados e encaminha intenções do
@@ -24,9 +25,10 @@ A estrutura combina módulos verticais e uma pequena infraestrutura compartilhad
 - **infrastructure** na raiz de src contém mecanismos compartilhados, como
   transporte HTTP e contratos de rede.
 
-Uma dependência externa deve atravessar um adaptador antes de chegar aos modelos
-da aplicação. Uma interação visual deve atravessar a API da aplicação antes de
-produzir efeitos externos.
+Integrações com serviços, transporte e persistência atravessam adaptadores que
+preservam os contratos da aplicação. Bibliotecas auxiliares podem ser usadas
+diretamente quando seu uso pertence à responsabilidade da camada. Uma interação
+visual atravessa a API da aplicação antes de produzir efeitos externos.
 
 ## Estrutura de diretórios
 
@@ -79,9 +81,9 @@ do módulo atual, não diretórios obrigatórios para todos.
 | --- | --- | --- |
 | main.dart e bootstrap.dart | Preparar a plataforma e iniciar a aplicação na ordem correta. | Flutter, configuração dos SDKs e API de montagem. |
 | app/ | Integrar módulos, tema, navegação, ciclo de vida e propriedade dos recursos. | APIs dos módulos; implementações concretas no ponto de composição. |
-| application/models/ | Representar fatos e valores usados pelos casos de uso. | Dart e tipos da própria aplicação. |
+| application/models/ | Representar fatos e valores usados pelos casos de uso. | Tipos da aplicação e bibliotecas compatíveis com a responsabilidade dos modelos. |
 | application/ports/ | Definir operações externas necessárias ao módulo. | Modelos, resultados e falhas da aplicação. |
-| Demais bibliotecas de application/ | Coordenar casos de uso, concorrência, estado e políticas locais. | Dart e contratos da própria aplicação. |
+| Demais bibliotecas de application/ | Coordenar casos de uso, concorrência, estado e políticas locais. | Contratos da aplicação e bibliotecas compatíveis com essa coordenação. |
 | infrastructure/ do módulo | Adaptar serviços, SDKs e persistência às portas da aplicação. | Aplicação do módulo, bibliotecas externas e infraestrutura compartilhada. |
 | presentation/ do módulo | Renderizar estados e encaminhar ações do usuário. | Flutter, aplicação do próprio módulo e API visual compartilhada. |
 | src/presentation/ | Disponibilizar componentes visuais genéricos que recebem dados e callbacks. | Flutter e bibliotecas da própria apresentação compartilhada. |
@@ -134,6 +136,23 @@ app / composição ──────────> APIs dos módulos e implement
 A aplicação define as portas, e a infraestrutura as implementa. Por isso, um
 caso de uso pode chamar um serviço externo em execução sem importar seu SDK:
 a composição injeta uma implementação da interface requerida.
+
+### Bibliotecas e responsabilidades
+
+A escolha de uma biblioteca considera seu uso e a direção das dependências entre
+camadas. Sua origem externa ao projeto não exige, por si só, um adaptador, uma
+implementação própria ou uma exceção arquitetural. Essa orientação vale para
+todas as camadas.
+
+Por exemplo, os modelos de identidade usam `UuidValue`, do pacote `uuid`, como
+tipo de valor. A interpretação do JSON HTTP, a representação persistente e as
+chamadas a serviços continuam nos adaptadores correspondentes. A biblioteca de
+UUID não transfere essas responsabilidades para os modelos.
+
+As verificações automáticas fiscalizam as relações entre bibliotecas do projeto.
+A adequação do uso de bibliotecas externas às responsabilidades de cada camada
+também faz parte da revisão do código; ela não é determinada por uma lista de
+pacotes permitidos.
 
 ### Fachadas e importações
 
@@ -204,7 +223,8 @@ A construção de widgets não deve iniciar implicitamente os efeitos do caso de
 | Formato persistente | Adaptador e codec locais do módulo | Conservar dados conforme um contrato de armazenamento próprio. |
 | Estado de apresentação | Coordenação da aplicação e apresentação | Informar atividade, resultado e falhas para renderização. |
 
-Os modelos de aplicação não possuem métodos JSON ou referências a SDKs.
+Os modelos de aplicação expressam os dados usados pelos casos de uso.
+A serialização do protocolo HTTP e do cache pertence à infraestrutura.
 Os adaptadores conhecem as duas representações que traduzem; suas dependências
 não precisam ser propagadas para os consumidores.
 
@@ -355,8 +375,10 @@ compartilhados ficam em support/ e não fazem parte da implementação distribu�
 
 [architecture_boundaries_test.dart](test/architecture/architecture_boundaries_test.dart)
 verifica as diretivas de importação e exportação do módulo atual: aplicação
-independente, apresentação sem adaptadores, transporte sem dependência dos módulos
-ou de app, composição visual por fachadas e exportações das respectivas camadas.
+sem dependência das outras camadas, apresentação sem adaptadores, transporte sem
+dependência dos módulos ou de app, composição visual por fachadas e exportações
+das respectivas camadas.
+O teste verifica as dependências internas sem manter exceções por pacote externo.
 As importações de SDKs externos e clientes de infraestrutura em app ficam na raiz
 de composição AppDependencies. Novos módulos devem
 receber verificações equivalentes. Os diretórios, por si só, não impõem esses

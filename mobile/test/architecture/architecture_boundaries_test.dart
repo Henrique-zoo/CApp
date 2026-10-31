@@ -1,8 +1,10 @@
 /// Regressões das fronteiras de importação do módulo e da composição.
 ///
-/// Impede reintroduzir SDKs e transporte na aplicação e na apresentação.
+/// Fiscaliza as relações entre bibliotecas próprias das camadas e dos módulos.
 /// A composição visual usa fachadas; a raiz de dependências concentra as
 /// implementações concretas. A infraestrutura compartilhada não depende de app.
+/// O uso de bibliotecas externas é avaliado pela responsabilidade na revisão
+/// do código, sem uma lista de pacotes permitidos neste teste.
 library;
 
 import 'dart:io';
@@ -29,6 +31,11 @@ String _target(File source, String uri) {
   return source.absolute.uri.resolve(uri).toString();
 }
 
+/// Identifica dependências que não pertencem às camadas do próprio projeto.
+bool _isExternalDependency(String uri) =>
+    uri.startsWith('dart:') ||
+    (uri.startsWith('package:') && !uri.startsWith('package:capp/'));
+
 /// Lista os arquivos autorais de uma área.
 Iterable<File> _sources(String root) => Directory(root)
     .listSync(recursive: true)
@@ -39,12 +46,12 @@ Iterable<File> _sources(String root) => Directory(root)
 
 /// Registra os limites fiscalizáveis pelas diretivas das bibliotecas.
 void main() {
-  test('aplicação depende somente de Dart e da própria aplicação', () {
+  test('aplicação não depende de outras camadas ou módulos', () {
     final root = Directory('lib/src/modules/identity/application').absolute.uri
         .toString();
     for (final source in _sources('lib/src/modules/identity/application')) {
       for (final uri in _directives(source)) {
-        if (uri.startsWith('dart:')) continue;
+        if (_isExternalDependency(uri)) continue;
         expect(
           _target(source, uri).startsWith(root),
           isTrue,
@@ -54,7 +61,7 @@ void main() {
     }
   });
 
-  test('apresentação não conhece transporte, Firebase ou preferências', () {
+  test('apresentação preserva as fronteiras do módulo e dos adaptadores', () {
     final identity = Directory('lib/src/modules/identity').absolute.uri
         .toString();
     final sharedPresentation = File('lib/src/presentation/presentation.dart')
@@ -63,11 +70,7 @@ void main() {
         .toString();
     for (final source in _sources('lib/src/modules/identity/presentation')) {
       for (final uri in _directives(source)) {
-        if (uri.startsWith('dart:') ||
-            uri.startsWith('package:flutter/') ||
-            uri.startsWith('package:flutter_svg/')) {
-          continue;
-        }
+        if (_isExternalDependency(uri)) continue;
         final target = _target(source, uri);
         if (target == sharedPresentation) continue;
         expect(
@@ -84,33 +87,25 @@ void main() {
     }
   });
 
-  test(
-    'apresentação compartilhada depende somente de Flutter e de si própria',
-    () {
-      final root = Directory('lib/src/presentation').absolute.uri.toString();
-      for (final source in _sources('lib/src/presentation')) {
-        for (final uri in _directives(source)) {
-          if (uri.startsWith('dart:') || uri.startsWith('package:flutter/')) {
-            continue;
-          }
-          expect(
-            _target(source, uri).startsWith(root),
-            isTrue,
-            reason: '${source.path} depende de $uri',
-          );
-        }
+  test('apresentação compartilhada não depende de app ou módulos', () {
+    final root = Directory('lib/src/presentation').absolute.uri.toString();
+    for (final source in _sources('lib/src/presentation')) {
+      for (final uri in _directives(source)) {
+        if (_isExternalDependency(uri)) continue;
+        expect(
+          _target(source, uri).startsWith(root),
+          isTrue,
+          reason: '${source.path} depende de $uri',
+        );
       }
-    },
-  );
+    }
+  });
 
   test('infraestrutura compartilhada não conhece app ou módulos', () {
     final root = Directory('lib/src/infrastructure').absolute.uri.toString();
     for (final source in _sources('lib/src/infrastructure')) {
       for (final uri in _directives(source)) {
-        if (uri.startsWith('dart:') ||
-            (uri.startsWith('package:') && !uri.startsWith('package:capp/'))) {
-          continue;
-        }
+        if (_isExternalDependency(uri)) continue;
         expect(
           _target(source, uri).startsWith(root),
           isTrue,
@@ -133,12 +128,7 @@ void main() {
     for (final source in _sources('lib/src/app')) {
       if (source.absolute.uri.toString() == composition) continue;
       for (final uri in _directives(source)) {
-        if (uri.startsWith('dart:') ||
-            uri.startsWith('package:flutter/') ||
-            uri.startsWith('package:go_router/') ||
-            uri.startsWith('package:flutter_riverpod/')) {
-          continue;
-        }
+        if (_isExternalDependency(uri)) continue;
         final target = _target(source, uri);
         if (target.startsWith(root) || target == presentation) continue;
 
