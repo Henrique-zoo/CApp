@@ -1,6 +1,6 @@
 /// Associação interna entre uma verificação institucional e a conta solicitante.
 ///
-/// A resposta HTTP contém perfil e validade, mas não devolve o UID Firebase.
+/// A resposta HTTP contém perfil, instituição e validade, sem devolver o UID Firebase.
 /// Esta biblioteca fecha essa diferença no contrato de aplicação, juntando a
 /// verificação ao identificador observado durante o caso de uso.
 ///

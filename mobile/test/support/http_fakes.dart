@@ -25,7 +25,11 @@ Dio createTestDio(FakeHttpAdapter adapter) {
 /// Resposta institucional do protocolo, independente dos modelos da aplicação.
 ///
 /// [student] seleciona a variante estudantil, preservando curso nulo.
-Map<String, Object?> backendVerificationBody({bool student = false}) => {
+/// [institutionAcronym] controla a sigla opcional sem omitir a propriedade.
+Map<String, Object?> backendVerificationBody({
+  bool student = false,
+  String? institutionAcronym = 'IEX',
+}) => {
   'profile': {
     'microsoftObjectId': '00000000-0000-0000-0000-000000000001',
     'name': 'Pessoa Exemplo',
@@ -33,6 +37,11 @@ Map<String, Object?> backendVerificationBody({bool student = false}) => {
     'affiliation': student
         ? <String, Object?>{'type': 'student', 'courseName': null}
         : <String, Object?>{'type': 'nonStudent'},
+  },
+  'institution': <String, Object?>{
+    'id': '00000000-0000-0000-0000-000000000002',
+    'name': 'Instituição Exemplo',
+    'acronym': institutionAcronym,
   },
   'expiresAt': '2026-01-01T13:00:00Z',
 };

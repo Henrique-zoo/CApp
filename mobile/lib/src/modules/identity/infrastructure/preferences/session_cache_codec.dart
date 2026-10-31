@@ -1,17 +1,22 @@
 /// Contrato de representação persistente da verificação institucional.
 ///
-/// O armazenamento local precisa continuar legível quando o protocolo HTTP mudar.
+/// O formato local evolui independentemente do protocolo HTTP.
 /// Esta biblioteca codifica modelos de aplicação diretamente, sem reutilizar DTOs
 /// do backend, e separa interpretação de conteúdo do acesso às preferências.
 ///
 /// ## Envelope e compatibilidade
 ///
-/// A versão 1 contém schemaVersion, firebaseUid e verification. A gravação
-/// preserva campos opcionais nulos e representa expiresAt em UTC.
-/// Não inclui credenciais Firebase ou Microsoft.
+/// A versão 2 contém schemaVersion, firebaseUid e verification, com perfil,
+/// instituição e validade. Os UUIDs são gravados como texto e reconstruídos como
+/// UuidValue após validação de formato, sem exigir uma versão específica de UUID.
+/// A gravação preserva campos nullable e representa expiresAt em UTC.
+/// Não inclui credenciais Firebase ou Microsoft. Registros da versão 1 são
+/// rejeitados como versão não suportada porque não contêm a instituição;
+/// o codec não inventa esse dado nem consulta a rede para completá-lo.
 ///
 /// decode lê o JSON, confere a estrutura e versão do envelope e compara seu UID
-/// ao proprietário esperado. Em seguida reconstrói perfil, vínculo e validade.
+/// ao proprietário esperado. Em seguida reconstrói perfil, instituição, vínculo
+/// e validade.
 /// Campos adicionais são ignorados; campos obrigatórios continuam obrigatórios
 /// mesmo quando seu valor admite nulo.
 ///
@@ -37,10 +42,12 @@ library;
 
 import 'dart:convert';
 
+import 'package:capp/src/modules/identity/application/models/institution_summary.dart';
 import 'package:capp/src/modules/identity/application/models/institutional_affiliation.dart';
 import 'package:capp/src/modules/identity/application/models/institutional_profile.dart';
 import 'package:capp/src/modules/identity/application/models/institutional_verification.dart';
 import 'package:capp/src/modules/identity/application/session_cache_result.dart';
+import 'package:uuid/uuid.dart';
 
 /// Codifica e interpreta registros institucionais de sessão.
 ///
@@ -54,11 +61,12 @@ final class SessionCacheCodec {
   const SessionCacheCodec();
 
   /// Versão do formato persistente produzido e aceito pelo codec.
-  static const int _schemaVersion = 1;
+  static const int _schemaVersion = 2;
 
   /// Serializa [verification] em um envelope associado a [firebaseUid].
   ///
-  /// Preserva campos opcionais nulos e grava a expiração em UTC.
+  /// Grava perfil e instituição com UUIDs textuais, preserva campos nullable
+  /// e representa a expiração em UTC.
   /// Não inclui credenciais ou objetos próprios do transporte HTTP.
   ///
   /// Não confere a identidade autenticada nem exige uma expiração futura.
@@ -158,6 +166,7 @@ final class SessionCacheCodec {
     InstitutionalVerification verification,
   ) {
     final profile = verification.profile;
+    final institution = verification.institution;
 
     final Map<String, Object?> affiliation = switch (profile.affiliation) {
       StudentAffiliation(:final courseName) => {
@@ -169,10 +178,15 @@ final class SessionCacheCodec {
 
     return {
       'profile': {
-        'microsoftObjectId': profile.microsoftObjectId,
+        'microsoftObjectId': profile.microsoftObjectId.uuid,
         'name': profile.name,
         'email': profile.email,
         'affiliation': affiliation,
+      },
+      'institution': {
+        'id': institution.id.uuid,
+        'name': institution.name,
+        'acronym': institution.acronym,
       },
       'expiresAt': verification.expiresAt.toUtc().toIso8601String(),
     };
@@ -180,8 +194,9 @@ final class SessionCacheCodec {
 
   /// Reconstrói uma verificação a partir do formato persistente.
   ///
-  /// Exige os campos obrigatórios da versão 1. Nome, e-mail e curso estudantil
-  /// admitem nulo, mas precisam estar presentes nos respectivos objetos.
+  /// Exige os campos obrigatórios da versão 2, incluindo instituição e UUIDs
+  /// textuais válidos. Nome e e-mail do perfil, sigla da instituição e curso
+  /// estudantil admitem nulo, mas precisam estar presentes nos respectivos objetos.
   ///
   /// A data segue a interpretação de DateTime.parse, preservando a política
   /// de leitura do formato anterior. O modelo normaliza o instante para UTC.
@@ -195,17 +210,24 @@ final class SessionCacheCodec {
       'verification.profile.affiliation',
     );
 
-    final expiresAt = _readString(json['expiresAt'], 'verification.expiresAt');
+    final institution = _readObject(
+      json['institution'],
+      'verification.institution',
+    );
+
+    final expiresAt = _readString(json, 'expiresAt');
 
     return InstitutionalVerification(
       profile: InstitutionalProfile(
-        microsoftObjectId: _readString(
-          profile['microsoftObjectId'],
-          'profile.microsoftObjectId',
-        ),
+        microsoftObjectId: _readUuid(profile, 'microsoftObjectId'),
         name: _readNullableString(profile, 'name'),
         email: _readNullableString(profile, 'email'),
         affiliation: _readAffiliation(affiliation),
+      ),
+      institution: InstitutionSummary(
+        id: _readUuid(institution, 'id'),
+        name: _readString(institution, 'name'),
+        acronym: _readNullableString(institution, 'acronym'),
       ),
       expiresAt: DateTime.parse(expiresAt),
     );
@@ -218,7 +240,7 @@ final class SessionCacheCodec {
   ///
   /// Lança FormatException para discriminador ou conteúdo incompatível.
   InstitutionalAffiliation _readAffiliation(Map<String, dynamic> json) {
-    final type = _readString(json['type'], 'affiliation.type');
+    final type = _readString(json, 'type');
 
     switch (type) {
       case 'student':
@@ -253,16 +275,36 @@ final class SessionCacheCodec {
     return value;
   }
 
-  /// Exige uma string não nula em [value].
+  /// Lê uma propriedade obrigatória contendo uma string não nula.
   ///
   /// Preserva o texto, inclusive vazio, conforme o formato anterior.
-  /// [field] identifica o campo no diagnóstico.
-  String _readString(Object? value, String field) {
+  /// [field] é a chave em [json] e identifica o campo no diagnóstico.
+  String _readString(Map<String, dynamic> json, String field) {
+    if (!json.containsKey(field)) {
+      throw FormatException('O campo "$field" está ausente no cache');
+    }
+
+    final value = json[field];
+
     if (value is! String) {
       throw FormatException('O campo "$field" deve ser uma string');
     }
 
     return value;
+  }
+
+  /// Lê um UUID textual obrigatório do cache.
+  ///
+  /// Lança [FormatException] para tipo ou formato incompatível.
+  /// [field] identifica o campo sem expor seu conteúdo no diagnóstico.
+  UuidValue _readUuid(Map<String, dynamic> json, String field) {
+    final text = _readString(json, field);
+
+    try {
+      return UuidValue.withFormatValidation(text);
+    } on FormatException {
+      throw FormatException('O campo "$field" deve conter um UUID válido');
+    }
   }
 
   /// Lê uma propriedade obrigatória que admite string ou nulo.

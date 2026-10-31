@@ -1,6 +1,6 @@
 /// Apresentação da tela inicial para navegação no aplicativo.
 ///
-/// Traduz o perfil confirmado em dados visuais e oferece uma ação de saída.
+/// Apresenta o perfil e a instituição confirmados e oferece uma ação de saída.
 /// A composição fornece o callback; o controlador conserva a coordenação do
 /// provedor e do cache. A tela bloqueia a ação enquanto a sessão está ocupada.
 ///
@@ -13,7 +13,7 @@ import 'package:capp/src/modules/identity/identity.dart';
 import 'package:flutter/material.dart';
 import 'package:capp/src/presentation/presentation.dart';
 
-/// Apresenta o perfil institucional e encaminha a intenção de encerrar a sessão.
+/// Apresenta perfil e instituição e encaminha a intenção de encerrar a sessão.
 ///
 /// O estado deve pertencer ao ramo pronto do gate, com verificação presente.
 /// O proprietário acompanha as falhas do callback e fornece novos estados;
@@ -21,11 +21,11 @@ import 'package:capp/src/presentation/presentation.dart';
 class HomePage extends StatelessWidget {
   /// Recebe a fotografia da sessão e a operação de saída da composição.
   ///
-  /// [state] fornece perfil e atividade; [onSignOut] deve tratar as falhas
-  /// operacionais de seu Future e manter os diagnósticos observáveis.
+  /// [state] fornece perfil, instituição e atividade; [onSignOut] trata as falhas
+  /// operacionais de seu Future e mantém os diagnósticos observáveis.
   const HomePage({super.key, required this.state, required this.onSignOut});
 
-  /// Fotografia atual do perfil e da operação em andamento.
+  /// Fotografia atual da verificação institucional e da operação em andamento.
   final SessionSignedIn state;
 
   /// Operação solicitada pelo botão, sem acesso direto ao provedor nesta tela.
@@ -34,7 +34,9 @@ class HomePage extends StatelessWidget {
   /// Constrói o ponto inicial da área principal autenticada.
   ///
   /// [state] é fornecido pelo ramo do gate que exige verificação válida.
-  /// Por esse contrato, seu perfil está disponível nesta construção.
+  /// Por esse contrato, perfil e instituição estão disponíveis nesta construção.
+  /// A instituição é apresentada pelo nome e, quando disponível, pela sigla
+  /// entre parênteses.
   ///
   /// O vínculo não estudantil gera uma mensagem informativa e não impede
   /// a montagem desta área. As funcionalidades principais podem ser
@@ -46,6 +48,8 @@ class HomePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final profile = state.verification!.profile;
     final affiliation = profile.affiliation;
+
+    final institution = state.verification!.institution;
 
     return Scaffold(
       appBar: AppBar(
@@ -90,6 +94,16 @@ class HomePage extends StatelessWidget {
                     child: Text(profile.email ?? 'Não informado'),
                   ),
 
+                  const SizedBox(height: 16),
+
+                  InputDecorator(
+                    decoration: const InputDecoration(labelText: 'Instituição'),
+                    child: Text(
+                      '${institution.name}'
+                      '${institution.acronym != null ? ' (${institution.acronym})' : ''}',
+                    ),
+                  ),
+
                   if (affiliation is StudentAffiliation) ...[
                     const SizedBox(height: 16),
 
@@ -105,13 +119,14 @@ class HomePage extends StatelessWidget {
         ),
       ),
       bottomNavigationBar: affiliation is NonStudentAffiliation
-          ? const SafeArea(
+          ? SafeArea(
               child: Padding(
                 padding: EdgeInsets.all(16),
                 child: WarningBox(
                   message:
-                      'Você não foi reconhecido como estudante da sua '
-                      'instituição. Isso significa que você não terá acesso '
+                      'Você não foi reconhecido como estudante da '
+                      '${institution.acronym ?? institution.name}. '
+                      'Isso significa que você não terá acesso '
                       'a diversas funcionalidades exclusivas de estudantes.',
                 ),
               ),

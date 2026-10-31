@@ -334,6 +334,7 @@ components:
       properties:
         microsoftObjectId:
           type: string
+          format: uuid
           description: Identificador de objeto Microsoft validado como UUID; não é o UID Firebase nem um ID interno do CApp.
           examples: ["00000000-0000-0000-0000-000000000001"]
         name:

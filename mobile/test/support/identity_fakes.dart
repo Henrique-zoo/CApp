@@ -12,21 +12,32 @@ import 'package:capp/src/modules/identity/application/ports/institutional_identi
 import 'package:capp/src/modules/identity/application/ports/microsoft_sign_in.dart';
 import 'package:capp/src/modules/identity/application/ports/session_store.dart';
 import 'package:capp/src/modules/identity/identity.dart';
+import 'package:uuid/uuid.dart';
 
 /// Produz dados fixos, independentes do relógio do computador.
 ///
 /// A validade padrão é uma hora após o instante inicial do harness.
+/// Os UUIDs da pessoa e da instituição são distintos. [institutionAcronym]
+/// permite exercitar o cadastro com e sem sigla.
 InstitutionalVerification testVerification({
   DateTime? expiresAt,
   bool student = false,
+  String? institutionAcronym = 'IEX',
 }) => InstitutionalVerification(
   profile: InstitutionalProfile(
-    microsoftObjectId: '00000000-0000-0000-0000-000000000001',
+    microsoftObjectId: const UuidValue.raw(
+      '00000000-0000-0000-0000-000000000001',
+    ),
     name: 'Pessoa Exemplo',
     email: null,
     affiliation: student
         ? const StudentAffiliation(courseName: null)
         : const NonStudentAffiliation(),
+  ),
+  institution: InstitutionSummary(
+    id: const UuidValue.raw('00000000-0000-0000-0000-000000000002'),
+    name: 'Instituição Exemplo',
+    acronym: institutionAcronym,
   ),
   expiresAt: expiresAt ?? DateTime.utc(2026, 1, 1, 13),
 );

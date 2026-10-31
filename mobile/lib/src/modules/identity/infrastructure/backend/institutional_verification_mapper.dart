@@ -8,7 +8,9 @@
 ///
 /// Depois de desserializar uma resposta, o gateway entrega seu DTO ao mapper.
 /// A função converte a variante de vínculo, cria InstitutionalProfile e envolve
-/// o perfil em InstitutionalVerification com o expiresAt recebido.
+/// o perfil em InstitutionalVerification com a instituição e o expiresAt recebidos.
+/// O resumo institucional possui tipo próprio da aplicação. Os UUIDs já foram
+/// interpretados pelo transporte e são preservados como valores imutáveis.
 ///
 /// Nome, e-mail e curso ausentes são preservados. O vínculo não estudantil mantém
 /// seu significado de resultado válido. A normalização do instante para UTC
@@ -28,6 +30,7 @@ import 'package:capp/src/infrastructure/backend/identity/dto/institutional_affil
     as wire_affiliation;
 import 'package:capp/src/infrastructure/backend/identity/dto/institutional_verification_response.dart'
     as wire_response;
+import 'package:capp/src/modules/identity/application/models/institution_summary.dart';
 
 import 'package:capp/src/modules/identity/application/models/institutional_affiliation.dart';
 import 'package:capp/src/modules/identity/application/models/institutional_profile.dart';
@@ -35,7 +38,7 @@ import 'package:capp/src/modules/identity/application/models/institutional_verif
 
 /// Converte [response] em uma verificação própria da aplicação.
 ///
-/// Preserva nome, e-mail e curso ausentes. O resultado não estudantil permanece
+/// Preserva nome, e-mail, sigla e curso ausentes. O resultado não estudantil permanece
 /// uma variante válida do vínculo, sem ser convertido em falha.
 ///
 /// A normalização do instante para UTC pertence ao construtor do modelo.
@@ -54,12 +57,19 @@ InstitutionalVerification mapInstitutionalVerification(
     wire_affiliation.NonStudentAffiliation() => const NonStudentAffiliation(),
   };
 
+  final institution = response.institution;
+
   return InstitutionalVerification(
     profile: InstitutionalProfile(
       microsoftObjectId: profile.microsoftObjectId,
       name: profile.name,
       email: profile.email,
       affiliation: affiliation,
+    ),
+    institution: InstitutionSummary(
+      id: institution.id,
+      name: institution.name,
+      acronym: institution.acronym,
     ),
     expiresAt: response.expiresAt,
   );

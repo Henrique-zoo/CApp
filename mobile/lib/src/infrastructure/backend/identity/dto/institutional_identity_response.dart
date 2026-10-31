@@ -6,7 +6,7 @@
 ///
 /// ## Percurso da resposta
 ///
-/// InstitutionalVerificationResponse agrega este DTO ao expiresAt.
+/// InstitutionalVerificationResponse agrega este DTO à instituição e ao expiresAt.
 /// Depois da desserialização, o mapper do gateway constrói o perfil próprio da
 /// aplicação e converte a união de vínculo para suas variantes internas.
 ///
@@ -18,7 +18,8 @@
 ///
 /// O objeto representa os dados retornados, sem provisionar usuário interno,
 /// associar a centros acadêmicos ou definir permissões.
-/// A criação manual não valida o UUID nem comprova que o backend ainda aceitará
+/// A leitura JSON valida o formato textual do UUID e o representa por UuidValue.
+/// A criação manual não valida novamente o UUID nem comprova que o backend aceitará
 /// a evidência em outra requisição.
 ///
 /// O formato persistente local pertence ao codec do módulo e não depende
@@ -27,7 +28,9 @@ library;
 
 // Adaptado do cliente gerado pelo OpenAPI Generator.
 
-// ignore_for_file: unused_element
+import 'package:capp/src/infrastructure/backend/converters/uuid_value_converter.dart';
+import 'package:uuid/uuid.dart';
+
 import 'institutional_affiliation.dart';
 
 import 'package:copy_with_extension/copy_with_extension.dart';
@@ -39,8 +42,8 @@ part 'institutional_identity_response.g.dart';
 ///
 /// Suporta serialização JSON e cópias com alterações por `copyWith`.
 /// A conversão aceita chaves adicionais e preserva campos opcionais nulos.
-/// Não faz consultas ao diretório, comparação com UID Firebase ou validação
-/// local do UUID informado em `microsoftObjectId`.
+/// A leitura JSON valida o formato de `microsoftObjectId`, sem exigir uma versão
+/// específica de UUID. Não consulta o diretório nem compara com o UID Firebase.
 @CopyWith()
 @JsonSerializable(
   checked: true,
@@ -61,8 +64,9 @@ class InstitutionalIdentityResponse {
   /// Identificador de objeto Microsoft validado como UUID pelo backend.
   ///
   /// É distinto do UID Firebase e de um eventual ID interno do CApp.
+  @UuidValueConverter()
   @JsonKey(name: r'microsoftObjectId', required: true, includeIfNull: false)
-  final String microsoftObjectId;
+  final UuidValue microsoftObjectId;
 
   /// `displayName` fornecido pela instituição, ou `null` se ausente.
   @JsonKey(name: r'name', required: true, includeIfNull: true)
