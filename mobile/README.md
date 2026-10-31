@@ -52,6 +52,7 @@ lib/
     │   └── backend/
     │       ├── backend_api.dart       # Transporte compartilhado e suas APIs.
     │       ├── auth/                  # Credenciais das requisições HTTP.
+    │       ├── converters/            # Conversões JSON compartilhadas pelos DTOs.
     │       ├── error/                 # Envelope público de erros do protocolo.
     │       ├── identity/              # Cliente e DTOs HTTP de identidade.
     │       └── monitoring/            # Endpoints técnicos de diagnóstico.
@@ -338,6 +339,8 @@ test/
 │   │   └── status_banner_test.dart
 │   └── modules/identity/
 │       ├── application/
+│       │   ├── models/
+│       │   │   └── institutional_verification_test.dart
 │       │   ├── institutional_auth_service_test.dart
 │       │   └── session_controller_test.dart
 │       ├── infrastructure/

@@ -1,7 +1,7 @@
-/// Envelope HTTP do perfil institucional e de sua data de expiração.
+/// Envelope HTTP do perfil, da instituição e da data de expiração da evidência.
 ///
 /// Esta biblioteca representa a resposta de sucesso do endpoint de verificação.
-/// O protocolo agrupa profile e expiresAt, mas não inclui o UID Firebase
+/// O protocolo agrupa profile, institution e expiresAt, sem incluir o UID Firebase
 /// da conta que solicitou a operação.
 ///
 /// ## Participação no fluxo
@@ -36,6 +36,11 @@
 ///     'email': null,
 ///     'affiliation': {'type': 'nonStudent'},
 ///   },
+///   'institution': {
+///     'id': '00000000-0000-0000-0000-000000000001',
+///     'name': 'Instituição',
+///     'acronym': null,
+///   },
 ///   'expiresAt': '2026-10-25T12:00:00Z',
 /// });
 /// assert(response.expiresAt.isUtc);
@@ -45,6 +50,8 @@ library;
 // Adaptado do cliente gerado pelo OpenAPI Generator.
 
 // ignore_for_file: unused_element
+import 'package:capp/src/infrastructure/backend/identity/dto/institution_summary_response.dart';
+
 import 'institutional_identity_response.dart';
 
 import 'package:copy_with_extension/copy_with_extension.dart';
@@ -52,7 +59,7 @@ import 'package:json_annotation/json_annotation.dart';
 
 part 'institutional_verification_response.g.dart';
 
-/// Evidência institucional composta por um perfil e sua data de expiração.
+/// Evidência institucional composta por perfil, instituição e data de expiração.
 ///
 /// Suporta serialização JSON e cópias com alterações por `copyWith`.
 /// A criação do objeto não registra temporizador, não agenda renovação e não
@@ -65,16 +72,21 @@ part 'institutional_verification_response.g.dart';
   explicitToJson: true,
 )
 class InstitutionalVerificationResponse {
-  /// Cria o resultado com o perfil verificado e o instante de expiração.
+  /// Cria o resultado com o perfil, a instituição e o instante de expiração.
   /// Não exige instante futuro nem converte seu fuso automaticamente.
   InstitutionalVerificationResponse({
     required this.profile,
+    required this.institution,
     required this.expiresAt,
   });
 
   /// Perfil institucional confirmado pelo backend.
   @JsonKey(name: r'profile', required: true, includeIfNull: false)
   final InstitutionalIdentityResponse profile;
+
+  /// Resumo público da instituição, sem tenant ou configuração de grupos.
+  @JsonKey(name: r'institution', required: true, includeIfNull: false)
+  final InstitutionSummaryResponse institution;
 
   /// Expiração da evidência institucional, recebida em UTC no formato RFC 3339.
   ///
@@ -84,30 +96,32 @@ class InstitutionalVerificationResponse {
   @JsonKey(name: r'expiresAt', required: true, includeIfNull: false)
   final DateTime expiresAt;
 
-  /// Compara perfil e instante, delegando a igualdade aos respectivos objetos.
+  /// Compara perfil, instituição e instante pelos respectivos valores.
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is InstitutionalVerificationResponse &&
           other.profile == profile &&
+          other.institution == institution &&
           other.expiresAt == expiresAt;
 
-  /// Hash combinado do perfil e do instante usados pela igualdade.
+  /// Hash combinado do perfil, da instituição e do instante.
   @override
-  int get hashCode => profile.hashCode + expiresAt.hashCode;
+  int get hashCode =>
+      profile.hashCode + institution.hashCode + expiresAt.hashCode;
 
   /// Desserializa o perfil e converte `expiresAt` de uma string para [DateTime].
   ///
-  /// Ambas as propriedades são obrigatórias e não nulas. Propriedades
+  /// Perfil, instituição e expiração são obrigatórios e não nulos. Propriedades
   /// desconhecidas são aceitas; dados inválidos causam falha de desserialização.
   /// A data segue `DateTime.parse`; o cliente não verifica que o texto recebido
   /// estava em UTC ou representa a política de 24 horas do servidor. Falhas são
-  /// encapsuladas pela conversão checked, inclusive datas incompatíveis.
+  /// encapsuladas pela conversão checked, inclusive datas e UUIDs incompatíveis.
   factory InstitutionalVerificationResponse.fromJson(
     Map<String, dynamic> json,
   ) => _$InstitutionalVerificationResponseFromJson(json);
 
-  /// Serializa o perfil e a expiração em uma representação ISO 8601.
+  /// Serializa perfil e instituição com UUIDs textuais e expiração em ISO 8601.
   Map<String, dynamic> toJson() =>
       _$InstitutionalVerificationResponseToJson(this);
 

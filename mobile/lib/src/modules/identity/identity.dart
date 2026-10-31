@@ -50,6 +50,7 @@ export 'application/models/institutional_affiliation.dart'
     show InstitutionalAffiliation, StudentAffiliation, NonStudentAffiliation;
 export 'application/models/institutional_profile.dart'
     show InstitutionalProfile;
+export 'application/models/institution_summary.dart' show InstitutionSummary;
 export 'application/models/institutional_verification.dart'
     show InstitutionalVerification;
 export 'application/models/institutional_verification_result.dart'

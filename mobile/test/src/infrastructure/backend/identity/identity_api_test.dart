@@ -7,6 +7,7 @@ library;
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:json_annotation/json_annotation.dart';
+import 'package:uuid/uuid.dart';
 import 'package:capp/src/infrastructure/backend/identity/dto/institutional_auth_request.dart';
 import 'package:capp/src/infrastructure/backend/identity/dto/institutional_affiliation.dart';
 import 'package:capp/src/infrastructure/backend/identity/identity_api.dart';
@@ -37,6 +38,20 @@ void main() {
       expect(request.data, {'microsoftAccessToken': 'microsoft-test-token'});
       expect(response.profile.affiliation, isA<NonStudentAffiliation>());
       expect(response.profile.email, isNull);
+      expect(
+        response.profile.microsoftObjectId,
+        const UuidValue.raw('00000000-0000-0000-0000-000000000001'),
+      );
+      expect(
+        response.institution.id,
+        const UuidValue.raw('00000000-0000-0000-0000-000000000002'),
+      );
+      expect(response.institution.name, 'Instituição Exemplo');
+      expect(response.institution.acronym, 'IEX');
+      expect(response.toJson(), {
+        ...backendVerificationBody(),
+        'expiresAt': '2026-01-01T13:00:00.000Z',
+      });
     },
   );
 
@@ -94,6 +109,64 @@ void main() {
             .having((e) => e.response?.statusCode, 'status', 403)
             .having((e) => e.response?.data, 'corpo original', body),
       ),
+    );
+  });
+
+  test('instituição sem sigla preserva a propriedade nula no JSON', () async {
+    final body = backendVerificationBody(institutionAcronym: null);
+    final api = IdentityApi(
+      createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
+    );
+    final response = await api.verifyInstitutionalIdentity(request: _request());
+    expect(response.institution.acronym, isNull);
+    expect(response.toJson(), {
+      ...body,
+      'expiresAt': '2026-01-01T13:00:00.000Z',
+    });
+  });
+
+  for (final field in [
+    ('profile', 'microsoftObjectId'),
+    ('institution', 'id'),
+  ]) {
+    for (final value in <Object?>['not-a-uuid', null, 42]) {
+      test(
+        '${field.$1}.${field.$2} incompatível falha na leitura checked: $value',
+        () async {
+          final body = backendVerificationBody();
+          (body[field.$1] as Map)[field.$2] = value;
+          final api = IdentityApi(
+            createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
+          );
+          await expectLater(
+            api.verifyInstitutionalIdentity(request: _request()),
+            throwsA(isA<CheckedFromJsonException>()),
+          );
+        },
+      );
+    }
+  }
+
+  test('instituição é obrigatória na resposta institucional', () async {
+    final body = backendVerificationBody()..remove('institution');
+    final api = IdentityApi(
+      createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
+    );
+    await expectLater(
+      api.verifyInstitutionalIdentity(request: _request()),
+      throwsA(isA<CheckedFromJsonException>()),
+    );
+  });
+
+  test('sigla ausente difere de sigla explicitamente nula', () async {
+    final body = backendVerificationBody();
+    (body['institution'] as Map).remove('acronym');
+    final api = IdentityApi(
+      createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
+    );
+    await expectLater(
+      api.verifyInstitutionalIdentity(request: _request()),
+      throwsA(isA<CheckedFromJsonException>()),
     );
   });
 }

@@ -10,7 +10,7 @@
 /// O gateway do módulo consome esse cliente, monta o DTO de requisição e converte
 /// a resposta para modelos próprios antes de entregá-la ao caso de uso.
 ///
-/// Os tipos exportados representam o protocolo: perfil, vínculo e validade
+/// Os tipos exportados representam o protocolo: perfil, instituição, vínculo e validade
 /// recebidos pela rede. Eles não são catálogo de capacidades, estado de sessão
 /// ou entidades de um usuário interno provisionado.
 ///
@@ -29,5 +29,6 @@ export 'dto/institutional_verification_response.dart'
     show InstitutionalVerificationResponse;
 export 'dto/institutional_identity_response.dart'
     show InstitutionalIdentityResponse;
+export 'dto/institution_summary_response.dart' show InstitutionSummaryResponse;
 export 'dto/institutional_affiliation.dart'
     show InstitutionalAffiliation, StudentAffiliation, NonStudentAffiliation;

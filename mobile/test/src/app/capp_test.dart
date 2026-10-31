@@ -40,6 +40,8 @@ void main() {
       await tester.tap(find.text('Entrar com Microsoft'));
       await tester.pumpAndSettle();
       expect(find.text('Pessoa Exemplo'), findsOneWidget);
+      expect(find.text('Instituição'), findsOneWidget);
+      expect(find.text('Instituição Exemplo (IEX)'), findsOneWidget);
       expect(
         find.textContaining('Você não foi reconhecido como estudante'),
         findsOneWidget,
@@ -47,6 +49,29 @@ void main() {
       expect(find.text('Verificar instituição'), findsNothing);
       expect(find.text('Atualizar verificação'), findsNothing);
       expect(h.store.saveCalls, 1);
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(h.dispose);
+    }
+  });
+
+  testWidgets('instituição sem sigla apresenta apenas o nome', (tester) async {
+    final h = IdentityHarness(uid: 'user-a');
+    h.store.results['user-a'] = SessionCacheFound(
+      testVerification(institutionAcronym: null),
+    );
+    try {
+      h.controller.start();
+      await tester.pumpWidget(
+        CApp(
+          sessionController: h.controller,
+          backendReadinessController: readiness,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Instituição Exemplo'), findsOneWidget);
+      expect(find.textContaining('Instituição Exemplo ('), findsNothing);
+      expect(tester.takeException(), isNull);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.runAsync(h.dispose);
