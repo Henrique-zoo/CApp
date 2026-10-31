@@ -1,0 +1,9 @@
+targets:
+  $default:
+    builders:
+      source_gen:combining_builder:
+        options:
+          # copy_with_extension_gen emite casts redundantes para Object?.
+          # A exceção fica restrita aos arquivos gerados.
+          ignore_for_file:
+            - unnecessary_cast
