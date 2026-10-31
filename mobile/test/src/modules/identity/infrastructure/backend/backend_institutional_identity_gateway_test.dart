@@ -9,6 +9,8 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:json_annotation/json_annotation.dart';
+import 'package:uuid/uuid.dart';
 import 'package:capp/src/infrastructure/backend/identity/identity_api.dart';
 import 'package:capp/src/modules/identity/identity.dart';
 import 'package:capp/src/modules/identity/infrastructure/backend/backend_institutional_identity_gateway.dart';
@@ -38,8 +40,67 @@ void main() {
     );
     expect(result.profile.affiliation, const NonStudentAffiliation());
     expect(result.profile.name, 'Pessoa Exemplo');
+    expect(
+      result.profile.microsoftObjectId,
+      const UuidValue.raw('00000000-0000-0000-0000-000000000001'),
+    );
+    expect(
+      result.institution,
+      const InstitutionSummary(
+        id: UuidValue.raw('00000000-0000-0000-0000-000000000002'),
+        name: 'Instituição Exemplo',
+        acronym: 'IEX',
+      ),
+    );
     expect(result.expiresAt, DateTime.utc(2026, 1, 1, 13));
   });
+
+  test('preserva instituição sem sigla no perfil estudantil', () async {
+    final gateway = _gateway(
+      (_) => jsonTestResponse(
+        backendVerificationBody(student: true, institutionAcronym: null),
+      ),
+    );
+    final result = await gateway.verify(
+      microsoftAccessToken: 'microsoft-test-token',
+    );
+    expect(
+      result.profile.affiliation,
+      const StudentAffiliation(courseName: null),
+    );
+    expect(result.institution.name, 'Instituição Exemplo');
+    expect(result.institution.acronym, isNull);
+  });
+
+  for (final field in [
+    ('profile', 'microsoftObjectId'),
+    ('institution', 'id'),
+  ]) {
+    test(
+      'UUID inválido em ${field.$1}.${field.$2} é resposta inválida',
+      () async {
+        final body = backendVerificationBody();
+        (body[field.$1] as Map)[field.$2] = 'not-a-uuid';
+        final gateway = _gateway((_) => jsonTestResponse(body));
+        await expectLater(
+          gateway.verify(microsoftAccessToken: 'microsoft-test-token'),
+          throwsA(
+            isA<IdentityException>()
+                .having(
+                  (e) => e.kind,
+                  'classificação',
+                  IdentityFailureKind.invalidResponse,
+                )
+                .having(
+                  (e) => e.cause,
+                  'causa',
+                  isA<CheckedFromJsonException>(),
+                ),
+          ),
+        );
+      },
+    );
+  }
 
   for (final scenario in [
     (401, 'expired_token', IdentityFailureKind.credentialsRejected),

@@ -13,6 +13,10 @@ abstract class _$InstitutionalVerificationResponseCWProxy {
     InstitutionalIdentityResponse profile,
   );
 
+  InstitutionalVerificationResponse institution(
+    InstitutionSummaryResponse institution,
+  );
+
   InstitutionalVerificationResponse expiresAt(DateTime expiresAt);
 
   /// Creates a new instance with the provided field values.
@@ -25,6 +29,7 @@ abstract class _$InstitutionalVerificationResponseCWProxy {
   /// ```
   InstitutionalVerificationResponse call({
     InstitutionalIdentityResponse profile,
+    InstitutionSummaryResponse institution,
     DateTime expiresAt,
   });
 }
@@ -43,6 +48,11 @@ class _$InstitutionalVerificationResponseCWProxyImpl
   ) => call(profile: profile);
 
   @override
+  InstitutionalVerificationResponse institution(
+    InstitutionSummaryResponse institution,
+  ) => call(institution: institution);
+
+  @override
   InstitutionalVerificationResponse expiresAt(DateTime expiresAt) =>
       call(expiresAt: expiresAt);
 
@@ -57,6 +67,7 @@ class _$InstitutionalVerificationResponseCWProxyImpl
   @override
   InstitutionalVerificationResponse call({
     Object? profile = const $CopyWithPlaceholder(),
+    Object? institution = const $CopyWithPlaceholder(),
     Object? expiresAt = const $CopyWithPlaceholder(),
   }) {
     return InstitutionalVerificationResponse(
@@ -64,6 +75,11 @@ class _$InstitutionalVerificationResponseCWProxyImpl
           ? _value.profile
           // ignore: cast_nullable_to_non_nullable
           : profile as InstitutionalIdentityResponse,
+      institution:
+          institution == const $CopyWithPlaceholder() || institution == null
+          ? _value.institution
+          // ignore: cast_nullable_to_non_nullable
+          : institution as InstitutionSummaryResponse,
       expiresAt: expiresAt == const $CopyWithPlaceholder() || expiresAt == null
           ? _value.expiresAt
           // ignore: cast_nullable_to_non_nullable
@@ -90,11 +106,15 @@ InstitutionalVerificationResponse _$InstitutionalVerificationResponseFromJson(
 ) => $checkedCreate('InstitutionalVerificationResponse', json, (
   $checkedConvert,
 ) {
-  $checkKeys(json, requiredKeys: const ['profile', 'expiresAt']);
+  $checkKeys(json, requiredKeys: const ['profile', 'institution', 'expiresAt']);
   final val = InstitutionalVerificationResponse(
     profile: $checkedConvert(
       'profile',
       (v) => InstitutionalIdentityResponse.fromJson(v as Map<String, dynamic>),
+    ),
+    institution: $checkedConvert(
+      'institution',
+      (v) => InstitutionSummaryResponse.fromJson(v as Map<String, dynamic>),
     ),
     expiresAt: $checkedConvert('expiresAt', (v) => DateTime.parse(v as String)),
   );
@@ -105,5 +125,6 @@ Map<String, dynamic> _$InstitutionalVerificationResponseToJson(
   InstitutionalVerificationResponse instance,
 ) => <String, dynamic>{
   'profile': instance.profile.toJson(),
+  'institution': instance.institution.toJson(),
   'expiresAt': instance.expiresAt.toIso8601String(),
 };

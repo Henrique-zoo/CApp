@@ -1,4 +1,4 @@
-/// Evidência institucional composta por perfil e prazo de validade.
+/// Evidência institucional composta por perfil, instituição e prazo de validade.
 ///
 /// A autenticação Firebase e a confirmação institucional expiram segundo regras
 /// diferentes. Esta biblioteca representa a confirmação usada pela aplicação,
@@ -7,6 +7,8 @@
 /// ## Construção e uso
 ///
 /// O mapper do gateway ou o codec local produz InstitutionalVerification.
+/// InstitutionSummary conserva o cadastro público da instituição, sem tenant
+/// ou grupo Microsoft. Os identificadores da pessoa e da instituição são distintos.
 /// O construtor normaliza expiresAt para UTC; isValidAt compara o prazo com um
 /// instante fornecido, sem consultar implicitamente o relógio.
 ///
@@ -23,6 +25,8 @@
 /// A conta correspondente é associada fora deste objeto.
 library;
 
+import 'package:capp/src/modules/identity/application/models/institution_summary.dart';
+
 import 'institutional_profile.dart';
 
 /// Resultado institucional com prazo de validade.
@@ -34,7 +38,7 @@ import 'institutional_profile.dart';
 /// O instante de expiração é normalizado para UTC, preservando o momento
 /// informado pelo chamador.
 final class InstitutionalVerification {
-  /// Cria a verificação com [profile] e [expiresAt].
+  /// Cria a verificação com [profile], [institution] e [expiresAt].
   ///
   /// Aceita instantes passados porque o armazenamento pode conter
   /// verificações expiradas.
@@ -42,11 +46,15 @@ final class InstitutionalVerification {
   /// Não confere a política de duração do backend nem autentica a pessoa.
   InstitutionalVerification({
     required this.profile,
+    required this.institution,
     required DateTime expiresAt,
   }) : expiresAt = expiresAt.toUtc();
 
   /// Perfil obtido na verificação institucional.
   final InstitutionalProfile profile;
+
+  /// Instituição identificada pelo backend, independente do vínculo estudantil.
+  final InstitutionSummary institution;
 
   /// Instante de expiração, normalizado para UTC.
   final DateTime expiresAt;
@@ -65,16 +73,17 @@ final class InstitutionalVerification {
     return expiresAt.isAfter(instant);
   }
 
-  /// Compara perfil e instante de expiração por conteúdo.
+  /// Compara perfil, instituição e instante de expiração por conteúdo.
   @override
   bool operator ==(Object other) {
     return identical(this, other) ||
         other is InstitutionalVerification &&
             other.profile == profile &&
+            other.institution == institution &&
             other.expiresAt == expiresAt;
   }
 
   /// Hash dos atributos utilizados pela igualdade.
   @override
-  int get hashCode => Object.hash(profile, expiresAt);
+  int get hashCode => Object.hash(profile, institution, expiresAt);
 }

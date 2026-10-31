@@ -1,8 +1,8 @@
 //! Contratos JSON da verificação institucional.
 //!
 //! A entrada usa `microsoftAccessToken`; o ID token Firebase pertence ao cabeçalho
-//! `Authorization`. A saída contém `profile` e `expiresAt` em camelCase, com instante
-//! UTC serializado pelo Chrono em RFC 3339. Campos opcionais ausentes do perfil são
+//! `Authorization`. A saída contém `profile`, `institution` e `expiresAt` em camelCase,
+//! com instante UTC serializado pelo Chrono em RFC 3339. Campos opcionais ausentes do perfil são
 //! serializados como `null`; não há UID, senha ou credencial na resposta.
 
 use chrono::{DateTime, Utc};
@@ -41,6 +41,11 @@ pub(super) struct InstitutionalAuthRequest {
 ///     "name": "Estudante",
 ///     "email": null,
 ///     "affiliation": { "type": "student", "courseName": null }
+///   },
+///   "institution": {
+///     "id": "00000000-0000-0000-0000-000000000001",
+///     "name": "Instituição",
+///     "acronym": null
 ///   },
 ///   "expiresAt": "2026-10-20T21:00:00Z"
 /// }
