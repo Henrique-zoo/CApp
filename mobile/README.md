@@ -412,6 +412,20 @@ flutter test --no-pub
 dart doc
 ~~~
 
+Após alterar DTOs anotados com `JsonSerializable` ou `CopyWith`, atualize os
+arquivos gerados a partir de `mobile`:
+
+~~~bash
+dart run build_runner build
+~~~
+
+Use `dart run build_runner watch` para regenerá-los durante as edições.
+Os arquivos `.g.dart` são produzidos a partir das classes Dart; uma alteração
+isolada no OpenAPI não atualiza esses arquivos automaticamente.
+O `build.yaml` configura o gerador para ignorar `unnecessary_cast` somente nas
+saídas geradas, pois `copy_with_extension_gen` pode emitir casts redundantes
+para campos `Object?`. O código autoral continua sujeito a essa verificação.
+
 Os testes de sessão utilizam contratos simulados; os testes HTTP conservam Dio e
 a desserialização com transporte em memória. Os testes de widget verificam os
 ramos de entrada, erro, prontidão, aviso de cache e retomada. Eles não executam
