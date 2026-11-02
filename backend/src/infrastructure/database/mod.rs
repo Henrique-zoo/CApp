@@ -1,11 +1,11 @@
-//! Migrations PostgreSQL compartilhadas pelo servidor e pelos testes.
+//! Adaptador PostgreSQL e migrations usados pelo servidor e pelos testes.
 //!
-//! [`MIGRATOR`] incorpora o conteúdo de `backend/migrations/` na compilação.
-//! O executável o aplica antes de abrir a porta HTTP; a infraestrutura BDD usa
-//! o mesmo migrador ao preparar sua base-modelo, antes de carregar a fixture.
-//! Cada chamador cria e administra seu próprio pool.
+//! [`MIGRATOR`] incorpora `backend/migrations/` na compilação. O executável o aplica
+//! antes de abrir a porta HTTP; a suíte BDD prepara a base-modelo antes da fixture.
+//! [`PgDatabase`] encapsula o pool e recebe implementações de traits de repositório
+//! nos módulos de negócio. Cada chamador administra seu próprio pool.
 
-use sqlx::migrate::Migrator;
+use sqlx::{PgPool, migrate::Migrator};
 
 /// Migrations versionadas do backend, embutidas no binário.
 ///
@@ -19,10 +19,10 @@ use sqlx::migrate::Migrator;
 /// concorrentes no mesmo banco. Erros de conexão, permissão e execução SQL são
 /// propagados ao chamador. O banco deve existir antes da chamada.
 ///
-/// O diretório pode permanecer sem arquivos SQL enquanto o modelo de dados não
-/// estiver definido. Nesse caso, somente a tabela de controle é preparada.
+/// As migrations atuais criam `catalog_status`, `institution` e
+/// `institutional_verification`, sem inserir uma instituição real ou usuário.
 /// Novos arquivos exigem recompilar o binário; `build.rs` observa o diretório
-/// para que o Cargo detecte essas adições.
+/// para que o Cargo detecte essas adições. A fixture BDD é aplicada separadamente.
 ///
 /// # Exemplos
 ///
@@ -37,3 +37,46 @@ use sqlx::migrate::Migrator;
 /// # }
 /// ```
 pub static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+
+/// Acesso PostgreSQL compartilhado pelas implementações de repositório.
+///
+/// Clonar este tipo compartilha o mesmo pool de conexões.
+#[derive(Debug, Clone)]
+pub struct PgDatabase {
+    /// Pool utilizado pelos adaptadores de persistência do backend.
+    pub(crate) pool: PgPool,
+}
+
+impl PgDatabase {
+    /// Encapsula um pool existente sem abrir conexões nem aplicar migrations.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `pool`: handle SQLx conectado ou de conexão tardia, preparado pelo chamador.
+    ///
+    /// # Retorno
+    ///
+    /// Adaptador pronto para receber chamadas pelas traits dos módulos. Clonar o
+    /// adaptador compartilha o pool; fechar qualquer handle afeta os demais. O tipo não
+    /// cria transações, carrega dados ou verifica disponibilidade na construção.
+    ///
+    /// # Exemplos
+    ///
+    /// ```
+    /// use backend::infrastructure::database::PgDatabase;
+    /// use sqlx::postgres::PgPoolOptions;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), sqlx::Error> {
+    /// let pool = PgPoolOptions::new()
+    ///     .connect_lazy("postgres://capp:capp@localhost:5432/capp")?;
+    /// let database = PgDatabase::new(pool.clone());
+    /// let _shared = database.clone();
+    /// pool.close().await;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}

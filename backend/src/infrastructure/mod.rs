@@ -1,10 +1,12 @@
 //! Infraestrutura técnica compartilhada entre os domínios.
 //!
-//! [`database`] fornece as migrations usadas pelo servidor e pelos testes.
-//! Os demais submódulos reservam as integrações com provedores de identidade,
-//! dados acadêmicos, arquivos e notificações, ainda sem adaptadores executáveis.
-//! A conexão PostgreSQL atual é criada no executável e entregue à API pelo
-//! [`AppState`](crate::api::state::AppState).
+//! [`database`] fornece migrations e o adaptador PostgreSQL comum aos repositórios.
+//! Os diretórios globais [`firebase`] e [`microsoft`] permanecem reservados;
+//! os adaptadores executáveis de autenticação ficam em
+//! [`crate::modules::identity::infrastructure`]. [`storage`] e [`notifications`]
+//! também são espaços reservados.
+//!
+//! O executável constrói os recursos e os entrega em [`crate::api::state::AppState`].
 
 pub mod database;
 pub mod firebase;

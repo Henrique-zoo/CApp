@@ -13,7 +13,7 @@ Funcionalidade: Contexto Multi-CA e navegação entre Centros Acadêmicos
   # 3. Isolamento de Permissões - Alternar o contexto ativo para outro CA nunca concede permissões
   #    administrativas desse novo CA.
   # 4. Cargos Distintos por CA - Os privilégios de diretoria e gestão pertencem estritamente ao CA
-  #    no qual foram atribuídos; ao navegar por outro CA, o estudante atua estritamente como visitante.
+  #    no qual foram atribuídos; ao navegar por outro CA, o estudante só possui as permissões atribuídas nesse CA.
 
   Contexto:
     Dado que existem os seguintes Centros Acadêmicos cadastrados na UnB:
@@ -57,17 +57,19 @@ Funcionalidade: Contexto Multi-CA e navegação entre Centros Acadêmicos
     Então o estudante possui permissão para "Publicar notícias diretamente" no CA ativo
     Quando o estudante altera o contexto ativo para "Centro Acadêmico de Ciência da Computação (CACOMP)"
     Então o estudante não possui permissão para "Publicar notícias diretamente" no CA ativo
-    E atua estritamente como visitante no novo contexto
+    E não recebe permissões administrativas apenas pela mudança de contexto
 
   @backend @happy
   Cenário: Manutenção de cargos distintos e isolados por CA
     Dado que o estudante "231012345@aluno.unb.br" exerce o cargo de "Presidente" em "Centro Acadêmico de Engenharia de Redes (CAER)"
-    E o cargo possui a permissão de "Administrar integrantes da gestão"
+    E o cargo possui a permissão de "Administrar perfis e integrantes da gestão"
+    E esse cargo não possui a permissão de "Publicar e gerenciar eventos diretamente"
     E o estudante exerce o cargo de "Colaborador de Eventos" em "Centro Acadêmico de Ciência da Computação (CACOMP)"
     E o cargo possui a permissão de "Publicar e gerenciar eventos diretamente"
+    E esse cargo não possui a permissão de "Administrar perfis e integrantes da gestão"
     Quando o estudante está com o contexto ativo em "Centro Acadêmico de Engenharia de Redes (CAER)"
-    Então o estudante possui permissão para "Administrar integrantes da gestão" no CA ativo
+    Então o estudante possui permissão para "Administrar perfis e integrantes da gestão" no CA ativo
     E não possui permissão para "Publicar e gerenciar eventos diretamente" no CA ativo
     Quando o estudante altera o contexto ativo para "Centro Acadêmico de Ciência da Computação (CACOMP)"
     Então o estudante possui permissão para "Publicar e gerenciar eventos diretamente" no CA ativo
-    E não possui permissão para "Administrar integrantes da gestão" no CA ativo
+    E não possui permissão para "Administrar perfis e integrantes da gestão" no CA ativo
