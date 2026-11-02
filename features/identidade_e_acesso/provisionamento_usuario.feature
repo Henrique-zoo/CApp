@@ -1,58 +1,67 @@
 # language: pt
 
-@pending_backend @pending_mobile
-Funcionalidade: Provisionamento do usuário
-  Como estudante da instituição de ensino
-  Quero que meu perfil seja criado automaticamente após minha autenticação
-  Para que eu não precise preencher manualmente meus dados de cadastro
+# Referência: Relatório de Features, seções 1.2 e 12.1.
+# O primeiro acesso cria o perfil; o preenchimento complementar determina sua ativação.
+@backend @mobile @pending_backend @pending_mobile
+Funcionalidade: Provisionamento e conclusão do perfil do usuário
+  Como usuário com identidade institucional verificada
+  Quero que meu perfil seja criado automaticamente e possa ser concluído depois
+  Para retomar meu cadastro sem perder minha identidade ou meus dados
 
-  # ---------------------------------------------------------------------------
-  # 1. Primeiro acesso e criação automática de perfil
-  # ---------------------------------------------------------------------------
-  Regra: O primeiro acesso autenticado cria automaticamente o perfil da aplicação
+  Regra: O primeiro acesso cria um único perfil incompleto
 
-    @backend @mobile @happy
-    Cenário: Provisionamento automático de perfil no primeiro login com credencial institucional válida
-      Dado que o estudante possui a credencial institucional ativa "262001234@aluno.unb.br"
-      E o estudante ainda não possui cadastro no aplicativo
-      Quando ele realiza o primeiro login com sucesso utilizando sua credencial institucional
-      Então o sistema cria automaticamente o perfil interno do usuário
-      E a conta interna do estudante é ativada sem exigir preenchimento de formulário de cadastro
-      E o perfil da aplicação fica associado ao e-mail institucional "262001234@aluno.unb.br"
+    Cenário: Criar perfil incompleto no primeiro acesso institucional
+      Dado que a identidade institucional do usuário foi autenticada e verificada
+      E ainda não existe um perfil do CApp associado a essa identidade
+      Quando o usuário conclui seu primeiro acesso institucional
+      Então o CApp cria um perfil associado à identidade autenticada
+      E o perfil é criado com o status "Incomplete"
+      E a criação do perfil não exige o preenchimento prévio dos dados complementares
+      E o aplicativo solicita a conclusão dos dados obrigatórios do perfil
 
-  # ---------------------------------------------------------------------------
-  # 2. Vínculo unívoco entre identidade externa e interna
-  # ---------------------------------------------------------------------------
-  Regra: A identidade institucional externa deve ser associada de forma unívoca ao registro interno
+    Cenário: Retomar o preenchimento após um novo acesso
+      Dado que o usuário possui um perfil com status "Incomplete"
+      E já informou parte dos dados complementares do perfil
+      Quando retorna ao CApp com a mesma identidade institucional autenticada
+      Então o aplicativo recupera o mesmo perfil incompleto
+      E os dados complementares já salvos permanecem disponíveis
+      E o aplicativo permite continuar o preenchimento
 
-    @backend @happy
-    Cenário: Associação unívoca entre a identidade institucional externa e o registro interno do usuário
-      Dado que um estudante com e-mail institucional "262001234@aluno.unb.br" conclui a validação externa
-      Quando o sistema processa o provisionamento do perfil do usuário
-      Então uma identidade institucional externa unívoca é associada ao registro interno do estudante
-      E nenhum outro usuário interno pode ser vinculado à mesma identidade institucional externa
+    Cenário: Acessos simultâneos não duplicam o perfil
+      Dado que a identidade institucional do usuário foi autenticada e verificada
+      E ainda não existe um perfil do CApp associado a essa identidade
+      Quando duas solicitações de primeiro acesso dessa identidade são processadas simultaneamente
+      Então existe somente um perfil do CApp para essa identidade
+      E as duas solicitações recuperam o mesmo identificador interno
 
-  # ---------------------------------------------------------------------------
-  # 3. Reutilização de perfil e atualização de acesso
-  # ---------------------------------------------------------------------------
-  Regra: Usuários com cadastro existente não sofrem duplicação de perfil em novos acessos
+  Regra: A conclusão dos dados obrigatórios ativa o perfil existente
 
-    @backend @mobile @happy
-    Cenário: Login de estudante já cadastrado apenas recupera o perfil e atualiza o acesso sem recriar dados
-      Dado que o estudante com e-mail "231012345@aluno.unb.br" já possui perfil cadastrado no aplicativo
-      Quando ele realiza login no aplicativo utilizando sua credencial institucional
-      Então o sistema apenas recupera o perfil existente do estudante
-      E nenhum novo registro de usuário é criado no aplicativo
-      E a data do último acesso da identidade institucional é atualizada
+    Cenário: Ativar o perfil após preencher os dados obrigatórios
+      Dado que o usuário possui um perfil com status "Incomplete"
+      Quando informa todos os dados complementares obrigatórios válidos e confirma a conclusão
+      Então o perfil existente passa ao status "Active"
+      E os dados informados ficam associados ao mesmo perfil
+      E seu identificador interno permanece inalterado
 
-  # ---------------------------------------------------------------------------
-  # 4. Idempotência e integridade do identificador interno
-  # ---------------------------------------------------------------------------
-  Regra: Reautenticações consecutivas preservam a integridade e unicidade do identificador interno
+    Cenário: Não ativar um perfil com dados obrigatórios ausentes
+      Dado que o usuário possui um perfil com status "Incomplete"
+      Quando tenta concluir o perfil sem informar todos os dados obrigatórios
+      Então o perfil permanece com o status "Incomplete"
+      E o aplicativo informa quais dados obrigatórios ainda precisam ser preenchidos
 
-    @backend @happy
-    Cenário: Prevenção de duplicidade: reautenticações preservam a unicidade do identificador interno
-      Dado que o estudante com e-mail "231012345@aluno.unb.br" possui um identificador interno único
-      Quando ele se reautentica no aplicativo consecutivas vezes com a mesma credencial institucional
-      Então o identificador interno original do estudante permanece inalterado
-      E o sistema preserva um único registro de perfil para o estudante
+  Regra: A identidade autenticada determina o perfil recuperado em acessos posteriores
+
+    Cenário: Recuperar o perfil ativo sem criar outro cadastro
+      Dado que o usuário possui um perfil com status "Active"
+      Quando retorna ao CApp com a mesma identidade institucional autenticada
+      Então o aplicativo recupera o mesmo perfil ativo
+      E nenhum novo perfil é criado para essa identidade
+      E seus dados próprios do CApp permanecem preservados
+
+    Cenário: Alteração do e-mail não cria outro perfil para a mesma identidade
+      Dado que o usuário já possui um perfil associado à sua identidade institucional
+      E o e-mail dessa identidade foi alterado pela instituição
+      Quando retorna ao CApp com a mesma identidade institucional autenticada
+      Então o aplicativo recupera o perfil associado à identidade autenticada
+      E o identificador interno original permanece inalterado
+      E nenhum novo perfil é criado apenas pela alteração do e-mail
