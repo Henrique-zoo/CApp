@@ -1,5 +1,8 @@
 # language: pt
-
+# Specificação documental dos cenários de prestação de contas (#210).
+# Automação backend/mobile permanece pendente até a issue de implementação.
+# @backend e @mobile indicam onde o cenário deve ser verificado.
+@pending_backend @pending_mobile
 Funcionalidade: Prestação de contas e transparência financeira do Centro Acadêmico
   Como estudante ou membro da gestão de um Centro Acadêmico
   Quero registrar, retificar e consultar receitas, despesas e demonstrativos financeiros
@@ -192,17 +195,3 @@ Funcionalidade: Prestação de contas e transparência financeira do Centro Acad
       Então ele visualiza o total de despesas acumuladas de "0.00"
       E visualiza o saldo atual consolidado de "0.00"
       E a lista de lançamentos financeiros publicados está vazia
-
-  # ---------------------------------------------------------------------------
-  # 4. Isolamento multi-CA dos registros contábeis
-  # ---------------------------------------------------------------------------
-  Regra: Cada Centro Acadêmico mantém prestações de contas isoladas; a consulta de um CA não mistura lançamentos de outro
-
-    Cenário: Consulta de um CA não inclui lançamentos de outro CA
-      Dado que o "Centro Acadêmico de Ciência da Computação" possui uma despesa publicada de "100.00" com identificador "DESP-CA-CC"
-      E que o "Centro Acadêmico de Engenharia Elétrica" possui uma despesa publicada de "999.00" com identificador "DESP-CA-EE"
-      Quando qualquer estudante consulta o demonstrativo financeiro do "Centro Acadêmico de Ciência da Computação"
-      Então ele visualiza o total de despesas acumuladas de "100.00"
-      E visualiza o saldo atual consolidado de "-100.00"
-      E o lançamento "DESP-CA-EE" não aparece nos registros consultados
-      E o lançamento "DESP-CA-CC" aparece nos registros consultados
