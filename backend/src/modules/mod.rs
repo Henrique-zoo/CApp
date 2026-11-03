@@ -1,8 +1,9 @@
 //! Organização dos domínios de negócio do CApp.
 //!
 //! Cada domínio possui camadas de API, aplicação, domínio e infraestrutura.
-//! As declarações atuais estabelecem essa organização; ainda não implementam
-//! casos de uso, regras, endpoints de negócio ou persistência.
+//! [`identity`] implementa verificação institucional e persistência da evidência.
+//! Os demais módulos estabelecem a organização prevista, sem casos de uso,
+//! endpoints de negócio ou persistência implementados.
 //!
 //! - [`identity`]: identidade institucional e dados acadêmicos.
 //! - [`ca`]: Centros Acadêmicos e perfis administrativos.

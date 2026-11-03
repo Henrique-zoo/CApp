@@ -2,7 +2,7 @@
 
 # Referência: Relatório de Features do Projeto, seções 11.1 e 11.3.
 # Registros e permissões permanecem restritos ao CA responsável.
-@pending_backend @pending_mobile
+@backend @mobile @pending_backend @pending_mobile
 Funcionalidade: Registro de ocorrências
 
   Como membro autorizado da gestão do CA
@@ -14,7 +14,7 @@ Funcionalidade: Registro de ocorrências
     Cenário: Registrar ocorrência associada a um estudante
       Dado que o CA ativo é "CA de Computação"
       E estou autenticado como "Gestor A"
-      E tenho permissão para registrar ocorrências individuais nesse CA
+      E possuo a permissão "Registrar strikes de estudantes" nesse CA
       E o estudante "Estudante A" pode ser associado a uma ocorrência nesse CA
       Quando registro uma ocorrência individual para "Estudante A" com motivo "Descumprimento de regra interna" e descrição "A situação observada foi relatada à gestão"
       Então a ocorrência é registrada no "CA de Computação"
@@ -35,7 +35,7 @@ Funcionalidade: Registro de ocorrências
     Cenário: Registrar ocorrência cujo alvo é o próprio CA
       Dado que o CA ativo é "CA de Computação"
       E estou autenticado como "Gestor B"
-      E tenho permissão para registrar ocorrências do próprio CA nesse CA
+      E possuo a permissão "Registrar strikes do CA" nesse CA
       Quando registro uma ocorrência contra o próprio CA com motivo "Problema de limpeza" e descrição "Foi identificada uma necessidade de limpeza na área comum"
       Então a ocorrência é registrada no "CA de Computação"
       E o próprio CA é identificado como alvo da ocorrência
@@ -71,7 +71,7 @@ Funcionalidade: Registro de ocorrências
 
     Cenário: Recusar registro sem motivo obrigatório
       Dado que o CA ativo é "CA de Computação"
-      E tenho permissão para registrar ocorrências individuais nesse CA
+      E possuo a permissão "Registrar strikes de estudantes" nesse CA
       E iniciei o registro de uma ocorrência para "Estudante A"
       E preenchi a descrição da ocorrência
       Quando tento salvar a ocorrência sem informar o motivo
@@ -80,7 +80,7 @@ Funcionalidade: Registro de ocorrências
 
     Cenário: Recusar registro sem descrição obrigatória
       Dado que o CA ativo é "CA de Computação"
-      E tenho permissão para registrar ocorrências individuais nesse CA
+      E possuo a permissão "Registrar strikes de estudantes" nesse CA
       E iniciei o registro de uma ocorrência para "Estudante A"
       E preenchi o motivo da ocorrência
       Quando tento salvar a ocorrência sem informar a descrição
@@ -89,7 +89,7 @@ Funcionalidade: Registro de ocorrências
 
     Cenário: Não impor banimento global ao registrar ocorrência
       Dado que o CA ativo é "CA de Computação"
-      E tenho permissão para registrar ocorrências individuais nesse CA
+      E possuo a permissão "Registrar strikes de estudantes" nesse CA
       E o estudante "Estudante A" participa de outros CAs
       Quando registro uma ocorrência individual para "Estudante A" nesse CA
       Então a ocorrência fica vinculada ao "CA de Computação"
