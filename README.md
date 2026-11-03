@@ -194,6 +194,12 @@ As convenções para os cenários compartilhados são:
   regra ou cenário e são herdadas pelos cenários contidos. O backend exclui
   `@pending_backend`; o mobile registra `@pending_mobile` como teste ignorado.
   Remova a tag de cada plataforma quando a implementação do teste estiver pronta.
+- Registre as definições de steps também nas entregas de especificação. Enquanto
+  a automação estiver pendente, use `pending_step(...)` no backend e
+  `pendingStep(...)` no mobile, mantendo as tags de pendência. Registre cada
+  expressão uma única vez e compartilhe as reutilizadas entre funcionalidades.
+  Os testes de registro conferem essa correspondência mesmo nos cenários pendentes;
+  eles não executam o comportamento funcional.
 - Deixe HTTP, SQL, containers e preparação dos dados nas step definitions de cada
   componente. As verificações técnicas do backend permanecem em sua suíte própria.
 

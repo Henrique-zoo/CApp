@@ -5,7 +5,7 @@
 # cargos e permissões atribuídos em um CA não produzem efeito em outro.
 # Somente integrantes cujo cargo possui a permissão "Administrar perfis e integrantes da gestão"
 # podem vincular, alterar ou remover integrantes da gestão do próprio CA.
-# No MVP, cada usuário ocupa no máximo um cargo na gestão de um mesmo CA.
+# Um usuário pode acumular cargos na gestão do mesmo CA, com permissões cumulativas.
 # O histórico administrativo é preservado: vinculações, alterações e remoções
 # não apagam registros anteriores e não podem ser editadas ou excluídas.
 # Os e-mails abaixo são exemplos fictícios de contas institucionais da UnB.
