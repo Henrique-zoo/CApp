@@ -3,7 +3,7 @@
 # Referência: Relatório de Features do Projeto, seção 5.4.
 # Issues relacionadas: #147 e #153.
 # Recorte I07: acompanhamento do fórum de demandas sobre o espaço físico.
-@pending_backend @pending_mobile
+@v1 @backend @mobile @pending_backend @pending_mobile
 Funcionalidade: Acompanhamento de status das demandas sobre o espaço físico do CA
 
   Como usuário do aplicativo
@@ -58,31 +58,6 @@ Funcionalidade: Acompanhamento de status das demandas sobre o espaço físico do
         | concluída  |
       E a demanda não apresenta o status "enviada à coordenação"
 
-  Regra: O histórico preserva as alterações realizadas no andamento da demanda
-
-    Cenário: Consultar o histórico de alterações de status
-      Dado que o CA ativo é "CA de Computação"
-      E estou autenticado como "Usuário A"
-      E a demanda "Reparo da porta" possui as seguintes alterações de status:
-        | status     | autor da alteração | data       |
-        | em análise | Gestor A    | 2026-10-01 |
-        | concluída  | Gestor B    | 2026-10-03 |
-      Quando consulto os detalhes da demanda "Reparo da porta"
-      Então vejo o histórico de alterações de status
-      E cada alteração apresenta o status correspondente
-      E cada alteração identifica quem realizou a alteração
-      E cada alteração apresenta sua data
-
-    Cenário: Preservar alterações anteriores no histórico
-      Dado que o CA ativo é "CA de Computação"
-      E estou autenticado como "Usuário A"
-      E a demanda "Reparo da porta" teve uma alteração para "em análise"
-      E posteriormente teve uma alteração para "concluída"
-      Quando consulto o histórico da demanda "Reparo da porta"
-      Então vejo o registro da alteração para "em análise"
-      E vejo o registro da alteração posterior para "concluída"
-      E a alteração anterior não foi substituída pela mais recente
-
   Regra: As informações consultadas refletem as alterações realizadas na demanda
 
     Cenário: Exibir o status mais recente após uma atualização
@@ -92,5 +67,3 @@ Funcionalidade: Acompanhamento de status das demandas sobre o espaço físico do
       E a gestão do CA atualizou o status da demanda para "em análise"
       Quando consulto novamente os detalhes da demanda "Reparo da porta"
       Então vejo que o status atual é "em análise"
-      E o histórico apresenta a nova alteração
-      E as alterações anteriores continuam disponíveis
