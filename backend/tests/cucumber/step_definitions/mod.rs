@@ -7,7 +7,11 @@
 //! `bdd_infrastructure`, sem serem registrados nesta suíte.
 
 mod autenticacao_institucional;
+mod consulta_faq;
 mod consultas_estudantis;
+mod contexto_multi_ca;
+mod publicacao_institucional;
+mod shared_pending;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///
