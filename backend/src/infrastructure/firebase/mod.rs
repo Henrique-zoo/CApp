@@ -1,4 +1,5 @@
-//! Espaço reservado para integração com Firebase Authentication.
+//! Espaço global reservado para futuras integrações compartilhadas com Firebase.
 //!
-//! O escopo previsto é validar tokens e obter a identidade autenticada.
-//! As decisões de autorização pertencem às regras da aplicação.
+//! A validação de tokens já implementada pertence ao contexto de identidade, em
+//! [`crate::modules::identity::infrastructure::firebase`]. Este módulo não contém
+//! outro verificador; as decisões de autorização permanecem na aplicação.

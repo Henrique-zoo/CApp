@@ -140,7 +140,7 @@ domínio. Cada projeto implementa suas próprias step definitions para verificar
 esses comportamentos no contexto correspondente.
 
 As verificações técnicas de PostgreSQL, prontidão e isolamento da infraestrutura
-de testes ficam em `backend/tests/features/`, com steps e execução exclusivos do
+de testes ficam em `backend/tests/cucumber/features/`, com steps e execução exclusivos do
 backend. Elas não fazem parte do contrato funcional compartilhado em `features/`.
 
 ------------------------------------------------------------------------

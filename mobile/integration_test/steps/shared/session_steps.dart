@@ -5,11 +5,11 @@ final sessionSteps = <StepDefinition>[
   // GIVEN / DADO
   // Preparação das condições iniciais
   // -----------------------------------------
-  pendingStep(r'^o usuário não está autenticado no aplicativo$'),
+  pendingStep(r'^que o usuário não está autenticado no aplicativo$'),
 
-  pendingStep(r'^o estudante possui uma sessão "([^"]+)"$'),
+  pendingStep(r'^que o estudante possui uma sessão "([^"]+)"$'),
 
-  pendingStep(r'^o estudante possui uma sessão autenticada válida$'),
+  pendingStep(r'^que o estudante possui uma sessão autenticada válida$'),
 
   // -----------------------------------------
   // WHEN / QUANDO
