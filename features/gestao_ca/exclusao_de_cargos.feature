@@ -25,7 +25,7 @@ Funcionalidade: Exclusão de cargos administrativos de um Centro Acadêmico
     E o CA "CAER" possui os cargos "Presidente", "Vice-Presidente", "Tesoureiro" e "Diretor de Eventos"
     E o CA "CACC" possui os cargos "Presidente", "Vice-Presidente", "Tesoureiro" e "Diretor de Eventos"
     E o estudante "231012345@aluno.unb.br" exerce o cargo de "Presidente" em "CAER"
-    E o cargo "Presidente" possui a permissão de "Administrar integrantes da gestão"
+    E o cargo "Presidente" possui a permissão de "Administrar perfis e integrantes da gestão"
 
   Regra: Cargos personalizados podem ser excluídos quando não possuem integrantes ativos
 
@@ -63,7 +63,7 @@ Funcionalidade: Exclusão de cargos administrativos de um Centro Acadêmico
     @sad @backend @mobile
     Cenário: Integrante sem permissão de administrar a gestão não exclui cargos personalizados
       Dado que o estudante "222033333@aluno.unb.br" exerce o cargo de "Tesoureiro" em "CAER"
-      E o cargo "Tesoureiro" não possui a permissão de "Administrar integrantes da gestão"
+      E o cargo "Tesoureiro" não possui a permissão de "Administrar perfis e integrantes da gestão"
       E o cargo "Diretor de Eventos" de "CAER" não possui integrante vinculado
       Quando "222033333@aluno.unb.br" tenta excluir o cargo "Diretor de Eventos" de "CAER"
       Então a operação é recusada por falta de permissão
