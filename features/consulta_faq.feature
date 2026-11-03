@@ -1,7 +1,7 @@
 # language: pt
 
 # Referência: Relatório de Features do Projeto, seção 8.2.
-@pending_backend @pending_mobile
+@backend @mobile @pending_backend @pending_mobile
 Funcionalidade: Consulta do FAQ
 
   Como estudante
