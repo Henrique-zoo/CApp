@@ -5,9 +5,9 @@
 # A criação, a edição e a publicação direta de eventos ocorrem sempre no contexto
 # de um único Centro Acadêmico; permissões de um CA não produzem efeito em outro.
 # Somente integrantes da gestão cujo cargo possui a permissão
-# "Publicar e gerenciar eventos diretamente" podem criar eventos já publicados fora do próprio CA,
-# publicar esses rascunhos sem homologação e editar eventos do próprio CA.
-# O local especial "O próprio CA" sempre exige homologação.
+# "Publicar e gerenciar eventos diretamente" podem criar eventos já publicados fora do ambiente físico do próprio CA,
+# publicar esses rascunhos sem homologação e editar eventos vinculados ao CA.
+# O local especial "o ambiente físico do próprio CA" sempre exige homologação.
 # Editar um evento publicado o retira da agenda até nova homologação.
 # Título, descrição, início e local são obrigatórios; término é opcional e, quando
 # informado, deve ser estritamente posterior ao início.
@@ -28,7 +28,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
     E o estudante "222033333@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
     E o estudante "241098765@aluno.unb.br" possui perfil no CApp e não integra a gestão de "CAER"
 
-  Regra: Integrante autorizado pode publicar diretamente eventos cujo local não seja o próprio CA
+  Regra: Integrante autorizado pode publicar diretamente eventos cujo local não seja o ambiente físico do próprio CA
 
     @happy @backend @mobile
     Cenário: Gestor autorizado cria e publica diretamente um evento no CA
@@ -56,7 +56,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
     @happy @backend @mobile
     Cenário: Gestor autorizado publica diretamente um evento salvo em rascunho
       Dado que existe em "CAER" o evento em rascunho "Oficina de Redes Definidas por Software" criado por "231012345@aluno.unb.br"
-      E o local desse evento não é o próprio CA
+      E o local desse evento não é o ambiente físico do próprio CA
       Quando o gestor "231012345@aluno.unb.br" publica diretamente o evento "Oficina de Redes Definidas por Software" em "CAER"
       Então o evento "Oficina de Redes Definidas por Software" passa a estar publicado em "CAER"
       E o evento passa a figurar na agenda de eventos publicados de "CAER"
@@ -105,7 +105,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       Então a operação é recusada informando que o horário de término deve ser posterior ao início
       E nenhum novo evento é registrado em "CAER"
 
-  Regra: Integrante autorizado da gestão pode editar eventos do próprio CA preservando sua validade
+  Regra: Integrante autorizado da gestão pode editar eventos vinculados ao CA preservando sua validade
 
     @happy @backend @mobile
     Cenário: Gestor autorizado edita informações de um evento já publicado
@@ -255,64 +255,64 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       Então a operação é recusada informando que o término deve ser posterior ao início
       E nenhum novo evento é registrado em "CAER"
 
-  Regra: A permissão de homologação também permite publicação direta quando o local não é o próprio CA
+  Regra: A permissão de homologação também permite publicação direta quando o local não é o ambiente físico do próprio CA
 
     @happy @backend @mobile
     Cenário: Homologador cria evento em outro local sem concessão separada de publicação direta
       Dado que o integrante possui a permissão "Homologar eventos" em "CAER"
       E não recebeu uma concessão separada de "Publicar e gerenciar eventos diretamente"
-      Quando cria e publica diretamente um evento válido em um local diferente do próprio CA
+      Quando cria e publica diretamente um evento válido em um local diferente do ambiente físico do próprio CA
       Então o evento é publicado na agenda de "CAER"
 
-  Regra: Usar o próprio CA como local exige homologação em qualquer tentativa de publicação
+  Regra: Usar o ambiente físico do próprio CA como local exige homologação em qualquer tentativa de publicação
 
     @happy @backend @mobile
-    Cenário: Selecionar o próprio CA como opção especial de local
-      Quando o gestor "231012345@aluno.unb.br" seleciona "O próprio CA" como local de um evento válido
+    Cenário: Selecionar o ambiente físico do próprio CA como opção especial de local
+      Quando o gestor "231012345@aluno.unb.br" seleciona "o ambiente físico do próprio CA" como local de um evento válido
       Então o local do evento fica associado ao espaço do CA "CAER"
       E o aplicativo identifica que a publicação exige homologação
 
     @happy @backend @mobile
-    Cenário: Publicação direta de evento no próprio CA segue para homologação
+    Cenário: Publicação direta de evento no ambiente físico do próprio CA segue para homologação
       Dado que o gestor "231012345@aluno.unb.br" possui publicação direta de eventos em "CAER"
-      Quando cria um evento válido com o local "O próprio CA" e solicita a publicação
+      Quando cria um evento válido com o local "o ambiente físico do próprio CA" e solicita a publicação
       Então o evento fica pendente de homologação em "CAER"
       E o evento não aparece na agenda pública antes da aprovação
 
     @sad @backend @mobile
-    Cenário: Permissão de homologação não elimina a etapa obrigatória no próprio CA
+    Cenário: Permissão de homologação não elimina a etapa obrigatória no ambiente físico do próprio CA
       Dado que o integrante possui a permissão "Homologar eventos" em "CAER"
-      Quando cria um evento válido com o local "O próprio CA" e solicita a publicação direta
+      Quando cria um evento válido com o local "o ambiente físico do próprio CA" e solicita a publicação direta
       Então o evento aguarda uma ação explícita de homologação
       E a criação não publica automaticamente o evento
 
     @happy @backend @mobile
-    Cenário: Publicar rascunho no próprio CA exige homologação
-      Dado que existe um evento em rascunho no local "O próprio CA"
+    Cenário: Publicar rascunho no ambiente físico do próprio CA exige homologação
+      Dado que existe um evento em rascunho no local "o ambiente físico do próprio CA"
       Quando o gestor com publicação direta solicita a publicação desse rascunho em "CAER"
       Então o evento passa a ficar pendente de homologação
       E permanece fora da agenda pública
 
     @happy @backend @mobile
-    Cenário: Aprovar o evento no próprio CA libera sua publicação
-      Dado que existe em "CAER" um evento no local "O próprio CA" aguardando homologação
+    Cenário: Aprovar o evento no ambiente físico do próprio CA libera sua publicação
+      Dado que existe em "CAER" um evento no local "o ambiente físico do próprio CA" aguardando homologação
       E o integrante possui a permissão "Homologar eventos" nesse CA
       Quando aprova a publicação do evento
       Então o evento aparece na agenda pública de "CAER"
-      E a opção "O próprio CA" permanece identificada como seu local
+      E a opção "o ambiente físico do próprio CA" permanece identificada como seu local
 
     @sad @backend @mobile
-    Cenário: Rejeição da homologação mantém o evento no próprio CA fora da agenda
-      Dado que existe em "CAER" um evento no local "O próprio CA" aguardando homologação
+    Cenário: Rejeição da homologação mantém o evento no ambiente físico do próprio CA fora da agenda
+      Dado que existe em "CAER" um evento no local "o ambiente físico do próprio CA" aguardando homologação
       E o integrante possui a permissão "Homologar eventos" nesse CA
       Quando rejeita a publicação do evento
       Então o evento não é publicado na agenda de "CAER"
       E o proponente pode identificar que a publicação foi rejeitada
 
     @happy @backend @mobile
-    Cenário: Mudar o local de evento publicado para o próprio CA exige nova homologação
+    Cenário: Mudar o local de evento publicado para o ambiente físico do próprio CA exige nova homologação
       Dado que existe em "CAER" um evento publicado em outro local
-      Quando o gestor "231012345@aluno.unb.br" altera o local para "O próprio CA"
+      Quando o gestor "231012345@aluno.unb.br" altera o local para "o ambiente físico do próprio CA"
       Então o evento fica pendente de nova homologação
       E sai da agenda pública até que a alteração seja aprovada
 
