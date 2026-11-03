@@ -3,7 +3,7 @@
 # § 2.5 e § 2.6 (administração dos integrantes da gestão). Entrega do MVP do módulo.
 # A administração dos integrantes ocorre sempre no contexto de um único CA;
 # cargos e permissões atribuídos em um CA não produzem efeito em outro.
-# Somente integrantes cujo cargo possui a permissão "Administrar integrantes da gestão"
+# Somente integrantes cujo cargo possui a permissão "Administrar perfis e integrantes da gestão"
 # podem vincular, alterar ou remover integrantes da gestão do próprio CA.
 # No MVP, cada usuário ocupa no máximo um cargo na gestão de um mesmo CA.
 # O histórico administrativo é preservado: vinculações, alterações e remoções
@@ -20,7 +20,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
     Dado que o Centro Acadêmico "Centro Acadêmico de Engenharia de Redes (CAER)" está cadastrado na UnB
     E o CA "CAER" possui os cargos "Presidente", "Diretor de Comunicação" e "Diretor de Eventos"
     E o estudante "231012345@aluno.unb.br" exerce o cargo de "Presidente" em "CAER"
-    E o cargo "Presidente" possui a permissão de "Administrar integrantes da gestão"
+    E o cargo "Presidente" possui a permissão de "Administrar perfis e integrantes da gestão"
 
   Regra: Um gestor autorizado pode vincular usuários da plataforma a cargos da gestão do CA
 
@@ -35,7 +35,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
     @sad @backend @mobile
     Cenário: Integrante sem permissão de administrar a gestão não pode vincular usuários
       Dado que o estudante "222033333@aluno.unb.br" exerce o cargo de "Diretor de Eventos" em "CAER"
-      E o cargo "Diretor de Eventos" não possui a permissão de "Administrar integrantes da gestão"
+      E o cargo "Diretor de Eventos" não possui a permissão de "Administrar perfis e integrantes da gestão"
       E o estudante "241098765@aluno.unb.br" possui perfil no CApp
       Quando "222033333@aluno.unb.br" tenta vincular "241098765@aluno.unb.br" ao cargo "Diretor de Comunicação" em "CAER"
       Então a operação é recusada por falta de permissão
@@ -66,10 +66,10 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
       E "241098765@aluno.unb.br" não passa a integrar a gestão de "CAER"
 
     @sad @backend @mobile
-    Cenário: Usuário que já integra a gestão não recebe um segundo vínculo no mesmo CA
+    Cenário: O mesmo vínculo entre usuário e cargo não é duplicado
       Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
-      Quando o gestor "231012345@aluno.unb.br" tenta vincular "241098765@aluno.unb.br" ao cargo "Diretor de Eventos" em "CAER"
-      Então a operação é recusada informando que o usuário já integra a gestão do CA
+      Quando o gestor "231012345@aluno.unb.br" tenta vincular "241098765@aluno.unb.br" novamente ao cargo "Diretor de Comunicação" em "CAER"
+      Então a operação é recusada informando que o usuário já exerce esse cargo
       E "241098765@aluno.unb.br" permanece somente no cargo "Diretor de Comunicação" em "CAER"
 
     @happy @backend
@@ -96,7 +96,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
     @sad @backend @mobile
     Cenário: Integrante sem permissão de administrar a gestão não pode alterar cargos
       Dado que o estudante "222033333@aluno.unb.br" exerce o cargo de "Diretor de Eventos" em "CAER"
-      E o cargo "Diretor de Eventos" não possui a permissão de "Administrar integrantes da gestão"
+      E o cargo "Diretor de Eventos" não possui a permissão de "Administrar perfis e integrantes da gestão"
       E o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
       Quando "222033333@aluno.unb.br" tenta alterar o cargo de "241098765@aluno.unb.br" para "Presidente" em "CAER"
       Então a operação é recusada por falta de permissão
@@ -130,7 +130,7 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
     @sad @backend @mobile
     Cenário: Integrante sem permissão de administrar a gestão não pode remover integrantes
       Dado que o estudante "222033333@aluno.unb.br" exerce o cargo de "Diretor de Eventos" em "CAER"
-      E o cargo "Diretor de Eventos" não possui a permissão de "Administrar integrantes da gestão"
+      E o cargo "Diretor de Eventos" não possui a permissão de "Administrar perfis e integrantes da gestão"
       E o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
       Quando "222033333@aluno.unb.br" tenta remover "241098765@aluno.unb.br" da gestão de "CAER"
       Então a operação é recusada por falta de permissão
@@ -138,25 +138,26 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
 
     @sad @backend @mobile
     Cenário: O último integrante que administra a gestão não pode ser removido
-      Dado que "231012345@aluno.unb.br" é o único integrante de "CAER" com a permissão de "Administrar integrantes da gestão"
+      Dado que "231012345@aluno.unb.br" é o único integrante de "CAER" com a permissão de "Administrar perfis e integrantes da gestão"
       Quando o gestor "231012345@aluno.unb.br" tenta remover "231012345@aluno.unb.br" da gestão de "CAER"
       Então a operação é recusada informando que a gestão precisa manter ao menos um integrante com essa permissão
       E "231012345@aluno.unb.br" permanece no cargo "Presidente" em "CAER"
 
     @sad @backend @mobile
     Cenário: O último integrante que administra a gestão não pode ser movido para cargo sem essa permissão
-      Dado que "231012345@aluno.unb.br" é o único integrante de "CAER" com a permissão de "Administrar integrantes da gestão"
-      E o cargo "Diretor de Eventos" não possui a permissão de "Administrar integrantes da gestão"
+      Dado que "231012345@aluno.unb.br" é o único integrante de "CAER" com a permissão de "Administrar perfis e integrantes da gestão"
+      E o cargo "Diretor de Eventos" não possui a permissão de "Administrar perfis e integrantes da gestão"
       Quando o gestor "231012345@aluno.unb.br" tenta alterar o cargo de "231012345@aluno.unb.br" para "Diretor de Eventos" em "CAER"
       Então a operação é recusada informando que a gestão precisa manter ao menos um integrante com essa permissão
       E "231012345@aluno.unb.br" permanece no cargo "Presidente" em "CAER"
 
     @happy @backend @mobile
     Cenário: Gestor pode deixar a gestão quando outro integrante também a administra
-      Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Presidente" em "CAER"
+      Dado que o estudante "241098765@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
+      E esse cargo possui a permissão de "Administrar perfis e integrantes da gestão"
       Quando o gestor "231012345@aluno.unb.br" remove "231012345@aluno.unb.br" da gestão de "CAER"
       Então "231012345@aluno.unb.br" deixa de integrar a gestão de "CAER"
-      E "241098765@aluno.unb.br" permanece com a permissão de "Administrar integrantes da gestão" em "CAER"
+      E "241098765@aluno.unb.br" permanece com a permissão de "Administrar perfis e integrantes da gestão" em "CAER"
 
   Regra: Toda mudança na composição da gestão é registrada e o histórico é preservado
 
@@ -212,8 +213,50 @@ Funcionalidade: Administração dos integrantes da gestão de um Centro Acadêmi
     @sad @backend @mobile
     Cenário: Operação recusada não gera registro no histórico administrativo
       Dado que o estudante "222033333@aluno.unb.br" exerce o cargo de "Diretor de Eventos" em "CAER"
-      E o cargo "Diretor de Eventos" não possui a permissão de "Administrar integrantes da gestão"
+      E o cargo "Diretor de Eventos" não possui a permissão de "Administrar perfis e integrantes da gestão"
       E o estudante "241098765@aluno.unb.br" possui perfil no CApp
       Quando "222033333@aluno.unb.br" tenta vincular "241098765@aluno.unb.br" ao cargo "Diretor de Comunicação" em "CAER"
       Então a operação é recusada por falta de permissão
       E nenhum novo registro é adicionado ao histórico administrativo de "CAER"
+
+  Regra: Um integrante pode acumular cargos e suas permissões no mesmo CA
+
+    @happy @backend @mobile
+    Cenário: Vincular outro cargo preserva o cargo e as permissões anteriores
+      Dado que "241098765@aluno.unb.br" exerce o cargo "Diretor de Comunicação" em "CAER"
+      E esse cargo concede a permissão "Publicar notícias diretamente"
+      E o cargo "Diretor de Eventos" concede a permissão "Publicar e gerenciar eventos diretamente"
+      Quando o gestor "231012345@aluno.unb.br" vincula "241098765@aluno.unb.br" também ao cargo "Diretor de Eventos" em "CAER"
+      Então o integrante permanece nos dois cargos em "CAER"
+      E possui as permissões de publicação de notícias e gerenciamento de eventos nesse CA
+
+    @happy @backend @mobile
+    Cenário: Remover um cargo não remove o integrante dos outros cargos
+      Dado que "241098765@aluno.unb.br" exerce os cargos "Diretor de Comunicação" e "Diretor de Eventos" em "CAER"
+      Quando o gestor "231012345@aluno.unb.br" remove somente seu vínculo com o cargo "Diretor de Eventos"
+      Então o integrante permanece no cargo "Diretor de Comunicação" em "CAER"
+      E perde apenas as permissões que não sejam concedidas por seus cargos restantes
+      E o histórico preserva a participação nos dois cargos
+
+    @happy @backend
+    Cenário: Permissão compartilhada continua disponível após remover um vínculo
+      Dado que "241098765@aluno.unb.br" exerce dois cargos em "CAER"
+      E ambos os cargos concedem a permissão "Publicar notícias diretamente"
+      Quando o gestor "231012345@aluno.unb.br" remove somente um desses vínculos
+      Então o integrante continua podendo publicar notícias diretamente em "CAER"
+
+    @happy @backend
+    Cenário: Último administrador pode perder um cargo se outro cargo seu mantiver a permissão
+      Dado que "241098765@aluno.unb.br" é o único integrante autorizado a administrar a gestão de "CAER"
+      E exerce dois cargos que concedem a permissão "Administrar perfis e integrantes da gestão"
+      Quando remove somente um desses vínculos
+      Então a remoção do vínculo é permitida
+      E permanece autorizado a administrar a gestão pelo cargo restante
+
+    @sad @backend @mobile
+    Cenário: Remover o último vínculo que mantém a gestão administrável é recusado
+      Dado que "241098765@aluno.unb.br" é o único integrante autorizado a administrar a gestão de "CAER"
+      E somente um de seus cargos concede a permissão "Administrar perfis e integrantes da gestão"
+      Quando tenta remover seu vínculo com esse cargo
+      Então a operação é recusada informando que a gestão precisa manter ao menos um integrante com essa permissão
+      E todos os vínculos do integrante permanecem inalterados
