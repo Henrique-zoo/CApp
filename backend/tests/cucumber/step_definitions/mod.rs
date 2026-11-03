@@ -9,6 +9,9 @@
 mod associacao_dados_academicos;
 mod autenticacao_institucional;
 mod consultas_estudantis;
+mod contexto_multi_ca;
+mod publicacao_institucional;
+mod shared_pending;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///
