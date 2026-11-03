@@ -5,15 +5,19 @@
 # A criação, a edição e a publicação direta de eventos ocorrem sempre no contexto
 # de um único Centro Acadêmico; permissões de um CA não produzem efeito em outro.
 # Somente integrantes da gestão cujo cargo possui a permissão
-# "Publicar e gerenciar eventos diretamente" podem criar eventos já publicados,
-# publicar rascunhos sem homologação e editar eventos do próprio CA.
+# "Publicar e gerenciar eventos diretamente" podem criar eventos já publicados fora do próprio CA,
+# publicar esses rascunhos sem homologação e editar eventos do próprio CA.
+# O local especial "O próprio CA" sempre exige homologação.
+# Editar um evento publicado o retira da agenda até nova homologação.
+# Título, descrição, início e local são obrigatórios; término é opcional e, quando
+# informado, deve ser estritamente posterior ao início.
 # Os e-mails abaixo são exemplos fictícios de contas institucionais da UnB.
 # @backend e @mobile indicam onde o cenário deve ser verificado.
 @pending_backend @pending_mobile
 Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acadêmico
   Como integrante autorizado da gestão de um Centro Acadêmico
   Quero criar, editar e publicar diretamente eventos acadêmicos, sociais e institucionais do CA
-  Para divulgar atividades oficiais à comunidade estudantil sem depender de fila de homologação
+  Para divulgar atividades oficiais respeitando as permissões e a homologação exigida
 
   Contexto:
     Dado que o Centro Acadêmico "Centro Acadêmico de Engenharia de Redes (CAER)" está cadastrado na UnB
@@ -24,7 +28,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
     E o estudante "222033333@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
     E o estudante "241098765@aluno.unb.br" possui perfil no CApp e não integra a gestão de "CAER"
 
-  Regra: Integrante autorizado da gestão pode criar e publicar eventos diretamente no CA
+  Regra: Integrante autorizado pode publicar diretamente eventos cujo local não seja o próprio CA
 
     @happy @backend @mobile
     Cenário: Gestor autorizado cria e publica diretamente um evento no CA
@@ -52,6 +56,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
     @happy @backend @mobile
     Cenário: Gestor autorizado publica diretamente um evento salvo em rascunho
       Dado que existe em "CAER" o evento em rascunho "Oficina de Redes Definidas por Software" criado por "231012345@aluno.unb.br"
+      E o local desse evento não é o próprio CA
       Quando o gestor "231012345@aluno.unb.br" publica diretamente o evento "Oficina de Redes Definidas por Software" em "CAER"
       Então o evento "Oficina de Redes Definidas por Software" passa a estar publicado em "CAER"
       E o evento passa a figurar na agenda de eventos publicados de "CAER"
@@ -121,7 +126,8 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
         | início      | 2026-11-10 14:30                                          |
         | término     | 2026-11-10 18:30                                          |
         | local       | Auditório do Departamento de Engenharia Elétrica          |
-      E o evento permanece publicado na agenda de "CAER"
+      E o evento passa a ficar pendente de nova homologação em "CAER"
+      E o evento é retirado da agenda pública enquanto aguarda a homologação
 
     @happy @backend @mobile
     Cenário: Gestor autorizado edita informações de um evento em rascunho sem publicá-lo
@@ -234,3 +240,87 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       Quando o gestor "231012345@aluno.unb.br" tenta editar o evento "Maratona de Programação da UnB" em "CACC"
       Então a operação é recusada por falta de permissão
       E o evento "Maratona de Programação da UnB" permanece inalterado em "CACC"
+
+  Regra: O término é opcional e o período informado deve ser válido
+
+    @happy @backend @mobile
+    Cenário: Criar evento sem horário de término
+      Quando o gestor "231012345@aluno.unb.br" cria em "CAER" um evento com título, descrição, início e local válidos sem informar o término
+      Então o evento é registrado sem horário de término
+      E nenhum horário de término é inventado pelo sistema
+
+    @sad @backend @mobile
+    Cenário: Término igual ao início não constitui um período válido
+      Quando o gestor "231012345@aluno.unb.br" tenta criar em "CAER" um evento com início e término em "2026-11-10 14:00"
+      Então a operação é recusada informando que o término deve ser posterior ao início
+      E nenhum novo evento é registrado em "CAER"
+
+  Regra: A permissão de homologação também permite publicação direta quando o local não é o próprio CA
+
+    @happy @backend @mobile
+    Cenário: Homologador cria evento em outro local sem concessão separada de publicação direta
+      Dado que o integrante possui a permissão "Homologar eventos" em "CAER"
+      E não recebeu uma concessão separada de "Publicar e gerenciar eventos diretamente"
+      Quando cria e publica diretamente um evento válido em um local diferente do próprio CA
+      Então o evento é publicado na agenda de "CAER"
+
+  Regra: Usar o próprio CA como local exige homologação em qualquer tentativa de publicação
+
+    @happy @backend @mobile
+    Cenário: Selecionar o próprio CA como opção especial de local
+      Quando o gestor "231012345@aluno.unb.br" seleciona "O próprio CA" como local de um evento válido
+      Então o local do evento fica associado ao espaço do CA "CAER"
+      E o aplicativo identifica que a publicação exige homologação
+
+    @happy @backend @mobile
+    Cenário: Publicação direta de evento no próprio CA segue para homologação
+      Dado que o gestor "231012345@aluno.unb.br" possui publicação direta de eventos em "CAER"
+      Quando cria um evento válido com o local "O próprio CA" e solicita a publicação
+      Então o evento fica pendente de homologação em "CAER"
+      E o evento não aparece na agenda pública antes da aprovação
+
+    @sad @backend @mobile
+    Cenário: Permissão de homologação não elimina a etapa obrigatória no próprio CA
+      Dado que o integrante possui a permissão "Homologar eventos" em "CAER"
+      Quando cria um evento válido com o local "O próprio CA" e solicita a publicação direta
+      Então o evento aguarda uma ação explícita de homologação
+      E a criação não publica automaticamente o evento
+
+    @happy @backend @mobile
+    Cenário: Publicar rascunho no próprio CA exige homologação
+      Dado que existe um evento em rascunho no local "O próprio CA"
+      Quando o gestor com publicação direta solicita a publicação desse rascunho em "CAER"
+      Então o evento passa a ficar pendente de homologação
+      E permanece fora da agenda pública
+
+    @happy @backend @mobile
+    Cenário: Aprovar o evento no próprio CA libera sua publicação
+      Dado que existe em "CAER" um evento no local "O próprio CA" aguardando homologação
+      E o integrante possui a permissão "Homologar eventos" nesse CA
+      Quando aprova a publicação do evento
+      Então o evento aparece na agenda pública de "CAER"
+      E a opção "O próprio CA" permanece identificada como seu local
+
+    @sad @backend @mobile
+    Cenário: Rejeição da homologação mantém o evento no próprio CA fora da agenda
+      Dado que existe em "CAER" um evento no local "O próprio CA" aguardando homologação
+      E o integrante possui a permissão "Homologar eventos" nesse CA
+      Quando rejeita a publicação do evento
+      Então o evento não é publicado na agenda de "CAER"
+      E o proponente pode identificar que a publicação foi rejeitada
+
+    @happy @backend @mobile
+    Cenário: Mudar o local de evento publicado para o próprio CA exige nova homologação
+      Dado que existe em "CAER" um evento publicado em outro local
+      Quando o gestor "231012345@aluno.unb.br" altera o local para "O próprio CA"
+      Então o evento fica pendente de nova homologação
+      E sai da agenda pública até que a alteração seja aprovada
+
+  Regra: Alterações de eventos publicados só retornam à agenda após homologação
+
+    @happy @backend @mobile
+    Cenário: Homologação de alteração devolve o evento à agenda
+      Dado que a edição de um evento publicado em "CAER" o retirou da agenda pública
+      E o integrante possui a permissão "Homologar eventos" nesse CA
+      Quando aprova a alteração do evento
+      Então o evento retorna à agenda pública com os dados homologados
