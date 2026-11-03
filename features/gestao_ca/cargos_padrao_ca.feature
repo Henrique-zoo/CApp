@@ -23,20 +23,25 @@ Funcionalidade: Cargos padrão da gestão de um Centro Acadêmico
     E o administrador "200000001@unb.br" administra a plataforma
     E o Centro Acadêmico "Centro Acadêmico de Engenharia de Redes (CAER)" está cadastrado na UnB
     E o Centro Acadêmico "Centro Acadêmico de Ciência da Computação (CACC)" está cadastrado na UnB
+    E o estudante "231012345@aluno.unb.br" exerce o cargo "Presidente" em "CAER"
+    E esse cargo possui a permissão "Administrar perfis e integrantes da gestão"
 
   Regra: Todo Centro Acadêmico cadastrado recebe automaticamente os três cargos padrão
 
     @happy @backend @mobile
-    Cenário: Cadastro de um novo CA cria os cargos padrão
+    Cenário: Cadastro de um novo CA cria os cargos padrão e a gestão inicial informada
+      Dado que o estudante informa a si mesmo como Presidente da gestão inicial de "CAEE"
       Quando o estudante "241098765@aluno.unb.br" cadastra o Centro Acadêmico "Centro Acadêmico de Engenharia Elétrica (CAEE)"
       Então o CA "CAEE" passa a possuir exatamente os cargos "Presidente", "Vice-Presidente" e "Tesoureiro"
-      E nenhum desses cargos possui integrante vinculado
+      E o cargo "Presidente" fica vinculado ao responsável informado na gestão inicial
+      E os cargos "Vice-Presidente" e "Tesoureiro" ficam disponíveis para novas vinculações
 
     @happy @backend
     Cenário: Os cargos padrão do novo CA ficam disponíveis para vinculação de integrantes
-      Dado que o Centro Acadêmico "Centro Acadêmico de Engenharia Elétrica (CAEE)" foi recém-cadastrado
-      Quando o estudante "241098765@aluno.unb.br" vincula a si mesmo ao cargo "Presidente" em "CAEE"
-      Então "241098765@aluno.unb.br" passa a exercer o cargo "Presidente" em "CAEE"
+      Dado que "CAEE" foi cadastrado com "241098765@aluno.unb.br" como Presidente da gestão inicial
+      Quando o responsável consulta a estrutura inicial da gestão de "CAEE"
+      Então o cargo "Presidente" apresenta o responsável informado na criação
+      E os cargos "Vice-Presidente" e "Tesoureiro" estão disponíveis para vinculação por usuários autorizados
 
     @sad @backend
     Cenário: Cadastro recusado não cria cargos
@@ -49,7 +54,7 @@ Funcionalidade: Cargos padrão da gestão de um Centro Acadêmico
     @sad @backend @mobile
     Cenário: Gestor com permissão máxima na gestão não exclui o cargo de Presidente
       Dado que o estudante "231012345@aluno.unb.br" exerce o cargo de "Presidente" em "CAER"
-      E o cargo "Presidente" possui a permissão de "Administrar integrantes da gestão"
+      E o cargo "Presidente" possui a permissão de "Administrar perfis e integrantes da gestão"
       Quando "231012345@aluno.unb.br" tenta excluir o cargo "Presidente" em "CAER"
       Então a operação é recusada informando que o cargo de Presidente não pode ser excluído
       E o CA "CAER" mantém o cargo "Presidente"
@@ -68,22 +73,22 @@ Funcionalidade: Cargos padrão da gestão de um Centro Acadêmico
       E o CA "CAER" mantém o cargo "Presidente"
 
     @happy @backend @mobile
-    Cenário: Administrador da plataforma remove o Presidente e o cargo permanece no CA
+    Cenário: Gestor autorizado remove o Presidente e o cargo permanece no CA
       Dado que o estudante "231012345@aluno.unb.br" exerce o cargo de "Presidente" em "CAER"
-      E o cargo "Vice-Presidente" possui a permissão de "Administrar integrantes da gestão"
+      E o cargo "Vice-Presidente" possui a permissão de "Administrar perfis e integrantes da gestão"
       E o estudante "241098765@aluno.unb.br" exerce o cargo de "Vice-Presidente" em "CAER"
-      Quando o administrador "200000001@unb.br" remove "231012345@aluno.unb.br" da gestão de "CAER"
+      Quando o gestor "241098765@aluno.unb.br" remove "231012345@aluno.unb.br" da gestão de "CAER"
       Então "231012345@aluno.unb.br" deixa de integrar a gestão de "CAER"
       E o CA "CAER" mantém o cargo "Presidente"
       E o cargo "Presidente" de "CAER" não possui integrante vinculado
-      E "241098765@aluno.unb.br" permanece com a permissão de "Administrar integrantes da gestão" em "CAER"
+      E "241098765@aluno.unb.br" permanece com a permissão de "Administrar perfis e integrantes da gestão" em "CAER"
 
   Regra: Os cargos de Vice-Presidente e Tesoureiro podem ser removidos quando não possuem integrantes
 
     @happy @backend @mobile
     Esquema do Cenário: Gestor remove cargo padrão sem integrantes vinculados
       Dado que o estudante "231012345@aluno.unb.br" exerce o cargo de "Presidente" em "CAER"
-      E o cargo "Presidente" possui a permissão de "Administrar integrantes da gestão"
+      E o cargo "Presidente" possui a permissão de "Administrar perfis e integrantes da gestão"
       E o cargo "<cargo>" de "CAER" não possui integrante vinculado
       Quando "231012345@aluno.unb.br" remove o cargo "<cargo>" de "CAER"
       Então o CA "CAER" deixa de possuir o cargo "<cargo>"
@@ -97,7 +102,7 @@ Funcionalidade: Cargos padrão da gestão de um Centro Acadêmico
     @sad @backend @mobile
     Esquema do Cenário: Cargo padrão com integrante ativo não pode ser removido
       Dado que o estudante "231012345@aluno.unb.br" exerce o cargo de "Presidente" em "CAER"
-      E o cargo "Presidente" possui a permissão de "Administrar integrantes da gestão"
+      E o cargo "Presidente" possui a permissão de "Administrar perfis e integrantes da gestão"
       E o estudante "241098765@aluno.unb.br" exerce o cargo de "<cargo>" em "CAER"
       Quando "231012345@aluno.unb.br" tenta remover o cargo "<cargo>" de "CAER"
       Então a operação é recusada informando que o cargo possui integrante ativo
@@ -119,7 +124,7 @@ Funcionalidade: Cargos padrão da gestão de um Centro Acadêmico
     @sad @backend @mobile
     Cenário: Integrante sem permissão de administrar a gestão não remove cargos
       Dado que o estudante "222033333@aluno.unb.br" exerce o cargo de "Vice-Presidente" em "CAER"
-      E o cargo "Vice-Presidente" não possui a permissão de "Administrar integrantes da gestão"
+      E o cargo "Vice-Presidente" não possui a permissão de "Administrar perfis e integrantes da gestão"
       E o cargo "Tesoureiro" de "CAER" não possui integrante vinculado
       Quando "222033333@aluno.unb.br" tenta remover o cargo "Tesoureiro" de "CAER"
       Então a operação é recusada por falta de permissão
@@ -138,7 +143,7 @@ Funcionalidade: Cargos padrão da gestão de um Centro Acadêmico
     @happy @backend
     Cenário: Remover um cargo padrão em um CA não altera os cargos de outro CA
       Dado que o estudante "231012345@aluno.unb.br" exerce o cargo de "Presidente" em "CAER"
-      E o cargo "Presidente" possui a permissão de "Administrar integrantes da gestão"
+      E o cargo "Presidente" possui a permissão de "Administrar perfis e integrantes da gestão"
       E o cargo "Tesoureiro" de "CAER" não possui integrante vinculado
       Quando "231012345@aluno.unb.br" remove o cargo "Tesoureiro" de "CAER"
       Então o CA "CAER" deixa de possuir o cargo "Tesoureiro"
@@ -157,7 +162,7 @@ Funcionalidade: Cargos padrão da gestão de um Centro Acadêmico
     Cenário: Não é possível vincular um integrante a cargo de outro CA
       Dado que o estudante "241098765@aluno.unb.br" possui perfil no CApp
       E o estudante "231012345@aluno.unb.br" exerce o cargo de "Presidente" em "CAER"
-      E o cargo "Presidente" possui a permissão de "Administrar integrantes da gestão"
+      E o cargo "Presidente" possui a permissão de "Administrar perfis e integrantes da gestão"
       Quando o gestor "231012345@aluno.unb.br" tenta vincular "241098765@aluno.unb.br" ao cargo "Tesoureiro" de "CACC"
       Então a operação é recusada por falta de permissão
       E "241098765@aluno.unb.br" não passa a integrar a gestão de "CACC"

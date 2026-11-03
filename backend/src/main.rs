@@ -3,6 +3,8 @@
 //! # Configuração
 //!
 //! - `DATABASE_URL`: obrigatória; URL de conexão PostgreSQL aceita pelo SQLx.
+//! - `FIREBASE_PROJECT_ID`: obrigatória; projeto esperado nos ID tokens, não vazio
+//!   e sem espaços em branco. Não é verificada a existência externa do projeto.
 //! - `RUST_LOG`: filtro opcional do `tracing`; ausente ou inválido usa `info`.
 //! - Endereço HTTP: `0.0.0.0:3000`, fixo nesta implementação.
 //!
@@ -11,21 +13,33 @@
 //! e antes da abertura da porta HTTP; uma falha impede a inicialização da API.
 //!
 //! O subscriber encaminha os eventos de diagnóstico para a saída padrão.
-//! Após inicializá-lo, o processo conecta ao banco, aplica migrations e serve o
+//! Após inicializá-lo, o processo configura um cliente HTTP compartilhado, com
+//! timeout de conexão de três segundos, total de dez e sem redirecionamentos.
+//! Os adaptadores Firebase e Graph não executam I/O nessa construção. Depois,
+//! o processo conecta ao banco, aplica migrations e serve o
 //! router da biblioteca. Não há tratamento próprio de sinais ou configuração
 //! de encerramento gracioso nesta inicialização.
 
-use std::env::{self, VarError};
+use std::{
+    env::{self, VarError},
+    time::Duration,
+};
 
 use anyhow::Context;
 use backend::{
-    api::{self, state::AppState},
-    infrastructure::database::MIGRATOR,
+    api::{
+        self,
+        state::{AppState, Clients},
+    },
+    infrastructure::database::{MIGRATOR, PgDatabase},
+    modules::identity::infrastructure::{
+        firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
+    },
 };
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
 
-/// Inicializa logs, pool PostgreSQL, migrations e servidor HTTP no runtime Tokio.
+/// Inicializa logs, clientes externos, PostgreSQL, migrations e servidor HTTP.
 ///
 /// O pool usa as opções padrão de [`PgPoolOptions`]. A conexão inicial precisa
 /// funcionar e as migrations devem concluir antes da abertura da porta HTTP,
@@ -35,7 +49,8 @@ use tracing_subscriber::EnvFilter;
 ///
 /// # Erros
 ///
-/// Propaga a ausência ou invalidade de `DATABASE_URL`, erros ao conectar ao
+/// Propaga a ausência ou invalidade de `DATABASE_URL` ou `FIREBASE_PROJECT_ID`,
+/// falhas ao construir o cliente HTTP e o verificador Firebase, erros ao conectar ao
 /// PostgreSQL, ao validar ou aplicar migrations, ao abrir o socket TCP e os
 /// erros retornados por `axum::serve`.
 ///
@@ -45,6 +60,8 @@ use tracing_subscriber::EnvFilter;
 /// já tiver sido instalado no mesmo processo.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -60,6 +77,23 @@ async fn main() -> anyhow::Result<()> {
         }
     })?;
 
+    let http = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("Não foi possível construir o cliente HTTP")?;
+
+    let firebase = FirebaseTokenVerifier::new(
+        env::var("FIREBASE_PROJECT_ID")
+            .context("FIREBASE_PROJECT_ID não está definida ou é inválida")?,
+        http.clone(),
+    )?;
+
+    let microsoft = MicrosoftGraphClient::new(http.clone());
+
+    let clients = Clients::new(firebase, microsoft);
+
     let pool = PgPoolOptions::new()
         .connect(&db_url)
         .await
@@ -72,11 +106,13 @@ async fn main() -> anyhow::Result<()> {
         .context("Não foi possível aplicar as migrations do banco de dados")?;
     tracing::info!("Migrations do banco de dados atualizadas");
 
+    let pg_database = PgDatabase::new(pool);
+
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await
         .context("Não foi possível criar o socket TCP")?;
 
-    let service = api::router::create_router().with_state(AppState::new(pool));
+    let service = api::router::create_router().with_state(AppState::new(pg_database, clients));
 
     axum::serve(listener, service).await?;
 
