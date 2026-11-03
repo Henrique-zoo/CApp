@@ -12,7 +12,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-capp} -d ${POSTGRES_DB:-capp}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-capp} -d ${POSTGRES_DB:-capp}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -26,11 +30,28 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-capp}:${POSTGRES_PASSWORD:-capp}@postgres:5432/${POSTGRES_DB:-capp}
       RUST_LOG: ${RUST_LOG:-info}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "--max-time",
+          "3",
+          "http://127.0.0.1:3000/ready",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   postgres_data:

@@ -6,7 +6,7 @@
 # Os cenários da fila não presumem uma ordenação ou prazo de confirmação
 # ainda não definido pelo projeto.
 
-@pending_backend @pending_mobile
+@backend @mobile @pending_backend @pending_mobile
 Funcionalidade: Controle opcional de vagas em eventos
 
   Como proponente de um evento
@@ -17,7 +17,7 @@ Funcionalidade: Controle opcional de vagas em eventos
 
     @mvp
     Cenário: Definir limite de vagas ao cadastrar um evento
-      Dado que sou proponente do CA "CA de Computação"
+      Dado que estou propondo um evento para o CA "CA de Computação"
       E estou cadastrando o evento "Palestra de IA"
       Quando defino o limite de 3 vagas e salvo o evento
       Então o evento é salvo com limite de 3 vagas
@@ -62,6 +62,15 @@ Funcionalidade: Controle opcional de vagas em eventos
       Quando um participante cancela sua inscrição no evento "Palestra de IA"
       Então o evento passa a ter uma vaga disponível
       E o número de participantes inscritos não supera o limite
+
+    @mvp
+    Cenário: Inscrições simultâneas não ultrapassam a capacidade
+      Dado que o evento publicado "Palestra de IA" possui limite de 3 vagas
+      E já possui 2 participantes inscritos
+      Quando duas pessoas sem inscrição solicitam simultaneamente a última vaga
+      Então somente uma nova inscrição ativa é registrada
+      E o evento fica com 3 participantes inscritos
+      E a capacidade não é ultrapassada
 
   Regra: A fila de espera atende interessados em eventos lotados
 
