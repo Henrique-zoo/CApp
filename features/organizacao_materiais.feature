@@ -2,7 +2,7 @@
 
 # Referência principal: Relatório de Features do Projeto, seção 6.3.
 # Referências complementares: seções 6.1 e 6.2 e issue #118.
-@pending_backend @pending_mobile
+@backend @mobile @pending_backend @pending_mobile
 Funcionalidade: Organização de materiais por disciplina
 
   Como estudante
@@ -32,7 +32,8 @@ Funcionalidade: Organização de materiais por disciplina
       Dado que o CA ativo é "CA de Computação"
       E existe o material publicado "Resumo de Cálculo I" nesse CA
       E a disciplina "Cálculo I" pertence à grade curricular do contexto acadêmico
-      Quando a gestão associa "Resumo de Cálculo I" à disciplina "Cálculo I"
+      Dado que o integrante possui a permissão "Gerenciar materiais" no CA ativo
+      Quando esse integrante associa "Resumo de Cálculo I" à disciplina "Cálculo I"
       Então a associação do material com a disciplina é registrada
       E o material passa a pertencer à organização da disciplina "Cálculo I"
       E o material fica disponível para consulta nessa disciplina
@@ -41,7 +42,8 @@ Funcionalidade: Organização de materiais por disciplina
       Dado que o CA ativo é "CA de Computação"
       E existe o material publicado "Resumo de Cálculo I" nesse CA
       E existe a disciplina "Direito Constitucional" em outro contexto acadêmico
-      Quando a gestão tenta associar "Resumo de Cálculo I" à disciplina "Direito Constitucional"
+      Dado que o integrante possui a permissão "Gerenciar materiais" no CA ativo
+      Quando esse integrante tenta associar "Resumo de Cálculo I" à disciplina "Direito Constitucional"
       Então a associação é recusada
       E o material não fica associado à disciplina incompatível
 
@@ -146,3 +148,13 @@ Funcionalidade: Organização de materiais por disciplina
       Então o material "Exercícios de Cálculo I" é apresentado
       E o material "Resumo de Cálculo I" não é apresentado
       E a organização corresponde ao contexto do "CA de Matemática"
+
+  Regra: Alterar a organização de materiais exige autorização no CA correspondente
+
+    Cenário: Integrante sem permissão não altera a disciplina de um material
+      Dado que o CA ativo é "CA de Computação"
+      E existe um material publicado nesse CA
+      E o integrante não possui a permissão "Gerenciar materiais" nesse CA
+      Quando tenta associar o material a uma disciplina
+      Então a associação é recusada por falta de permissão
+      E a organização anterior do material permanece inalterada
