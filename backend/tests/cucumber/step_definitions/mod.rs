@@ -8,6 +8,7 @@
 
 mod autenticacao_institucional;
 mod consultas_estudantis;
+mod publicacao_institucional;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///
