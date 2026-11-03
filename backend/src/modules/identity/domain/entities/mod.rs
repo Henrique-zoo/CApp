@@ -1,4 +1,9 @@
-//! Espaço reservado para entidades do módulo de identidade institucional.
+//! Entidades usadas na verificação institucional.
 //!
-//! Ainda não define tipos. Os modelos de domínio deverão expressar identidade
-//! e estado do negócio sem depender dos formatos HTTP ou SQL.
+//! [`institution`] configura o tenant e o grupo de estudantes.
+//! [`institutional_verification`] registra evidência por UID Firebase, independente
+//! de provisionamento de usuário interno. Os derives SQLx mapeiam linhas para esses
+//! tipos; não aplicam migrations nem consultam o banco.
+
+pub mod institution;
+pub mod institutional_verification;

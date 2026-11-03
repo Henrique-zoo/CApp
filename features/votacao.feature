@@ -2,8 +2,10 @@
 # Os cenários descrevem regras de negócio e resultados observáveis.
 # Detalhes técnicos de persistência, concorrência e privacidade devem ser
 # verificados nos componentes correspondentes.
+# A primeira entrega exige cadastro eleitoral anterior à abertura, assinatura
+# própria por eleitor e as garantias de recibo e quadro público para voto secreto.
 
-@pending_backend @pending_mobile
+@v1 @backend @mobile @pending_backend @pending_mobile
 Funcionalidade: Votação em eleições de Centros Acadêmicos
 
   Como estudante elegível de um Centro Acadêmico
@@ -14,6 +16,9 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
     Dado que existe uma eleição para o Centro Acadêmico "CA Engenharia"
     E a eleição possui as chapas ativas "Aurora" e "Horizonte"
     E existe uma chapa inativa chamada "Legado"
+    E "Ana" consta no cadastro de eleitores definido antes da abertura
+    E a chave pública eleitoral de "Ana" foi cadastrada antes da abertura
+    E as solicitações válidas de voto de "Ana" são assinadas com sua própria chave
 
   Regra: Somente eleitores cadastrados antes da abertura podem votar
 
@@ -198,3 +203,13 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       Então apenas uma das tentativas é aceita
       E apenas um voto é contabilizado para essa participação
       E a outra tentativa é recusada por participação já realizada
+
+  Regra: A inscrição eleitoral e as chaves anteriores à abertura determinam a habilitação
+
+    @sad
+    Cenário: Cadastro posterior à abertura não habilita voto nessa eleição
+      Dado que a eleição está no período de votação
+      E "Bruno" só foi cadastrado como eleitor depois da abertura
+      Quando tenta registrar um voto com assinatura válida
+      Então o voto é recusado por ausência no cadastro eleitoral anterior à abertura
+      E nenhum voto é registrado para "Bruno"
