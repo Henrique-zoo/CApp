@@ -87,9 +87,11 @@ Contém as regras de negócio do sistema.
 
 Entidades e regras aplicam as validações e transições do negócio. A coordenação de consultas e persistência normalmente cabe aos casos de uso em `Application`.
 
-Não possui conhecimento sobre:
+As entidades atuais de identidade usam `sqlx::FromRow` e `sqlx::Type` para mapeamento direto. Esse é um acoplamento explícito e limitado aos metadados de persistência; consultas SQL, pools e transações ficam na infraestrutura. Portanto, a implementação não segue independência absoluta de bibliotecas de persistência.
 
-- banco de dados;
+As regras de domínio não executam consultas nem conhecem:
+
+- conexões ou transações de banco de dados;
 - HTTP;
 - Firebase;
 - serviços externos.
@@ -176,6 +178,8 @@ Inclui:
 O módulo de identidade representa a identidade institucional do usuário e suas informações acadêmicas.
 
 Ele não representa uma relação de pertencimento a um Centro Acadêmico.
+
+A implementação atual cobre verificação institucional, registro da evidência e um extractor reutilizável para acesso protegido. Provisionamento e associação acadêmica permanecem fora desse recorte. Consulte os [Rustdocs do módulo](src/modules/identity/mod.rs) para fluxo, decisões e testes específicos, e o [OpenAPI](../packages/api-contracts/openapi.yaml) para o contrato HTTP.
 
 ---
 
@@ -393,17 +397,13 @@ Contém recursos utilizados por múltiplos módulos.
 
 Responsável pelo acesso ao PostgreSQL.
 
-Inclui:
-
-- pool de conexões;
-- transações;
-- persistência.
+O módulo `src/infrastructure/database/` contém `MIGRATOR` e `PgDatabase`. Este último encapsula o pool; as implementações dos repositórios ficam na infraestrutura de cada módulo de negócio. Criar ou clonar o adaptador não abre um novo pool, não inicia transação e não aplica migrations.
 
 ---
 
 ## firebase
 
-Responsável pela integração com Firebase Authentication.
+O adaptador executável está em `src/modules/identity/infrastructure/firebase/`. O diretório global `src/infrastructure/firebase/` permanece reservado.
 
 Responsabilidades:
 
@@ -416,9 +416,7 @@ Não contém regras de autorização da aplicação.
 
 ## microsoft
 
-Responsável pela integração com Microsoft Graph.
-
-Utilizado para obtenção de informações acadêmicas.
+O adaptador executável está em `src/modules/identity/infrastructure/microsoft/`; o diretório global permanece reservado. Consulta perfil, tenant e participação no grupo de estudantes. Recebe o access token por operação e o grupo a partir do cadastro institucional; não armazena credenciais de usuários.
 
 ---
 
@@ -482,7 +480,7 @@ Exemplos:
 
 # Configuração
 
-Atualmente o executável lê `DATABASE_URL` e `RUST_LOG` diretamente do ambiente.
+Atualmente o executável lê `DATABASE_URL`, `FIREBASE_PROJECT_ID` e `RUST_LOG` diretamente do ambiente.
 O módulo `src/config/` está reservado para centralizar essa configuração no futuro.
 O backend não carrega arquivos `.env` automaticamente.
 
@@ -498,6 +496,7 @@ precedência sobre esse arquivo.
 | `POSTGRES_PORT` | `5432` | Porta do PostgreSQL publicada no host. |
 | `BACKEND_PORT` | `3000` | Porta da API publicada no host pelo Compose. |
 | `RUST_LOG` | `info` | Filtro dos eventos de diagnóstico do backend. |
+| `FIREBASE_PROJECT_ID` | Sem padrão válido | Obrigatória para o backend e os runners BDD; define audiência e emissor esperados nos ID tokens. O valor de `.env.example` é um placeholder. |
 
 Os valores de usuário e senha acima destinam-se ao ambiente local de desenvolvimento.
 Para personalizá-los, na primeira configuração e somente se ainda não existir
@@ -509,7 +508,7 @@ cp .env.example .env
 
 Edite os valores necessários. O arquivo `.env` é ignorado pelo Git; mantenha o
 [`.env.example`](../.env.example) como referência compartilhada.
-O Compose também funciona sem `.env`, usando os padrões da tabela.
+O Compose pode receber os valores pelo ambiente sem `.env`. Subir somente o PostgreSQL dispensa `FIREBASE_PROJECT_ID`. Para iniciar o backend, defina um ID não vazio e sem espaços: quando ausente, o Compose repassa uma string vazia e o próprio backend encerra com erro de configuração. `docker compose config` valida o Compose, mas não a existência do projeto Firebase nem essa exigência da aplicação. O ID identifica o projeto; tokens, senhas e chaves privadas são credenciais distintas e não devem ser versionados.
 
 Dentro da rede do Compose, o backend recebe uma `DATABASE_URL` construída com
 usuário, senha e banco configurados, usando o endereço `postgres:5432`.
@@ -546,9 +545,13 @@ execuções concorrentes com seu lock de migrations. O usuário da conexão prec
 poder criar essa tabela e executar as alterações SQL previstas. O banco deve
 existir previamente; no ambiente local, o Compose cuida de sua criação.
 
-Ainda não há modelo de dados nem migrations de domínio. O diretório contém
-somente `.keep`, e executar o migrador prepara apenas sua tabela de controle.
-As primeiras migrations serão adicionadas junto da implementação do modelo.
+As migrations atuais criam:
+
+- `catalog_status`: enum PostgreSQL com `active` e `inactive`;
+- `institution`: cadastro com tenant Microsoft único e grupo de estudantes;
+- `institutional_verification`: última evidência por UID Firebase, com resultado, configuração verificada e validade.
+
+Elas não inserem a UnB nem qualquer outra instituição automaticamente. Para autenticação real, cadastre uma instituição com tenant e grupo corretos antes do login. O enum `status` representa disponibilidade no catálogo; o serviço atual não o usa como filtro de autorização. Os demais componentes do [modelo relacional proposto](../MODELO_ENTIDADE_RELACIONAMENTO.md) ainda não são criados por essas migrations.
 
 ### Criar uma migration quando houver uma alteração de esquema
 
@@ -600,9 +603,7 @@ migrations de sua compilação; reinicie-o com a versão recompilada.
 Esse acompanhamento segue a
 [orientação do SQLx para Rust stable](https://docs.rs/sqlx/0.8.6/sqlx/macro.migrate.html).
 
-O Dockerfile copia `build.rs` e `migrations/` para a imagem. Após adicionar uma
-migration, execute novamente `docker compose --profile backend up -d --build`
-na raiz do monorepo para reconstruir e iniciar a versão atualizada.
+O Dockerfile copia `build.rs` e `migrations/` para o estágio de compilação. As migrations ficam embutidas no binário copiado para a imagem final. Após adicionar uma migration, execute novamente `docker compose --profile backend up -d --build --wait` na raiz do monorepo para reconstruir e iniciar a versão atualizada.
 
 Os alvos BDD usam o mesmo `MIGRATOR` para preparar sua base-modelo antes da fixture.
 A aplicação das migrations nos testes fica restrita aos containers descartáveis
@@ -615,7 +616,7 @@ conforme a [seção BDD](#bdd).
 
 ## Pré-requisitos
 
-- Docker com daemon acessível e o comando `docker compose` disponível.
+- Docker com daemon acessível, `docker compose` e Buildx/BuildKit disponíveis para construir a imagem com caches de compilação.
 - Acesso à internet na primeira execução para obter imagens e dependências.
 - Portas locais livres; os padrões são `5432` para o banco e `3000` para a API.
 - Para executar o backend ou os testes fora do container, Rust e Cargo da
@@ -632,12 +633,12 @@ Na raiz do monorepo, valide a configuração e inicie os serviços:
 
 ```bash
 docker compose --profile backend config --quiet
-docker compose --profile backend up -d --build
+docker compose --profile backend up -d --build --wait
 ```
 
 O perfil `backend` inclui a API, enquanto o PostgreSQL participa do ambiente por
 padrão. O Compose aguarda o healthcheck do banco antes de iniciar o backend e
-fornece sua `DATABASE_URL` automaticamente.
+fornece sua `DATABASE_URL` automaticamente. Com `--wait`, o comando também aguarda o backend ficar saudável: seu healthcheck consulta `http://127.0.0.1:3000/ready` dentro do container, verificando a API e sua conexão com PostgreSQL.
 
 Acompanhe o estado dos serviços e os logs:
 
@@ -646,11 +647,11 @@ docker compose --profile backend ps
 docker compose logs -f backend
 ```
 
-O container do backend executa `cargo run`, portanto a primeira inicialização
-pode levar algum tempo compilando dependências. Espere a compilação terminar
-antes de consultar a API. `Ctrl+C` encerra apenas o acompanhamento dos logs.
-Após alterar o código, execute novamente o comando com `--build`, pois o código
-é copiado para a imagem e não está montado como um volume.
+O estágio de build executa `cargo build --release --locked --bin backend`. A primeira construção pode demorar; as seguintes reutilizam caches BuildKit de dependências e compilação. A imagem final contém o binário, certificados TLS e `curl` para a sondagem, sem o compilador ou os fontes. O processo executa diretamente o binário como usuário sem privilégios de root e aplica migrations antes de abrir a porta HTTP.
+
+O healthcheck roda a cada dez segundos, limita a requisição a três segundos e permite cinco falhas consecutivas depois de uma tolerância inicial de vinte segundos. Ele não testa Firebase ou Microsoft Graph, nem exige uma instituição cadastrada. Marcar o container como `unhealthy` não o reinicia automaticamente.
+
+`Ctrl+C` encerra apenas o acompanhamento dos logs. Após alterar o código ou as migrations, execute novamente o comando com `--build --wait`, pois não há montagem dos fontes como volume nem recompilação na inicialização do container.
 
 ## PostgreSQL pelo Compose e backend com Cargo
 
@@ -673,10 +674,12 @@ Depois, usando os valores locais padrão:
 
 ```bash
 cd backend
-DATABASE_URL='postgres://capp:capp@localhost:5432/capp' RUST_LOG=info cargo run --locked
+DATABASE_URL='postgres://capp:capp@localhost:5432/capp' \
+FIREBASE_PROJECT_ID='seu-project-id' \
+RUST_LOG=info cargo run --locked
 ```
 
-Se personalizou usuário, senha, banco ou porta, ajuste a URL desse comando.
+Substitua `seu-project-id` pelo projeto Firebase usado pelo aplicativo. Se personalizou usuário, senha, banco ou porta, ajuste a URL desse comando.
 O `.env` da raiz é lido pelo Compose; ele não exporta variáveis para o processo
 Cargo. Mantenha esse terminal aberto enquanto usar a API e utilize `Ctrl+C` para
 encerrar o backend.
@@ -710,9 +713,10 @@ Na raiz, para parar e remover os containers mantendo o volume com os dados:
 docker compose --profile backend down
 ```
 
-Para executar os testes, no diretório `backend`:
+Para executar os testes, no diretório `backend`, forneça o projeto usado pela suíte:
 
 ```bash
+export FIREBASE_PROJECT_ID='seu-project-id'
 cargo test --all-features --locked --no-fail-fast
 ```
 
@@ -740,7 +744,7 @@ será validada conforme elas forem implementadas nas entregas seguintes.
 1. Confira os [pré-requisitos](#pré-requisitos) e a [configuração](#configuração).
 2. Com o código da versão desejada no checkout, siga a
    [execução pelo Compose](#postgresql-e-backend-pelo-compose). Use novamente
-   `docker compose --profile backend up -d --build` após alterações para
+   `docker compose --profile backend up -d --build --wait` após alterações para
    reconstruir a imagem e iniciar a versão atualizada. Como alternativa, siga
    a [execução com Cargo](#postgresql-pelo-compose-e-backend-com-cargo),
    encerrando o processo anterior antes de iniciar o novo.
@@ -756,8 +760,62 @@ A implantação em servidor externo ainda não foi realizada. Ela será definida
 quando uma entrega precisar de acesso remoto ou operação contínua. Nessa etapa,
 este guia deverá registrar o destino escolhido, a configuração de acesso e
 segredos, a persistência dos dados e os comandos de publicação e atualização.
-O Dockerfile atual executa `cargo run` e serve ao desenvolvimento local; a forma
-de execução no ambiente hospedado será definida junto dessa implantação.
+A imagem já executa um binário compilado em modo release. O Compose continua destinado ao ambiente local; a configuração de operação no ambiente hospedado será definida junto dessa implantação.
+
+---
+
+# Organização dos testes
+
+Os testes unitários ficam junto à implementação, em `src/`. Os runners Cucumber são declarados no `Cargo.toml`; os testes de integração usam o alvo `integration`, descoberto automaticamente pelo Cargo em `tests/integration/main.rs`:
+
+```text
+tests/
+├── cucumber/
+│   ├── bdd.rs
+│   ├── bdd_infrastructure.rs
+│   ├── scenario_filters.rs
+│   ├── support/
+│   ├── step_definitions/
+│   ├── infrastructure_steps/
+│   ├── features/
+│   └── fixtures/api_bdd.sql
+├── integration/
+│   ├── main.rs
+│   ├── repositories/
+│   ├── http/
+│   └── support/mod.rs
+└── fixtures/
+```
+
+Cucumber mantém seu World, hooks, steps, fixtures SQL e cenários técnicos juntos. `integration/` contém verificações diretas de PostgreSQL e HTTP, sem runner Gherkin. Fixtures utilizadas por mais de uma suíte ficam em `tests/fixtures/`. As features funcionais compartilhadas com o mobile continuam em `features/` na raiz do monorepo.
+
+Os alvos `bdd`, `bdd_infrastructure` e `scenario_filters` são separados de `integration`, que permite filtrar os testes por módulo.
+
+Para acrescentar testes de outro repositório, crie `tests/integration/repositories/<módulo>.rs` e declare `mod <módulo>;` em `repositories/mod.rs`. Faça o equivalente em `http/` para fluxos HTTP. Não é necessário acrescentar `[[test]]` ao Cargo. O suporte `TestDatabase` centraliza a criação e o descarte de PostgreSQL e a aplicação de migrations; crie uma instância por teste e reutilize seu pool entre os casos. Cada instância permanece isolada das demais, inclusive em execução paralela; o agrupamento no alvo não cria um container global.
+
+## Executar as suítes Rust
+
+No diretório `backend`, execute os testes unitários sem PostgreSQL:
+
+```bash
+cargo test --lib --locked
+```
+
+Os testes de integração exigem Docker e criam seus próprios bancos descartáveis; não dependem do PostgreSQL do Compose. A feature `test-support` habilita os testes HTTP com provedores locais. Sem ela, o alvo executa somente os testes de repositórios:
+
+```bash
+cargo test --test integration --features test-support --locked
+cargo test --test integration --locked repositories::
+cargo test --test integration --features test-support --locked http::
+```
+
+Para executar unitários e integração juntos:
+
+```bash
+cargo test --lib --test integration --features test-support --locked
+```
+
+Os detalhes de cobertura, fixtures e filtros por domínio pertencem aos Rustdocs dos módulos e das suítes. Consulte os [Rustdocs de identity](src/modules/identity/mod.rs) e a [entrada dos testes de integração](tests/integration/main.rs). A seção [Documentação Rust](#documentação-rust) explica como gerar a versão navegável.
 
 ---
 
@@ -781,17 +839,17 @@ O backend implementa os testes comportamentais relacionados às regras de negóc
 
 Essas especificações compartilhadas descrevem comportamentos do produto na
 linguagem do domínio. O backend implementa seus steps em
-`tests/step_definitions/`; cada cliente possui sua própria implementação dos
+`tests/cucumber/step_definitions/`; cada cliente possui sua própria implementação dos
 comportamentos aplicáveis ao seu contexto.
 
 Os cenários técnicos que verificam `/ready`, PostgreSQL e o isolamento dos testes
-ficam em `tests/features/`, com steps exclusivos em `tests/infrastructure_steps/`.
+ficam em `tests/cucumber/features/`, com steps exclusivos em `tests/cucumber/infrastructure_steps/`.
 Eles validam a infraestrutura do backend e são executados por um alvo separado.
 
 | Alvo Cargo | Cenários | Steps |
 |---|---|---|
-| `bdd` | `../features/` — comportamentos compartilhados do produto | `tests/step_definitions/` |
-| `bdd_infrastructure` | `tests/features/` — verificações técnicas do backend | `tests/infrastructure_steps/` |
+| `bdd` | `../features/` — comportamentos compartilhados do produto | `tests/cucumber/step_definitions/` |
+| `bdd_infrastructure` | `tests/cucumber/features/` — verificações técnicas do backend | `tests/cucumber/infrastructure_steps/` |
 
 O runner exclui automaticamente cenários com `@pending_backend`, considerando
 tags na feature, regra ou cenário. Essa exclusão também vale quando filtros
@@ -800,12 +858,14 @@ Remova a tag da plataforma quando sua automação estiver implementada.
 A exclusão pode resultar em zero cenários e não comprova cobertura funcional.
 
 Para executar os testes BDD, é necessário ter Rust/Cargo instalados e um daemon
-Docker disponível para o usuário atual. Na primeira execução, o Docker precisa
-conseguir obter a imagem `postgres:17-alpine`.
+Docker disponível para o usuário atual. Na primeira execução, o Docker precisa conseguir obter a imagem `postgres:17-alpine`.
+
+Os runners exigem `FIREBASE_PROJECT_ID` no ambiente, inclusive para cenários técnicos, porque constroem o mesmo `AppState` com clientes reais. Eles não carregam `.env` automaticamente. Construir os clientes não faz login nem chama os provedores; um cenário que execute autenticação real precisa também de tokens válidos e de dados institucionais em seu banco. O ID do projeto sozinho não autentica os testes.
 
 No diretório `backend`, verifique o Docker e execute os comportamentos do produto:
 
 ```bash
+export FIREBASE_PROJECT_ID='seu-project-id'
 docker info
 cargo test --test bdd --locked
 ```
@@ -829,20 +889,19 @@ quando um deles falha; o comando continua retornando falha se qualquer alvo
 falhar. A opção controla a execução entre alvos, não a estratégia interna dos
 cenários do Cucumber.
 
-Os dois alvos reutilizam o código de `tests/support/`, mas registram seus steps e
+Os dois alvos reutilizam o código de `tests/cucumber/support/`, mas registram seus steps e
 leem seus diretórios de cenários separadamente. Cada execução de um alvo cria um
 único container PostgreSQL, reutilizado por todos os cenários daquela suíte, com
 porta dinâmica. Executar os dois alvos cria dois containers independentes. A
 preparação usa o mesmo `MIGRATOR` do servidor e aplica a fixture
-`tests/fixtures/api_bdd.sql` a uma base-modelo.
+`tests/cucumber/fixtures/api_bdd.sql` a uma base-modelo.
 Cenários consultivos compartilham uma cópia dessa base com transações de leitura
 por padrão. Cenários que escrevem devem receber a tag `@isolated_database`, na
 feature, regra ou cenário, para obter uma base própria clonada do modelo.
 
 Os testes usam o router e o `AppState` reais em memória. Não é necessário iniciar
 o servidor HTTP nem o PostgreSQL do Compose; a suíte não lê `DATABASE_URL` e usa
-credenciais próprias no container descartável. Os hooks liberam os recursos dos
-cenários, e o encerramento da suíte remove o container.
+credenciais próprias no container descartável. Os clientes HTTP e o cache de chaves Firebase são compartilhados na suíte; a evidência institucional permanece no banco de cada cenário. O POST de verificação grava uma evidência e exige `@isolated_database` quando executado por um cenário. Os hooks liberam os recursos dos cenários, e o encerramento da suíte remove o container.
 
 Os resultados de cada suíte aparecem na saída do comando, com a quantidade de
 cenários e steps executados e os detalhes de eventuais falhas. O Cargo identifica
@@ -851,14 +910,13 @@ cada alvo antes de executá-lo, e o Cucumber apresenta o resumo da respectiva su
 No GitHub Actions, abra o workflow **Backend CI**, selecione a execução e consulte
 **Format, lint, and test → Run tests**. O runner Ubuntu fornece Docker para os
 containers criados pelo Testcontainers. O step executa diretamente o comando acima,
-preservando seu código de saída para que falhas nos testes reprovem o job.
+preservando seu código de saída para que falhas nos testes reprovem o job. Configure `FIREBASE_PROJECT_ID` em **Settings → Secrets and variables → Actions → Variables** do repositório; o workflow a fornece ao processo com `${{ vars.FIREBASE_PROJECT_ID }}`. Não é necessário gerar um `.env` no runner.
 
 As instruções de organização e escrita dos cenários compartilhados estão na
 [seção BDD do README do projeto](../README.md#bdd).
 
 A aprovação dos testes técnicos não representa cobertura dos comportamentos do
-produto. Enquanto as especificações funcionais não tiverem cenários, o alvo
-`bdd` pode terminar com zero cenários executados, sem validar regras de negócio.
+produto. Os cenários de autenticação atualmente usam `@pending_backend` e passos pendentes; sua automação é uma entrega separada. O alvo `bdd` pode terminar com zero cenários executados, sem validar autenticação. Compilar a suíte ou aprovar os cenários técnicos não comprova integração real com Firebase/Graph.
 
 ---
 
@@ -895,19 +953,20 @@ No diretório `backend`, gere a documentação da biblioteca, incluindo itens pr
 RUSTDOCFLAGS="-D warnings" cargo doc --lib --all-features --no-deps --document-private-items --locked
 ```
 
-O índice fica em `target/doc/backend/index.html`. A documentação da biblioteca
-não inclui os módulos dos testes; para gerar também as duas suítes, usando o
+O índice fica em `target/doc/backend/index.html`. A visão do módulo de identidade fica em `target/doc/backend/modules/identity/index.html`. A documentação da biblioteca
+não inclui os módulos dos testes; para gerar também as suítes externas, usando o
 diretório `target/` padrão:
 
 ```bash
 cargo build --lib --all-features --locked
 cargo rustdoc --test bdd --all-features --locked -- --document-private-items -D warnings --extern backend=target/debug/libbackend.rlib
 cargo rustdoc --test bdd_infrastructure --all-features --locked -- --document-private-items -D warnings --extern backend=target/debug/libbackend.rlib
+cargo rustdoc --test integration --all-features --locked -- --document-private-items -D warnings --extern backend=target/debug/libbackend.rlib
 ```
 
 O argumento `--extern` fornece a biblioteca do projeto que o Cargo não inclui
 automaticamente nesta geração de documentação dos testes. Os índices ficam em
-`target/doc/bdd/index.html` e `target/doc/bdd_infrastructure/index.html`.
+`target/doc/bdd/index.html`, `target/doc/bdd_infrastructure/index.html` e `target/doc/integration/index.html`.
 Esses comandos documentam os testes sem executá-los e não precisam de Docker.
 
 Para documentar somente a inicialização do executável, use:
@@ -971,3 +1030,9 @@ Flutter Mobile             Web Frontend
 ```
 
 As regras de negócio permanecem centralizadas no backend, enquanto diferentes clientes implementam apenas suas respectivas interfaces.
+
+# Contrato HTTP (OpenAPI)
+
+O contrato das rotas implementadas está em [`packages/api-contracts/openapi.yaml`](../packages/api-contracts/openapi.yaml), em OpenAPI 3.1. Ele descreve `GET /health`, `GET /ready` e `POST /auth/institutional/verify`, incluindo autenticação Firebase Bearer, token Microsoft no corpo, perfis de estudante e não estudante, validade e erros públicos. O backend serve esses caminhos sem prefixo `/v1`.
+
+Ao alterar um handler, DTO ou mapeamento de erros, atualize o contrato no mesmo conjunto de alterações. O arquivo pode ser aberto em ferramentas compatíveis com OpenAPI 3.1; o backend ainda não serve uma interface Swagger ou um endpoint de download do contrato. A rota `/protected` dos testes não integra a API pública.

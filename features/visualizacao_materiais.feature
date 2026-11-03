@@ -2,7 +2,7 @@
 
 # Referência: Relatório de Features do Projeto, seção 6.1.
 # A referência não define uma ordenação específica para os materiais.
-@pending_backend @pending_mobile
+@backend @mobile @pending_backend @pending_mobile
 Funcionalidade: Visualização de materiais acadêmicos
 
   Como estudante
@@ -52,12 +52,18 @@ Funcionalidade: Visualização de materiais acadêmicos
       Então vejo o título "Resumo de Estruturas de Dados"
       E vejo a descrição "Resumo para a primeira avaliação."
 
-    Cenário: Acessar o conteúdo de um material publicado
+    Esquema do Cenário: Acessar o conteúdo de um material publicado
       Dado que o CA ativo é "CA de Computação"
       E existe o material publicado "Referências de Cálculo I" nesse CA
-      E o material possui conteúdo disponível
+      E o material possui conteúdo disponível no formato "<formato>"
       Quando acesso o conteúdo do material "Referências de Cálculo I"
-      Então o conteúdo publicado é disponibilizado
+      Então o conteúdo publicado é disponibilizado no formato "<formato>"
+
+      Exemplos:
+        | formato       |
+        | PDF           |
+        | link externo  |
+        | outro arquivo |
 
     Cenário: Não disponibilizar conteúdo de material não publicado
       Dado que o CA ativo é "CA de Computação"
