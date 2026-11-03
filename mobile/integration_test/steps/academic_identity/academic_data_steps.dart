@@ -1,3 +1,12 @@
+/// Contratos pendentes da associação de dados acadêmicos ao perfil.
+///
+/// A interface depende de curso e situação acadêmica confirmados para apresentar
+/// funcionalidades adequadas. Esta biblioteca registra os passos compartilhados
+/// enquanto a automação real de consulta, associação e apresentação está pendente.
+/// Cada ação usa pendingStep e falha explicitamente se executada; nenhum dado
+/// acadêmico é simulado para aprovar os cenários.
+library;
+
 import '../../support/step_registry.dart';
 
 final academicDataSteps = <StepDefinition>[
