@@ -3,7 +3,7 @@
 # Referência: Relatório de Features do Projeto, seção 4.4.
 # Controle opcional de vagas e fila de espera não fazem parte desta especificação básica.
 # Regra proposta para revisão: impedir inscrições duplicadas e informar cancelamentos sem inscrição ativa.
-@pending_backend @pending_mobile
+@backend @mobile @pending_backend @pending_mobile
 Funcionalidade: Inscrição e cancelamento em eventos
 
   Como estudante
