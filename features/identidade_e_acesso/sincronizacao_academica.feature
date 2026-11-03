@@ -63,7 +63,8 @@ Funcionalidade: Sincronização acadêmica periódica
       E a fonte institucional está temporariamente indisponível
       Quando ocorre uma tentativa de sincronização acadêmica
       Então os últimos dados acadêmicos confirmados permanecem associados ao estudante
-      E a falha de consulta não altera, por si só, as permissões derivadas desses dados
+      E as regras de acesso continuam avaliando a validade dos últimos dados confirmados
+      E a tentativa que falhou não renova nem prorroga essa validade
 
   Regra: A sincronização mantém a consistência dos dados acadêmicos
 
