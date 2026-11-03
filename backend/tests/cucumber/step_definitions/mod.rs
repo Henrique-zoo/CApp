@@ -8,6 +8,10 @@
 
 mod autenticacao_institucional;
 mod consultas_estudantis;
+mod contexto_multi_ca;
+mod exclusao_de_cargos;
+mod publicacao_institucional;
+mod shared_pending;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///
