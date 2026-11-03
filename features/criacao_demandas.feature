@@ -2,7 +2,7 @@
 
 # Referência: Relatório de Features do Projeto, seção 5.2.
 # Recorte I07: fórum de demandas sobre o espaço físico do CA.
-@pending_backend @pending_mobile
+@backend @mobile @pending_backend @pending_mobile
 Funcionalidade: Criação de demandas sobre o espaço físico do CA
 
   Como usuário do aplicativo
