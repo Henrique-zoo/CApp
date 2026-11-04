@@ -6,10 +6,12 @@
 //! Steps técnicos de prontidão e isolamento pertencem ao alvo
 //! `bdd_infrastructure`, sem serem registrados nesta suíte.
 
+mod apadrinhamento;
 mod autenticacao_institucional;
 mod consultas_estudantis;
 mod contexto_multi_ca;
 mod publicacao_institucional;
+mod shared_steps;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///
