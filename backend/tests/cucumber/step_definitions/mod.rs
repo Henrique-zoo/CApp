@@ -11,7 +11,7 @@ mod consultas_estudantis;
 mod contexto_multi_ca;
 mod exclusao_de_cargos;
 mod publicacao_institucional;
-mod shared_pending;
+mod shared_steps;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///
