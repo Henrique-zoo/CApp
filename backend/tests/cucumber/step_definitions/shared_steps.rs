@@ -1,9 +1,13 @@
-//! O vocabulário comum dos cenários precisa ter um único registro entre as funcionalidades.
+//! Steps compartilhados entre funcionalidades dos cenários de produto.
 //!
-//! Estes registros ligam os cenários ao runner enquanto a automação real está
-//! pendente. Cada passo chama `pending_step` e falha explicitamente se executado.
-//! Não prepara estado nem simula resultados do produto. As expressões reutilizadas
-//! por outras funcionalidades ficam no módulo compartilhado, com registro único.
+//! O vocabulário reutilizado precisa de um registro único para evitar definições
+//! ambíguas. Este módulo registra essas expressões na coleção do Cucumber usada
+//! pela suíte do backend; os módulos de cada funcionalidade mantêm seus passos
+//! específicos.
+//!
+//! Os passos ainda sem automação chamam `pending_step` e falham explicitamente se
+//! executados. Ao implementar seu comportamento real, o registro permanece neste
+//! módulo e as tags de pendência são removidas dos cenários já automatizados.
 
 use cucumber::{given, then, when};
 
