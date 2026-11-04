@@ -10,6 +10,7 @@ mod associacao_dados_academicos;
 mod autenticacao_institucional;
 mod consultas_estudantis;
 mod contexto_multi_ca;
+mod integrantes_da_gestao;
 mod publicacao_institucional;
 mod shared_steps;
 
