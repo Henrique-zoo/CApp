@@ -10,6 +10,8 @@ mod autenticacao_institucional;
 mod consultas_estudantis;
 mod contexto_multi_ca;
 mod publicacao_institucional;
+mod registro_ocorrencias;
+mod shared_steps;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///
