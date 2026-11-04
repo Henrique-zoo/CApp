@@ -5,8 +5,8 @@ import 'management/default_roles_steps.dart';
 import 'management/multi_ca_context_steps.dart';
 import 'shared/access_control_steps.dart';
 import 'shared/navigation_steps.dart';
-import 'shared/pending_product_steps.dart';
 import 'shared/session_steps.dart';
+import 'shared/shared_steps.dart';
 
 final stepDefinitions = <StepDefinition>[
   ...accessControlSteps,
@@ -15,6 +15,6 @@ final stepDefinitions = <StepDefinition>[
   ...institutionalPublicationSteps,
   ...multiCaContextSteps,
   ...navigationSteps,
-  ...pendingProductSteps,
   ...sessionSteps,
+  ...sharedSteps,
 ];
