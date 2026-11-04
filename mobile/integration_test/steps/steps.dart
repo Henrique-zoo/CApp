@@ -1,13 +1,20 @@
 import '../support/step_registry.dart';
-
 import 'authentication/authentication_steps.dart';
+import 'demands/demand_tracking_steps.dart';
+import 'governance/institutional_publication_steps.dart';
+import 'management/multi_ca_context_steps.dart';
 import 'shared/access_control_steps.dart';
 import 'shared/navigation_steps.dart';
 import 'shared/session_steps.dart';
+import 'shared/shared_steps.dart';
 
 final stepDefinitions = <StepDefinition>[
-  ...authenticationSteps,
-  ...sessionSteps,
   ...accessControlSteps,
+  ...authenticationSteps,
+  ...demandTrackingSteps,
+  ...institutionalPublicationSteps,
+  ...multiCaContextSteps,
   ...navigationSteps,
+  ...sessionSteps,
+  ...sharedSteps,
 ];
