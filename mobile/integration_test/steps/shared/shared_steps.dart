@@ -1,15 +1,19 @@
-/// O vocabulário comum dos cenários precisa ter um único registro entre as funcionalidades.
+/// Steps compartilhados entre funcionalidades dos cenários de produto.
 ///
-/// Registra o vocabulário usado pelo runner enquanto a automação está pendente.
-/// Cada ação usa [pendingStep] e falha explicitamente quando executada. A futura
-/// implementação deverá exercitar o aplicativo e seus efeitos reais antes de
-/// remover `@pending_mobile`. Expressões comuns têm um único registro compartilhado.
+/// O vocabulário reutilizado precisa de um registro único para evitar definições
+/// ambíguas. Esta library fornece [sharedSteps] ao registro global do runner;
+/// as libraries de cada funcionalidade mantêm seus passos específicos.
+///
+/// Os passos ainda sem automação usam [pendingStep] e falham explicitamente se
+/// executados. Ao implementar as ações e verificações reais sobre o aplicativo,
+/// seus registros permanecem aqui e a tag `@pending_mobile` é removida dos
+/// cenários já automatizados.
 library;
 
 import '../../support/step_registry.dart';
 
-/// Expressões pendentes consumidas pelo registro global dos cenários.
-final pendingProductSteps = <StepDefinition>[
+/// Steps reutilizados entre funcionalidades, consumidos pelo registro global.
+final sharedSteps = <StepDefinition>[
   pendingStep(
     r'^a operação é recusada informando que o cargo de Presidente não pode ser excluído$',
   ),
