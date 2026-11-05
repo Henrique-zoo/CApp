@@ -13,6 +13,7 @@ mod contexto_multi_ca;
 mod integrantes_da_gestao;
 mod publicacao_institucional;
 mod shared_steps;
+mod visualizacao_noticias;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///
