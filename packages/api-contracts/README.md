@@ -205,3 +205,23 @@ as versões afetadas e a estratégia de migração devem constar no PR.
 
 O arquivo vazio significa que não há exceções ativas. Uma exceção deve ser
 removida assim que deixar de ser necessária.
+
+## Exceções da validação Redocly
+
+O arquivo `.redocly.lint-ignore.yaml` registra exceções pontuais para regras
+que não podem ser atendidas corretamente com as informações e os
+comportamentos atualmente definidos pelo projeto:
+
+- **`no-empty-servers`**: ainda não existe uma URL canônica de implantação
+  definida para a API. A especificação não utiliza endereços fictícios ou
+  referências a `localhost`.
+- **`info-license`**: a licença do projeto ainda não foi formalmente definida.
+- **`operation-4xx-response` em `/health` e `/ready`**: esses endpoints não
+  recebem dados de entrada que justifiquem respostas 4XX. `/health` informa
+  a saúde do processo, enquanto `/ready` informa a disponibilidade do
+  PostgreSQL por meio de respostas 200 ou 503.
+
+As exceções são limitadas aos respectivos nós da especificação. As regras
+Redocly continuam sendo aplicadas às demais operações. Quando o projeto
+definir uma licença ou uma URL oficial de implantação, as exceções
+correspondentes deverão ser removidas.
