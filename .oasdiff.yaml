@@ -1,0 +1,4 @@
+fail-on: WARN
+deprecation-days-stable: 180
+severity-levels: .oasdiff-levels.txt
+err-ignore: .oasdiff-err-ignore.txt
