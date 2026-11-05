@@ -9,6 +9,7 @@ on:
       - ".oasdiff-err-ignore.txt"
       - ".oasdiff.yaml"
       - ".oasdiff-levels.txt"
+      - ".redocly.lint-ignore.yaml"
       - ".github/workflows/api-contracts.yml"
   pull_request:
     paths:
@@ -18,6 +19,7 @@ on:
       - ".oasdiff-err-ignore.txt"
       - ".oasdiff.yaml"
       - ".oasdiff-levels.txt"
+      - ".redocly.lint-ignore.yaml"
       - ".github/workflows/api-contracts.yml"
   workflow_dispatch:
 
