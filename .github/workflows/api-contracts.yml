@@ -38,6 +38,52 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate shared JSON examples
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          spec = Path("packages/api-contracts/openapi.yaml")
+          content = spec.read_text(encoding="utf-8")
+          references = re.findall(
+              r'^\s*externalValue:\s*(\S+)\s*$',
+              content,
+              flags=re.MULTILINE,
+          )
+
+          if not references:
+              raise SystemExit("Nenhuma referência externalValue encontrada.")
+
+          root = spec.parent.resolve()
+
+          for reference in references:
+              if "://" in reference:
+                  raise SystemExit(
+                      f"Esperada referência local, encontrada URL externa: {reference}"
+                  )
+
+              example = (spec.parent / reference).resolve()
+
+              try:
+                  example.relative_to(root)
+              except ValueError:
+                  raise SystemExit(
+                      f"Referência aponta para fora de packages/api-contracts: {reference}"
+                  )
+
+              if not example.is_file():
+                  raise SystemExit(f"Exemplo não encontrado: {reference}")
+
+              with example.open(encoding="utf-8") as file:
+                  json.load(file)
+
+              print(f"OK: {reference}")
+
+          print(f"\n{len(references)} exemplos externos válidos.")
+          PY
+
       - name: Lint OpenAPI description
         run: |
           docker run --rm \

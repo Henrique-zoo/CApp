@@ -13,6 +13,20 @@ import '../../../../support/http_fakes.dart';
 
 /// Registra sucesso público, indisponibilidade e respostas intermediárias.
 void main() {
+  test('saúde retorna a mensagem textual definida no contrato', () async {
+    final adapter = FakeHttpAdapter(
+      (_) => ResponseBody.fromString('O servidor está saudável.', 200),
+    );
+    final api = MonitoringApi(createTestDio(adapter));
+
+    final result = await api.getHealth();
+
+    expect(result, 'O servidor está saudável.');
+    expect(adapter.requests, hasLength(1));
+    expect(adapter.requests.single.path, '/health');
+    expect(adapter.requests.single.method, 'GET');
+  });
+
   test('prontidão usa GET público sem consultar credencial Firebase', () async {
     final adapter = FakeHttpAdapter((_) => ResponseBody.fromString('', 200));
     var tokenCalls = 0;
