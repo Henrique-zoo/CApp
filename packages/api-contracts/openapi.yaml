@@ -21,10 +21,6 @@ info:
     específicas de curso. A expiração informada é da evidência institucional,
     independente da expiração do ID token Firebase.
 
-servers:
-  - url: http://localhost:3000
-    description: Backend local, inclusive quando a porta 3000 é publicada pelo Docker.
-
 tags:
   - name: Infraestrutura
     description: Saúde do processo e comunicação com PostgreSQL.
