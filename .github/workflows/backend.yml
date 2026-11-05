@@ -5,13 +5,13 @@ on:
     paths:
       - "backend/**"
       - "features/**"
-      - "packages/api-contracts/openapi.yaml"
+      - "packages/api-contracts/**"
       - ".github/workflows/backend.yml"
   pull_request:
     paths:
       - "backend/**"
       - "features/**"
-      - "packages/api-contracts/openapi.yaml"
+      - "packages/api-contracts/**"
       - ".github/workflows/backend.yml"
   workflow_dispatch:
 

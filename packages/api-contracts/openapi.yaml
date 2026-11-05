@@ -88,8 +88,10 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/InstitutionalAuthRequest"
-            example:
-              microsoftAccessToken: "<MICROSOFT_ACCESS_TOKEN>"
+            examples:
+              institutionalAuthRequest:
+                summary: Requisição de verificação institucional
+                externalValue: ./examples/institutional-auth-request.json
       responses:
         "200":
           description: Identidade verificada e evidência institucional persistida.
@@ -100,36 +102,13 @@ paths:
               examples:
                 student:
                   summary: Estudante com curso informado pelo diretório
-                  value:
-                    profile:
-                      microsoftObjectId: "00000000-0000-0000-0000-000000000001"
-                      name: Pessoa Exemplo
-                      email: pessoa@instituicao.example
-                      affiliation:
-                        type: student
-                        courseName: Engenharia de Software
-                    expiresAt: "2026-10-22T12:00:00Z"
+                  externalValue: ./examples/institutional-verification-student.json
                 studentWithoutOptionalData:
                   summary: Estudante sem nome, e-mail ou curso informado
-                  value:
-                    profile:
-                      microsoftObjectId: "00000000-0000-0000-0000-000000000002"
-                      name: null
-                      email: null
-                      affiliation:
-                        type: student
-                        courseName: null
-                    expiresAt: "2026-10-22T12:00:00Z"
+                  externalValue: ./examples/institutional-verification-student-null-fields.json
                 nonStudent:
                   summary: Pessoa sem participação no grupo estudantil
-                  value:
-                    profile:
-                      microsoftObjectId: "00000000-0000-0000-0000-000000000003"
-                      name: Pessoa Exemplo
-                      email: null
-                      affiliation:
-                        type: nonStudent
-                    expiresAt: "2026-10-22T12:00:00Z"
+                  externalValue: ./examples/institutional-verification-non-student.json
         "400":
           description: |
             bad_request — JSON ausente, malformado, de tipo incompatível ou
@@ -209,11 +188,8 @@ paths:
                 $ref: "#/components/schemas/ApiError"
               examples:
                 unknownInstitution:
-                  value:
-                    error:
-                      code: unknown_institution
-                      message: Sua instituição ainda não está cadastrada no CApp.
-                      details: null
+                  summary: Tenant Microsoft sem instituição cadastrada
+                  externalValue: ./examples/api-error-unknown-institution.json
                 concurrentVerification:
                   value:
                     error:

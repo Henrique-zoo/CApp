@@ -38,7 +38,35 @@ void main() {
     );
     expect(result.profile.affiliation, const NonStudentAffiliation());
     expect(result.profile.name, 'Pessoa Exemplo');
-    expect(result.expiresAt, DateTime.utc(2026, 1, 1, 13));
+    expect(result.expiresAt, DateTime.utc(2026, 10, 22, 12));
+  });
+
+  test('estudante com curso informado é convertido corretamente', () async {
+    final body = loadApiContractExample(
+      'institutional-verification-student.json',
+    );
+    final gateway = _gateway((_) => jsonTestResponse(body));
+
+    final result = await gateway.verify(
+      microsoftAccessToken: 'microsoft-test-token',
+    );
+
+    expect(result.profile.affiliation, isA<StudentAffiliation>());
+  });
+
+  test('estudante com campos opcionais nulos é aceito', () async {
+    final body = loadApiContractExample(
+      'institutional-verification-student-null-fields.json',
+    );
+    final gateway = _gateway((_) => jsonTestResponse(body));
+
+    final result = await gateway.verify(
+      microsoftAccessToken: 'microsoft-test-token',
+    );
+
+    expect(result.profile.affiliation, isA<StudentAffiliation>());
+    expect(result.profile.name, isNull);
+    expect(result.profile.email, isNull);
   });
 
   for (final scenario in [

@@ -5,13 +5,13 @@ on:
     paths:
       - "mobile/**"
       - "features/**"
-      - "packages/api-contracts/openapi.yaml"
+      - "packages/api-contracts/**"
       - ".github/workflows/mobile.yml"
   pull_request:
     paths:
       - "mobile/**"
       - "features/**"
-      - "packages/api-contracts/openapi.yaml"
+      - "packages/api-contracts/**"
       - ".github/workflows/mobile.yml"
   workflow_dispatch:
 
