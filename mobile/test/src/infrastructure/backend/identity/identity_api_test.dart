@@ -15,8 +15,9 @@ import 'package:capp/src/infrastructure/backend/identity/identity_api.dart';
 import '../../../../support/http_fakes.dart';
 
 /// Requisição fictícia reutilizada nas verificações do protocolo.
-InstitutionalAuthRequest _request() =>
-    InstitutionalAuthRequest(microsoftAccessToken: 'microsoft-test-token');
+InstitutionalAuthRequest _request() => InstitutionalAuthRequest.fromJson(
+  loadApiContractExample('institutional-auth-request.json'),
+);
 
 /// Registra autenticação optativa, status e formatos de resposta.
 void main() {
@@ -36,7 +37,10 @@ void main() {
       expect(request.path, '/auth/institutional/verify');
       expect(request.extra['firebaseAuth'], isTrue);
       expect(request.contentType, Headers.jsonContentType);
-      expect(request.data, {'microsoftAccessToken': 'microsoft-test-token'});
+      expect(
+        request.data,
+        loadApiContractExample('institutional-auth-request.json'),
+      );
       expect(
         response.verification.profile.affiliation,
         isA<NonStudentAffiliation>(),
@@ -54,8 +58,38 @@ void main() {
       expect(response.verification.institution.acronym, 'IEX');
       expect(response.verification.toJson(), {
         ...backendVerificationBody(),
-        'expiresAt': '2026-01-01T13:00:00.000Z',
+        'expiresAt': '2026-10-22T12:00:00.000Z',
       });
+    },
+  );
+
+  test(
+    'desserializa a resposta compartilhada com conta e curso informado',
+    () async {
+      final body = loadApiContractExample(
+        'institutional-verification-student.json',
+      );
+      final api = IdentityApi(
+        createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
+      );
+
+      final response = await api.verifyInstitutionalIdentity(
+        request: _request(),
+      );
+
+      expect(
+        response.user.id,
+        const UuidValue.raw('00000000-0000-0000-0000-000000000010'),
+      );
+      expect(response.user.status, 'incomplete');
+      expect(
+        response.verification.profile.affiliation,
+        isA<StudentAffiliation>().having(
+          (affiliation) => affiliation.courseName,
+          'curso',
+          'Engenharia de Software',
+        ),
+      );
     },
   );
 
@@ -133,7 +167,7 @@ void main() {
     expect(response.verification.institution.acronym, isNull);
     expect(response.verification.toJson(), {
       ...(body['verification'] as Map),
-      'expiresAt': '2026-01-01T13:00:00.000Z',
+      'expiresAt': '2026-10-22T12:00:00.000Z',
     });
   });
 
