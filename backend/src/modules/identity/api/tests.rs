@@ -101,6 +101,16 @@ fn invalid_bearer_headers_are_rejected() {
 /// O DTO normaliza ausência, null e string vazia, mas não aceita tipos incompatíveis.
 #[test]
 fn microsoft_token_input_contract() {
+    let fixture: dto::InstitutionalAuthRequest = serde_json::from_str(include_str!(
+        "../../../../../packages/api-contracts/examples/institutional-auth-request.json"
+    ))
+    .unwrap();
+
+    assert_eq!(
+        fixture.microsoft_access_token.as_deref(),
+        Some("MICROSOFT_ACCESS_TOKEN_DE_TESTE")
+    );
+
     for value in [
         json!({}),
         json!({"microsoftAccessToken": null}),
@@ -134,45 +144,78 @@ fn microsoft_token_input_contract() {
     }
 }
 
-/// Respostas distinguem os vínculos e preservam campos opcionais e prazo sem expor tokens.
+/// As três variantes de resposta correspondem aos exemplos compartilhados do OpenAPI.
 #[test]
-fn verification_json_preserves_affiliation_and_expiry() {
-    let expires_at = chrono::DateTime::parse_from_rfc3339("2026-10-21T12:00:00Z")
+fn verification_json_matches_shared_contract_examples() {
+    let expires_at = chrono::DateTime::parse_from_rfc3339("2026-10-22T12:00:00Z")
         .unwrap()
         .with_timezone(&chrono::Utc);
-    for (affiliation, expected) in [
+
+    let cases = [
         (
-            InstitutionalAffiliation::Student {
-                course_name: Some("Curso".into()),
+            InstitutionalProfile {
+                id: "00000000-0000-0000-0000-000000000001".into(),
+                name: Some("Pessoa Exemplo".into()),
+                mail: Some("pessoa@instituicao.example".into()),
+                affiliation: InstitutionalAffiliation::Student {
+                    course_name: Some("Engenharia de Software".into()),
+                },
             },
-            json!({"type":"student", "courseName":"Curso"}),
+            include_str!(
+                "../../../../../packages/api-contracts/examples/institutional-verification-student.json"
+            ),
         ),
         (
-            InstitutionalAffiliation::Student { course_name: None },
-            json!({"type":"student", "courseName":null}),
+            InstitutionalProfile {
+                id: "00000000-0000-0000-0000-000000000002".into(),
+                name: None,
+                mail: None,
+                affiliation: InstitutionalAffiliation::Student { course_name: None },
+            },
+            include_str!(
+                "../../../../../packages/api-contracts/examples/institutional-verification-student-null-fields.json"
+            ),
         ),
         (
-            InstitutionalAffiliation::NonStudent,
-            json!({"type":"nonStudent"}),
+            InstitutionalProfile {
+                id: "00000000-0000-0000-0000-000000000003".into(),
+                name: Some("Pessoa Exemplo".into()),
+                mail: None,
+                affiliation: InstitutionalAffiliation::NonStudent,
+            },
+            include_str!(
+                "../../../../../packages/api-contracts/examples/institutional-verification-non-student.json"
+            ),
         ),
-    ] {
+    ];
+
+    for (profile, fixture) in cases {
         let response =
             dto::InstitutionalVerificationResponse::from(InstitutionalVerificationResult {
-                profile: InstitutionalProfile {
-                    id: "microsoft-id".into(),
-                    name: None,
-                    mail: None,
-                    affiliation,
-                },
+                profile,
                 expires_at,
             });
-        assert_eq!(
-            serde_json::to_value(response).unwrap(),
-            json!({"profile": {
-            "microsoftObjectId":"microsoft-id", "name":null, "email":null, "affiliation":expected
-        }, "expiresAt":"2026-10-21T12:00:00Z"})
-        );
+
+        let expected: Value = serde_json::from_str(fixture).unwrap();
+
+        assert_eq!(serde_json::to_value(response).unwrap(), expected);
     }
+}
+
+/// O erro público de instituição desconhecida corresponde ao exemplo compartilhado.
+#[tokio::test]
+async fn unknown_institution_error_matches_shared_contract_example() {
+    let response = ApiError::from(AuthenticationError::UnknownInstitution).into_response();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let actual = response_json(response).await;
+    let expected: Value = serde_json::from_str(include_str!(
+        "../../../../../packages/api-contracts/examples/api-error-unknown-institution.json"
+    ))
+    .unwrap();
+
+    assert_eq!(actual, expected);
 }
 
 /// Cada erro de aplicação produz status, código e desafio HTTP apropriados.

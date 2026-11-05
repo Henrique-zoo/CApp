@@ -6,6 +6,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -22,29 +23,48 @@ Dio createTestDio(FakeHttpAdapter adapter) {
   return dio;
 }
 
+/// Carrega um exemplo JSON compartilhado com a especificação OpenAPI.
+///
+/// Os testes Flutter são executados a partir do diretório `mobile`.
+Map<String, Object?> loadApiContractExample(String filename) {
+  final path = '../packages/api-contracts/examples/$filename';
+  final file = File(path);
+
+  if (!file.existsSync()) {
+    throw StateError('Exemplo de contrato não encontrado: $path');
+  }
+
+  final decoded = jsonDecode(file.readAsStringSync());
+
+  if (decoded is! Map<String, dynamic>) {
+    throw FormatException('O exemplo de contrato não é um objeto JSON: $path');
+  }
+
+  return Map<String, Object?>.from(decoded);
+}
+
 /// Resposta institucional do protocolo, independente dos modelos da aplicação.
 ///
-/// [student] seleciona a variante estudantil, preservando curso nulo.
-Map<String, Object?> backendVerificationBody({bool student = false}) => {
-  'profile': {
-    'microsoftObjectId': '00000000-0000-0000-0000-000000000001',
-    'name': 'Pessoa Exemplo',
-    'email': null,
-    'affiliation': student
-        ? <String, Object?>{'type': 'student', 'courseName': null}
-        : <String, Object?>{'type': 'nonStudent'},
-  },
-  'expiresAt': '2026-01-01T13:00:00Z',
-};
+/// [student] seleciona a variante estudantil com curso nulo.
+Map<String, Object?> backendVerificationBody({bool student = false}) =>
+    loadApiContractExample(
+      student
+          ? 'institutional-verification-student-null-fields.json'
+          : 'institutional-verification-non-student.json',
+    );
 
-/// Envelope público de erro com código controlado e sem diagnósticos internos.
-Map<String, Object?> backendErrorBody(String code) => {
-  'error': {
-    'code': code,
-    'message': 'Mensagem pública do backend',
-    'details': null,
-  },
-};
+/// Envelope público de erro baseado no exemplo compartilhado.
+///
+/// O código e a mensagem são substituídos para testar diferentes classificações.
+Map<String, Object?> backendErrorBody(String code) {
+  final body = loadApiContractExample('api-error-unknown-institution.json');
+  final error = Map<String, Object?>.from(body['error']! as Map);
+
+  error['code'] = code;
+  error['message'] = 'Mensagem pública do backend';
+
+  return {'error': error};
+}
 
 /// Serializa [body] e identifica o conteúdo como JSON para os transformadores.
 ///

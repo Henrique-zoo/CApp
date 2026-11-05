@@ -14,8 +14,9 @@ import 'package:capp/src/infrastructure/backend/identity/identity_api.dart';
 import '../../../../support/http_fakes.dart';
 
 /// Requisição fictícia reutilizada nas verificações do protocolo.
-InstitutionalAuthRequest _request() =>
-    InstitutionalAuthRequest(microsoftAccessToken: 'microsoft-test-token');
+InstitutionalAuthRequest _request() => InstitutionalAuthRequest.fromJson(
+  loadApiContractExample('institutional-auth-request.json'),
+);
 
 /// Registra autenticação optativa, status e formatos de resposta.
 void main() {
@@ -34,11 +35,27 @@ void main() {
       expect(request.path, '/auth/institutional/verify');
       expect(request.extra['firebaseAuth'], isTrue);
       expect(request.contentType, Headers.jsonContentType);
-      expect(request.data, {'microsoftAccessToken': 'microsoft-test-token'});
+      expect(
+        request.data,
+        loadApiContractExample('institutional-auth-request.json'),
+      );
       expect(response.profile.affiliation, isA<NonStudentAffiliation>());
       expect(response.profile.email, isNull);
     },
   );
+
+  test('desserializa a resposta de estudante com curso informado', () async {
+    final body = loadApiContractExample(
+      'institutional-verification-student.json',
+    );
+    final api = IdentityApi(
+      createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
+    );
+
+    final response = await api.verifyInstitutionalIdentity(request: _request());
+
+    expect(response.profile.affiliation, isA<StudentAffiliation>());
+  });
 
   test('status diferente de 200 não é aceito como sucesso', () async {
     final adapter = FakeHttpAdapter(
@@ -81,7 +98,7 @@ void main() {
   );
 
   test('resposta de erro fica disponível para o adaptador do módulo', () async {
-    final body = backendErrorBody('unknown_institution');
+    final body = loadApiContractExample('api-error-unknown-institution.json');
     final api = IdentityApi(
       createTestDio(
         FakeHttpAdapter((_) => jsonTestResponse(body, status: 403)),

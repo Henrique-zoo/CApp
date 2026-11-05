@@ -1,0 +1,12 @@
+{
+  "profile": {
+    "microsoftObjectId": "00000000-0000-0000-0000-000000000002",
+    "name": null,
+    "email": null,
+    "affiliation": {
+      "type": "student",
+      "courseName": null
+    }
+  },
+  "expiresAt": "2026-10-22T12:00:00Z"
+}
