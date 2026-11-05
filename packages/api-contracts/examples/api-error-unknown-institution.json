@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "unknown_institution",
+    "message": "Sua instituição ainda não está cadastrada no CApp.",
+    "details": null
+  }
+}

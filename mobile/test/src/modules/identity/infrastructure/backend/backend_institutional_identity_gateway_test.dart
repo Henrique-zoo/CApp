@@ -90,39 +90,71 @@ void main() {
     },
   );
 
-  test('não estudante é sucesso com modelos próprios', () async {
-    final gateway = _gateway((options) {
-      expect(options.path, '/auth/institutional/verify');
-      expect(
-        (options.data as Map)['microsoftAccessToken'],
-        'microsoft-test-token',
-      );
-
-      return jsonTestResponse(backendInstitutionalAuthBody());
-    });
-    final result = await gateway.verify(
-      microsoftAccessToken: 'microsoft-test-token',
-    );
-
-    expect(
-      result.verification!.profile.affiliation,
+  for (final scenario in [
+    (
+      'non-student',
+      '00000000-0000-0000-0000-000000000001',
+      'Pessoa Exemplo',
+      null,
       const NonStudentAffiliation(),
-    );
-    expect(result.verification!.profile.name, 'Pessoa Exemplo');
-    expect(
-      result.verification!.profile.microsoftObjectId,
-      const UuidValue.raw('00000000-0000-0000-0000-000000000001'),
-    );
-    expect(
-      result.verification!.institution,
-      const InstitutionSummary(
-        id: UuidValue.raw('00000000-0000-0000-0000-000000000002'),
-        name: 'Instituição Exemplo',
-        acronym: 'IEX',
-      ),
-    );
-    expect(result.verification!.expiresAt, DateTime.utc(2026, 1, 1, 13));
-  });
+      'IEX',
+    ),
+    (
+      'student',
+      '00000000-0000-0000-0000-000000000001',
+      'Pessoa Exemplo',
+      'pessoa@instituicao.example',
+      const StudentAffiliation(courseName: 'Engenharia de Software'),
+      'IEX',
+    ),
+    (
+      'student-null-fields',
+      '00000000-0000-0000-0000-000000000002',
+      null,
+      null,
+      const StudentAffiliation(courseName: null),
+      null,
+    ),
+  ]) {
+    test('converte todos os campos do exemplo ${scenario.$1}', () async {
+      final body = loadApiContractExample(
+        'institutional-verification-${scenario.$1}.json',
+      );
+      final gateway = _gateway((options) {
+        expect(options.path, '/auth/institutional/verify');
+        expect(
+          (options.data as Map)['microsoftAccessToken'],
+          'microsoft-test-token',
+        );
+
+        return jsonTestResponse(body);
+      });
+
+      final result = await gateway.verify(
+        microsoftAccessToken: 'microsoft-test-token',
+      );
+      final proof = result.verification!;
+
+      expect(
+        result.user.id,
+        const UuidValue.raw('00000000-0000-0000-0000-000000000010'),
+      );
+      expect(result.user.status, InternalUserStatus.incomplete);
+      expect(proof.profile.microsoftObjectId, UuidValue.raw(scenario.$2));
+      expect(proof.profile.name, scenario.$3);
+      expect(proof.profile.email, scenario.$4);
+      expect(proof.profile.affiliation, scenario.$5);
+      expect(
+        proof.institution,
+        InstitutionSummary(
+          id: const UuidValue.raw('00000000-0000-0000-0000-000000000002'),
+          name: 'Instituição Exemplo',
+          acronym: scenario.$6,
+        ),
+      );
+      expect(proof.expiresAt, DateTime.utc(2026, 10, 22, 12));
+    });
+  }
 
   test('preserva instituição sem sigla no perfil estudantil', () async {
     final gateway = _gateway(

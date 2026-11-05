@@ -58,6 +58,65 @@ por esta política.
 A versão de build do Flutter (`+N`) faz parte da identificação do aplicativo,
 mas não altera a versão SemVer do contrato.
 
+## Exemplos compartilhados e semântica dos campos
+
+Os exemplos JSON em `examples/` são a referência compartilhada entre a
+documentação OpenAPI e os testes automatizados do backend e do aplicativo.
+O `openapi.yaml` os referencia por `externalValue`; os testes Rust leem os
+mesmos arquivos em tempo de compilação, e os testes Flutter os carregam
+durante a execução.
+
+Os exemplos atuais cobrem:
+
+| Arquivo | Comportamento representado |
+| --- | --- |
+| `institutional-auth-request.json` | Corpo da requisição de verificação institucional. |
+| `institutional-verification-student.json` | Estudante com nome, e-mail e curso informados. |
+| `institutional-verification-student-null-fields.json` | Estudante com nome, e-mail e curso nulos. |
+| `institutional-verification-non-student.json` | Pessoa sem participação no grupo estudantil. |
+| `api-error-unknown-institution.json` | Erro público para instituição não cadastrada. |
+
+Os valores desses arquivos são fictícios e destinados exclusivamente à
+documentação e aos testes. Não devem conter tokens reais, credenciais ou
+dados pessoais.
+
+### Campos obrigatórios, nulos e ausentes
+
+A presença de uma propriedade e a possibilidade de seu valor ser `null`
+são regras distintas do contrato:
+
+- `microsoftAccessToken` é obrigatório e deve ser uma string não vazia.
+  O backend não aplica `trim` antes de consultar o provedor.
+- `profile.name` e `profile.email` devem estar presentes na resposta, mas
+  aceitam string ou `null`.
+- Quando `affiliation.type` é `student`, `courseName` deve estar presente,
+  mas aceita string ou `null`.
+- Quando `affiliation.type` é `nonStudent`, `courseName` não é retornado.
+- `expiresAt` é obrigatório e representa a expiração da evidência institucional
+  em data e hora RFC 3339.
+
+Portanto, substituir um campo nulo por um campo omitido não é necessariamente
+uma alteração compatível. A propriedade `required` e a nulabilidade precisam
+ser avaliadas separadamente ao modificar os schemas.
+
+### Envelope e códigos de erro
+
+As respostas de erro da operação institucional utilizam o envelope
+`{"error":{"code":"...","message":"...","details":null}}`.
+
+- `error.code` é o identificador estável para tratamento programático.
+  Clientes não devem depender do texto de `message` para classificar erros.
+- `error.message` é uma mensagem pública legível e não deve expor diagnósticos
+  internos, credenciais ou informações sensíveis.
+- `error.details` deve estar presente no envelope. Nos erros atualmente
+  documentados para a verificação institucional, seu valor é `null`.
+
+Códigos conhecidos devem receber o tratamento correspondente à sua semântica.
+Quando um cliente receber um código ainda desconhecido, deve evitar falhar
+na desserialização do envelope e aplicar um tratamento seguro baseado no
+status HTTP ou em uma falha genérica apropriada. A inclusão de um novo código
+deve ser acompanhada de testes e atualização da documentação.
+
 ## Compatibilidade e suporte
 
 Enquanto uma versão do aplicativo estiver registrada como suportada, o
@@ -90,16 +149,20 @@ Todo PR que alterar o contrato deve:
 
 1. Atualizar `openapi.yaml` junto da implementação ou do cliente afetado.
 2. Atualizar `info.version` de acordo com a política SemVer.
-3. Manter exemplos coerentes com os schemas documentados.
+3. Atualizar os arquivos em `examples/` quando os exemplos ou formatos
+   compartilhados forem afetados, mantendo-os coerentes com os schemas.
 4. Considerar todas as versões do aplicativo registradas como suportadas.
 5. Incluir ou atualizar testes do backend e do aplicativo quando o protocolo
-   ou os DTOs forem modificados.
+   ou os DTOs forem modificados. Os testes devem consumir os exemplos
+   compartilhados, em vez de manter cópias independentes dos mesmos JSONs.
 6. Descrever no PR o impacto sobre os consumidores e a estratégia de migração,
    quando aplicável.
 
-O workflow valida a especificação com Redocly e compara a versão proposta com
-a especificação da branch de destino usando OASDiff. As alterações no arquivo
-OpenAPI também acionam os workflows de testes do backend e do aplicativo.
+O workflow valida os arquivos JSON referenciados por `externalValue`,
+valida a especificação com Redocly e compara a versão proposta com a
+especificação da branch de destino usando OASDiff. Alterações em qualquer
+arquivo de `packages/api-contracts/` também acionam os workflows de testes
+do backend e do aplicativo.
 
 A comparação de especificações identifica mudanças incompatíveis declaradas
 no OpenAPI; ela não substitui testes da implementação real. Os testes do

@@ -6,6 +6,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -25,57 +26,69 @@ Dio createTestDio(FakeHttpAdapter adapter) {
   return dio;
 }
 
-/// Resposta institucional do protocolo, independente dos modelos da aplicação.
+/// Carrega um exemplo JSON compartilhado com a especificação OpenAPI.
 ///
-/// [student] seleciona a variante estudantil, preservando curso nulo.
-/// [institutionAcronym] controla a sigla opcional sem omitir a propriedade.
+/// Os testes Flutter são executados a partir do diretório `mobile`.
+Map<String, Object?> loadApiContractExample(String filename) {
+  final path = '../packages/api-contracts/examples/$filename';
+  final file = File(path);
+
+  if (!file.existsSync()) {
+    throw StateError('Exemplo de contrato não encontrado: $path');
+  }
+
+  final decoded = jsonDecode(file.readAsStringSync());
+
+  if (decoded is! Map<String, dynamic>) {
+    throw FormatException('O exemplo de contrato não é um objeto JSON: $path');
+  }
+
+  return Map<String, Object?>.from(decoded);
+}
+
+/// Evidência do protocolo extraída do exemplo de resposta compartilhado.
+///
+/// [student] seleciona o exemplo estudantil com curso nulo.
+/// [institutionAcronym] permite variar a sigla sem omitir a propriedade.
 Map<String, Object?> backendVerificationBody({
   bool student = false,
   String? institutionAcronym = 'IEX',
-}) => {
-  'profile': {
-    'microsoftObjectId': '00000000-0000-0000-0000-000000000001',
-    'name': 'Pessoa Exemplo',
-    'email': null,
-    'affiliation': student
-        ? <String, Object?>{'type': 'student', 'courseName': null}
-        : <String, Object?>{'type': 'nonStudent'},
-  },
-  'institution': <String, Object?>{
-    'id': '00000000-0000-0000-0000-000000000002',
-    'name': 'Instituição Exemplo',
-    'acronym': institutionAcronym,
-  },
-  'expiresAt': '2026-01-01T13:00:00Z',
-};
+}) => Map<String, Object?>.from(
+  backendInstitutionalAuthBody(
+        student: student,
+        institutionAcronym: institutionAcronym,
+      )['verification']!
+      as Map,
+);
 
-/// Envelope público de erro com código controlado e sem diagnósticos internos.
-/// Conta e evidência do contrato de verificação institucional.
+/// Conta e evidência carregadas do mesmo exemplo usado pelo OpenAPI e pelo Rust.
 Map<String, Object?> backendInstitutionalAuthBody({
   bool student = false,
   String? institutionAcronym = 'IEX',
-}) => {
-  'user': {
-    'id': '00000000-0000-0000-0000-000000000010',
-    'status': 'incomplete',
-    'nickname': null,
-    'email': null,
-    'currentSemester': null,
-    'institutionEntrySemester': null,
-  },
-  'verification': backendVerificationBody(
-    student: student,
-    institutionAcronym: institutionAcronym,
-  ),
-};
+}) {
+  final body = loadApiContractExample(
+    student
+        ? 'institutional-verification-student-null-fields.json'
+        : 'institutional-verification-non-student.json',
+  );
+  final proof = body['verification']! as Map;
+  final institution = proof['institution']! as Map;
 
-Map<String, Object?> backendErrorBody(String code) => {
-  'error': {
-    'code': code,
-    'message': 'Mensagem pública do backend',
-    'details': null,
-  },
-};
+  institution['acronym'] = institutionAcronym;
+
+  return body;
+}
+
+/// Envelope de erro compartilhado, com código variável para testar a tradução.
+Map<String, Object?> backendErrorBody(String code) {
+  final body = loadApiContractExample('api-error-unknown-institution.json');
+  final error = Map<String, Object?>.from(body['error']! as Map);
+
+  error['code'] = code;
+  error['message'] = 'Mensagem pública do backend';
+
+  return {'error': error};
+}
 
 /// Serializa [body] e identifica o conteúdo como JSON para os transformadores.
 ///

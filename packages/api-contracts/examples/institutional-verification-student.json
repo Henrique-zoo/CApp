@@ -1,0 +1,30 @@
+{
+  "user": {
+    "id": "00000000-0000-0000-0000-000000000010",
+    "status": "incomplete",
+    "nickname": null,
+    "email": null,
+    "currentSemester": null,
+    "institutionEntrySemester": null,
+    "name": null,
+    "institutionalEmail": null,
+    "courseName": null
+  },
+  "verification": {
+    "profile": {
+      "microsoftObjectId": "00000000-0000-0000-0000-000000000001",
+      "name": "Pessoa Exemplo",
+      "email": "pessoa@instituicao.example",
+      "affiliation": {
+        "type": "student",
+        "courseName": "Engenharia de Software"
+      }
+    },
+    "expiresAt": "2026-10-22T12:00:00Z",
+    "institution": {
+      "id": "00000000-0000-0000-0000-000000000002",
+      "name": "Instituição Exemplo",
+      "acronym": "IEX"
+    }
+  }
+}
