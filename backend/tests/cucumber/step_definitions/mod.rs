@@ -17,6 +17,7 @@ mod provisionamento_usuario;
 mod publicacao_institucional;
 mod publicacao_noticias;
 mod shared_steps;
+mod sincronizacao_academica;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///
