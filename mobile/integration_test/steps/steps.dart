@@ -10,6 +10,7 @@ import 'management/role_deletion_steps.dart';
 import 'materials/material_viewing_steps.dart';
 import 'news/news_publication_steps.dart';
 import 'news/news_viewing_steps.dart';
+import 'occurrences/occurrence_registration_steps.dart';
 import 'provisioning/user_provisioning_steps.dart';
 import 'shared/access_control_steps.dart';
 import 'shared/navigation_steps.dart';
@@ -29,6 +30,7 @@ final stepDefinitions = <StepDefinition>[
   ...navigationSteps,
   ...newsPublicationSteps,
   ...newsViewingSteps,
+  ...occurrenceRegistrationSteps,
   ...roleDeletionSteps,
   ...sessionSteps,
   ...sharedSteps,
