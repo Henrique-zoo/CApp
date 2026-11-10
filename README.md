@@ -194,6 +194,12 @@ As convenções para os cenários compartilhados são:
   regra ou cenário e são herdadas pelos cenários contidos. O backend exclui
   `@pending_backend`; o mobile registra `@pending_mobile` como teste ignorado.
   Remova a tag de cada plataforma quando a implementação do teste estiver pronta.
+- Identifique entregas evolutivas com tags como `@v1` e `@v2`, na regra ou no
+  cenário, ou em arquivos separados quando isso facilitar a leitura. Essas tags
+  permitem selecionar versões pelos filtros da suíte; não suspendem a execução
+  automaticamente nem substituem `@pending_backend` e `@pending_mobile`. Evite
+  colocar `@v1` na feature se ela também contiver cenários de `@v2`, pois as tags
+  são herdadas.
 - Registre as definições de steps também nas entregas de especificação. Enquanto
   a automação estiver pendente, use `pending_step(...)` no backend e
   `pendingStep(...)` no mobile, mantendo as tags de pendência. Registre cada

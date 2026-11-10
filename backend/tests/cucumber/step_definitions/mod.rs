@@ -23,6 +23,7 @@ mod demandas_espaco_fisico;
 mod exclusao_de_cargos;
 mod integrantes_da_gestao;
 mod organizacao_materiais;
+mod prestacao_de_contas;
 mod provisionamento_usuario;
 mod publicacao_institucional;
 mod publicacao_noticias;
