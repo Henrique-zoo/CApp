@@ -18,6 +18,7 @@ mod publicacao_institucional;
 mod publicacao_noticias;
 mod shared_steps;
 mod sincronizacao_academica;
+mod visualizacao_noticias;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///
