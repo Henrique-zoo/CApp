@@ -2,6 +2,7 @@ import '../support/step_registry.dart';
 import 'academic_identity/academic_data_steps.dart';
 import 'authentication/authentication_steps.dart';
 import 'demands/demand_creation_steps.dart';
+import 'demands/demand_tracking_steps.dart';
 import 'elections/voting_steps.dart';
 import 'events/event_browsing_steps.dart';
 import 'events/event_capacity_steps.dart';
@@ -30,6 +31,7 @@ final stepDefinitions = <StepDefinition>[
   ...authenticationSteps,
   ...defaultRolesSteps,
   ...demandCreationSteps,
+  ...demandTrackingSteps,
   ...eventBrowsingSteps,
   ...eventCapacitySteps,
   ...eventManagementSteps,
