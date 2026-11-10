@@ -1,4 +1,11 @@
-//! Espaço reservado para entidades do módulo de Centros Acadêmicos.
+//! Entidades do módulo de Centros Acadêmicos.
 //!
-//! Ainda não define tipos. Os modelos de domínio deverão expressar identidade
-//! e estado do negócio sem depender dos formatos HTTP ou SQL.
+//! Reúne os modelos de domínio do Centro Acadêmico, seu ciclo de vida,
+//! invariantes e regras de integridade estrutural.
+
+pub mod academic_center;
+
+pub use academic_center::{
+    AcademicCenter, AcademicCenterError, AcademicCenterStatus, CACC_DIDACTIC_ID, CAER_DIDACTIC_ID,
+    MAX_ACRONYM_LENGTH, MAX_DESCRIPTION_LENGTH, MAX_NAME_LENGTH,
+};
