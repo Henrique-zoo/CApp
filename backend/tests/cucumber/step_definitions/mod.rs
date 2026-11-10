@@ -19,6 +19,7 @@ mod criacao_demandas;
 mod criacao_edicao_eventos;
 mod exclusao_de_cargos;
 mod integrantes_da_gestao;
+mod organizacao_materiais;
 mod provisionamento_usuario;
 mod publicacao_institucional;
 mod publicacao_noticias;

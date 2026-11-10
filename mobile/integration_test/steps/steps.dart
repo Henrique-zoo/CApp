@@ -12,6 +12,7 @@ import 'management/default_roles_steps.dart';
 import 'management/management_members_steps.dart';
 import 'management/multi_ca_context_steps.dart';
 import 'management/role_deletion_steps.dart';
+import 'materials/material_organization_steps.dart';
 import 'materials/material_viewing_steps.dart';
 import 'mentoring/manual_pairing_steps.dart';
 import 'news/news_publication_steps.dart';
@@ -36,6 +37,7 @@ final stepDefinitions = <StepDefinition>[
   ...institutionalPublicationSteps,
   ...managementMembersSteps,
   ...manualPairingSteps,
+  ...materialOrganizationSteps,
   ...materialViewingSteps,
   ...multiCaContextSteps,
   ...navigationSteps,
