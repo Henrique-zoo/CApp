@@ -6,6 +6,7 @@
 //! Steps técnicos de prontidão e isolamento pertencem ao alvo
 //! `bdd_infrastructure`, sem serem registrados nesta suíte.
 
+mod apadrinhamento;
 mod associacao_dados_academicos;
 mod autenticacao_institucional;
 mod cargos_padrao_ca;
