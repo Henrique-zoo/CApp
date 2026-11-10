@@ -1,197 +1,66 @@
 # language: pt
-# Specificação documental dos cenários de prestação de contas (#210).
-# Automação backend/mobile permanece pendente até a issue de implementação.
-# @backend e @mobile indicam onde o cenário deve ser verificado.
-@pending_backend @pending_mobile
-Funcionalidade: Prestação de contas e transparência financeira do Centro Acadêmico
-  Como estudante ou membro da gestão de um Centro Acadêmico
-  Quero registrar, retificar e consultar receitas, despesas e demonstrativos financeiros
-  Para garantir a integridade, transparência e controle social dos recursos da entidade
+
+# Referência: Relatório de Features, seções 10.4 e 2.4.
+# Primeira entrega: receitas, despesas, documentos e consulta, sem integração bancária.
+# @v1 identifica a entrega; @pending_backend e @pending_mobile suspendem a automação.
+@v1 @backend @mobile @pending_backend @pending_mobile
+Funcionalidade: Prestação de contas do Centro Acadêmico
+  Como estudante ou membro autorizado da gestão
+  Quero consultar ou publicar receitas, despesas e documentos financeiros
+  Para acompanhar o uso dos recursos do CA
 
   Contexto:
-    Dado que o "Centro Acadêmico de Ciência da Computação" está ativo no CApp
+    Dado que o "Centro Acadêmico de Ciência da Computação" é o CA ativo
 
-  # ---------------------------------------------------------------------------
-  # 1. Cadastro e Publicação de Informações Financeiras Manuais
-  # ---------------------------------------------------------------------------
-  Regra: Apenas membros da gestão com permissão explícita podem publicar lançamentos financeiros
+  Regra: Publicar a prestação de contas exige a permissão correspondente nesse CA
 
-    Cenário: Membro da gestão com permissão financeira publica uma receita manual com comprovante
-      Dado que o usuário é um membro da gestão com permissão explícita de prestação de contas
-      Quando ele cadastra um lançamento financeiro manual com os seguintes dados:
-        | tipo de transação | Receita                                 |
-        | título            | Venda de Ingressos da Semana Acadêmica  |
-        | valor             | 1500.00                                 |
-        | data              | 2026-10-01                              |
-        | categoria         | Eventos Acadêmicos                      |
-        | comprovante       | relatorio_vendas_lote1.pdf              |
-      Então o lançamento financeiro é publicado com sucesso
-      E o saldo consolidado do Centro Acadêmico reflete a nova receita de "1500.00"
+    Esquema do Cenário: Publicar um lançamento manual com documento financeiro
+      Dado que integro a gestão do CA ativo
+      E possuo a permissão "Publicar a prestação de contas" nesse CA
+      Quando registro uma "<tipo>" com descrição "<descricao>", valor "<valor>" e documento "<documento>"
+      Então o lançamento fica disponível na prestação de contas do CA ativo
+      E seu tipo, descrição, valor e documento ficam associados ao lançamento
 
-    Cenário: Membro da gestão com permissão financeira publica uma despesa manual com comprovante
-      Dado que o usuário é um membro da gestão com permissão explícita de prestação de contas
-      Quando ele cadastra um lançamento financeiro manual com os seguintes dados:
-        | tipo de transação | Despesa                                 |
-        | título            | Compra de Suprimentos para a Sala do CA |
-        | valor             | 350.50                                  |
-        | data              | 2026-10-02                              |
-        | categoria         | Manutenção e Infraestrutura             |
-        | comprovante       | nota_fiscal_suprimentos_089.pdf         |
-      Então o lançamento financeiro é publicado com sucesso
-      E o saldo consolidado do Centro Acadêmico deduz a nova despesa de "350.50"
+      Exemplos:
+        | tipo    | descricao              | valor   | documento        |
+        | receita | Venda de ingressos     | 1500.00 | vendas.pdf       |
+        | despesa | Compra de suprimentos  | 350.50  | nota_fiscal.pdf  |
 
-    Cenário: Estudante comum tenta publicar registro de prestação de contas
-      Dado que o usuário é um estudante regularmente matriculado sem cargo financeiro na gestão
-      Quando ele tenta cadastrar um novo lançamento de despesa no valor de "200.00"
-      Então a publicação é recusada por ausência de permissão financeira
-      E nenhum lançamento é incluído nos registros contábeis do Centro Acadêmico
+    Cenário: Integrante sem a permissão não publica lançamentos
+      Dado que integro a gestão do CA ativo
+      E não possuo a permissão "Publicar a prestação de contas" nesse CA
+      Quando tento registrar um lançamento financeiro nesse CA
+      Então a publicação é recusada por falta de permissão
+      E nenhum lançamento financeiro é criado
 
-    Cenário: Membro da gestão sem permissão explícita tenta publicar registro financeiro
-      Dado que o usuário é um membro da gestão ativa, mas não possui permissão de prestação de contas
-      Quando ele tenta publicar um lançamento financeiro
-      Então a publicação é recusada indicando falta de autorização para movimentação contábil
-      E o balanço financeiro permanece inalterado
+    Cenário: Permissão financeira em outro CA não autoriza publicação no CA ativo
+      Dado que possuo a permissão "Publicar a prestação de contas" somente em outro CA
+      Quando tento registrar um lançamento financeiro no CA ativo
+      Então a publicação é recusada por falta de permissão
+      E a prestação de contas do CA ativo permanece inalterada
 
-  # ---------------------------------------------------------------------------
-  # 1.1 Validação de dados do lançamento
-  # ---------------------------------------------------------------------------
-  Regra: Lançamentos manuais exigem campos obrigatórios e valor monetário estritamente positivo
+  Regra: Usuários podem consultar a prestação de contas do CA ativo
 
-    Cenário: Publicação é recusada quando o valor é zero ou negativo
-      Dado que o usuário é um membro da gestão com permissão explícita de prestação de contas
-      Quando ele cadastra um lançamento financeiro manual com os seguintes dados:
-        | tipo de transação | Despesa                        |
-        | título            | Compra inválida                |
-        | valor             | 0.00                           |
-        | data              | 2026-10-03                     |
-        | categoria         | Manutenção e Infraestrutura    |
-        | comprovante       | nota_invalida.pdf              |
-      Então a publicação é recusada por dados inválidos do lançamento
-      E nenhum lançamento é incluído nos registros contábeis do Centro Acadêmico
+    Cenário: Consultar receitas e despesas publicadas
+      Dado que estou autenticado no CApp
+      E o CA ativo publicou receitas e despesas
+      Quando consulto sua prestação de contas
+      Então visualizo os lançamentos publicados com seus tipos, descrições e valores
 
-    Cenário: Publicação é recusada quando faltam campos obrigatórios
-      Dado que o usuário é um membro da gestão com permissão explícita de prestação de contas
-      Quando ele cadastra um lançamento financeiro manual com os seguintes dados:
-        | tipo de transação | Receita                        |
-        | título            |                                |
-        | valor             | 100.00                         |
-        | data              |                                |
-        | categoria         |                                |
-        | comprovante       |                                |
-      Então a publicação é recusada por dados inválidos do lançamento
-      E nenhum lançamento é incluído nos registros contábeis do Centro Acadêmico
+    Cenário: Acessar o documento de um lançamento
+      Dado que estou autenticado no CApp
+      E existe um lançamento publicado com um documento financeiro anexado
+      Quando consulto o documento desse lançamento
+      Então o documento fica disponível para consulta
 
-    Cenário: Publicação é recusada quando a data do lançamento é inválida
-      Dado que o usuário é um membro da gestão com permissão explícita de prestação de contas
-      Quando ele cadastra um lançamento financeiro manual com os seguintes dados:
-        | tipo de transação | Receita                        |
-        | título            | Doação pontual                 |
-        | valor             | 50.00                          |
-        | data              | 31-02-2026                     |
-        | categoria         | Patrocínios e Doações          |
-        | comprovante       | comprovante_doacao.pdf         |
-      Então a publicação é recusada por dados inválidos do lançamento
-      E nenhum lançamento é incluído nos registros contábeis do Centro Acadêmico
+    Cenário: Trocar o contexto altera a prestação de contas consultada
+      Dado que estou autenticado no CApp
+      E existem lançamentos publicados em dois CAs diferentes
+      Quando altero o CA ativo e consulto sua prestação de contas
+      Então visualizo somente os lançamentos publicados pelo novo CA ativo
 
-  # ---------------------------------------------------------------------------
-  # 2. Retificação e Atualização de Lançamentos Financeiros
-  # ---------------------------------------------------------------------------
-  Regra: Retificações em lançamentos contábeis exigem autorização e preservam histórico de justificativa
-
-    Cenário: Gestor autorizado retifica valor de lançamento publicado
-      Dado que existe um lançamento de despesa publicado com o identificador "DESP-001" no valor de "120.00"
-      E que o usuário é um membro da gestão com permissão explícita de prestação de contas
-      Quando ele retifica o lançamento "DESP-001" alterando o valor para "150.00" com a justificativa "Ajuste conforme nota fiscal corrigida"
-      Então o lançamento "DESP-001" é atualizado para o valor de "150.00"
-      E o histórico de retificações registra a alteração com justificativa, data e autor
-      E o saldo consolidado do Centro Acadêmico reflete a despesa retificada de "150.00"
-
-    Cenário: Tentativa de retificar lançamento inexistente
-      Dado que o usuário é um membro da gestão com permissão explícita de prestação de contas
-      Quando ele tenta retificar o lançamento com identificador "DESP-999" que não existe
-      Então a operação de retificação é recusada informando que o lançamento não foi encontrado
-
-    Cenário: Usuário não autorizado tenta retificar lançamento publicado
-      Dado que existe um lançamento de receita publicado com o identificador "REC-001" no valor de "800.00"
-      E que o usuário é um estudante sem permissão financeira
-      Quando ele tenta retificar o valor do lançamento "REC-001"
-      Então a alteração é bloqueada por falta de permissão administrativa
-      E o valor do lançamento "REC-001" permanece "800.00"
-
-    Cenário: Retificação sem justificativa é recusada
-      Dado que existe um lançamento de despesa publicado com o identificador "DESP-002" no valor de "90.00"
-      E que o usuário é um membro da gestão com permissão explícita de prestação de contas
-      Quando ele tenta retificar o lançamento "DESP-002" alterando o valor para "95.00" sem justificativa
-      Então a retificação é recusada por ausência de justificativa obrigatória
-      E o valor do lançamento "DESP-002" permanece "90.00"
-      E o saldo consolidado do Centro Acadêmico reflete a despesa retificada de "90.00"
-
-    Cenário: Gestor autorizado retifica metadados de lançamento publicado
-      Dado que existe um lançamento de despesa publicado com o identificador "DESP-003" no valor de "200.00"
-      E que o usuário é um membro da gestão com permissão explícita de prestação de contas
-      Quando ele retifica o lançamento "DESP-003" com os seguintes metadados e a justificativa "Correção de classificação orçamentária":
-        | título      | Compra de material de limpeza revisada |
-        | categoria    | Limpeza e Conservação                  |
-        | data         | 2026-09-15                             |
-        | comprovante  | nf_limpeza_corrigida.pdf               |
-      Então o lançamento "DESP-003" exibe os metadados retificados
-      E o histórico de retificações registra a alteração com justificativa, data e autor
-      E o valor do lançamento "DESP-003" permanece "200.00"
-
-    Cenário: Gestor autorizado cancela lançamento publicado com justificativa
-      Dado que existe um lançamento de despesa publicado com o identificador "DESP-004" no valor de "75.00"
-      E que o usuário é um membro da gestão com permissão explícita de prestação de contas
-      Quando ele cancela o lançamento "DESP-004" com a justificativa "Lançamento duplicado"
-      Então o lançamento "DESP-004" fica cancelado
-      E o lançamento "DESP-004" deixa de compor o saldo consolidado
-      E o histórico de cancelamento registra a justificativa, data e autor
-
-  # ---------------------------------------------------------------------------
-  # 3. Consulta Pública, Demonstrativos e Comprovantes
-  # ---------------------------------------------------------------------------
-  Regra: Balanços consolidados, demonstrativos e comprovantes são públicos para qualquer pessoa autenticada no CApp
-
-    Cenário: Estudante consulta balanço consolidado e demonstrativo financeiro
-      Dado que o Centro Acadêmico possui lançamentos publicados contendo receitas de "3000.00" e despesas de "1200.00"
-      Quando qualquer estudante consulta o demonstrativo financeiro do Centro Acadêmico
-      Então ele visualiza o total de receitas acumuladas de "3000.00"
-      E visualiza o total de despesas acumuladas de "1200.00"
-      E visualiza o saldo atual consolidado de "1800.00"
-
-    Cenário: Estudante visualiza detalhes e comprovante de um lançamento financeiro
-      Dado que existe um lançamento publicado com comprovante "comprovante_reforma_lab.pdf" anexado
-      Quando um estudante consulta os detalhes desse lançamento
-      Então o comprovante anexado é disponibilizado para visualização pública e download
-      E todos os metadados como categoria, data e justificativa são exibidos com transparência
-
-    Cenário: Estudante de outro Centro Acadêmico consulta a prestação de contas
-      Dado que o Centro Acadêmico possui lançamentos publicados contendo receitas de "500.00" e despesas de "200.00"
-      E que o usuário é um estudante autenticado vinculado a outro Centro Acadêmico
-      Quando ele consulta o demonstrativo financeiro do "Centro Acadêmico de Ciência da Computação"
-      Então ele visualiza o total de receitas acumuladas de "500.00"
-      E visualiza o total de despesas acumuladas de "200.00"
-      E visualiza o saldo atual consolidado de "300.00"
-      E as despesas publicadas ficam disponíveis para consulta
-
-    Cenário: Centro Acadêmico sem lançamentos exibe demonstrativo vazio
-      Dado que o Centro Acadêmico não possui lançamentos financeiros publicados
-      Quando qualquer estudante consulta o demonstrativo financeiro do Centro Acadêmico
-      Então ele visualiza o total de receitas acumuladas de "0.00"
-      E visualiza o total de despesas acumuladas de "0.00"
-      E visualiza o saldo atual consolidado de "0.00"
-      E a lista de lançamentos financeiros publicados está vazia
-
-    Cenário: Lançamento em rascunho não aparece na consulta pública nem no saldo
-      Dado que o usuário é um membro da gestão com permissão explícita de prestação de contas
-      Quando ele salva um lançamento financeiro em rascunho com os seguintes dados:
-        | tipo de transação | Despesa                     |
-        | título            | Compra ainda não publicada  |
-        | valor             | 40.00                       |
-        | data              | 2026-10-04                  |
-        | categoria         | Administrativo              |
-        | comprovante       | rascunho_compra.pdf         |
-      Então o lançamento financeiro fica salvo como rascunho
-      Quando qualquer estudante consulta o demonstrativo financeiro do Centro Acadêmico
-      Então ele visualiza o total de despesas acumuladas de "0.00"
-      E visualiza o saldo atual consolidado de "0.00"
-      E a lista de lançamentos financeiros publicados está vazia
+    Cenário: Informar ausência de lançamentos publicados
+      Dado que estou autenticado no CApp
+      E o CA ativo não possui lançamentos financeiros publicados
+      Quando consulto sua prestação de contas
+      Então a consulta informa que não existem lançamentos publicados
