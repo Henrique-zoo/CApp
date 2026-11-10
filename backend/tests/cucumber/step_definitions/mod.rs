@@ -6,12 +6,22 @@
 //! Steps técnicos de prontidão e isolamento pertencem ao alvo
 //! `bdd_infrastructure`, sem serem registrados nesta suíte.
 
+mod associacao_dados_academicos;
 mod autenticacao_institucional;
+mod cargos_padrao_ca;
+mod consulta_inscricao_eventos;
 mod consultas_estudantis;
 mod contexto_multi_ca;
+mod exclusao_de_cargos;
+mod integrantes_da_gestao;
+mod provisionamento_usuario;
 mod publicacao_institucional;
+mod publicacao_noticias;
 mod registro_ocorrencias;
 mod shared_steps;
+mod sincronizacao_academica;
+mod visualizacao_materiais;
+mod visualizacao_noticias;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///
