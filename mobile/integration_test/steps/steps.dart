@@ -5,6 +5,7 @@ import 'governance/institutional_publication_steps.dart';
 import 'management/default_roles_steps.dart';
 import 'management/management_members_steps.dart';
 import 'management/multi_ca_context_steps.dart';
+import 'management/role_deletion_steps.dart';
 import 'provisioning/user_provisioning_steps.dart';
 import 'shared/access_control_steps.dart';
 import 'shared/navigation_steps.dart';
@@ -20,6 +21,7 @@ final stepDefinitions = <StepDefinition>[
   ...managementMembersSteps,
   ...multiCaContextSteps,
   ...navigationSteps,
+  ...roleDeletionSteps,
   ...sessionSteps,
   ...sharedSteps,
   ...userProvisioningSteps,
