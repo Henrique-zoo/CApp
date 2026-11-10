@@ -13,6 +13,7 @@ mod consulta_faq;
 mod consulta_inscricao_eventos;
 mod consultas_estudantis;
 mod contexto_multi_ca;
+mod criacao_demandas;
 mod exclusao_de_cargos;
 mod integrantes_da_gestao;
 mod provisionamento_usuario;

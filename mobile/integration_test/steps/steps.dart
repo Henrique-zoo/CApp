@@ -1,6 +1,7 @@
 import '../support/step_registry.dart';
 import 'academic_identity/academic_data_steps.dart';
 import 'authentication/authentication_steps.dart';
+import 'demands/demand_creation_steps.dart';
 import 'events/event_browsing_steps.dart';
 import 'faq/faq_consultation_steps.dart';
 import 'governance/institutional_publication_steps.dart';
@@ -23,6 +24,7 @@ final stepDefinitions = <StepDefinition>[
   ...accessControlSteps,
   ...authenticationSteps,
   ...defaultRolesSteps,
+  ...demandCreationSteps,
   ...eventBrowsingSteps,
   ...faqConsultationSteps,
   ...institutionalPublicationSteps,
