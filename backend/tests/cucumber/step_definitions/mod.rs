@@ -16,6 +16,7 @@ mod consulta_inscricao_eventos;
 mod consultas_estudantis;
 mod contexto_multi_ca;
 mod controle_vagas_eventos;
+mod criacao_centro_academico;
 mod criacao_demandas;
 mod criacao_edicao_eventos;
 mod demandas_espaco_fisico;
