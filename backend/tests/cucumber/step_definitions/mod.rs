@@ -26,6 +26,7 @@ mod shared_steps;
 mod sincronizacao_academica;
 mod visualizacao_materiais;
 mod visualizacao_noticias;
+mod votacao;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.
 ///
