@@ -15,6 +15,7 @@ mod consultas_estudantis;
 mod contexto_multi_ca;
 mod controle_vagas_eventos;
 mod criacao_demandas;
+mod criacao_edicao_eventos;
 mod exclusao_de_cargos;
 mod integrantes_da_gestao;
 mod provisionamento_usuario;

@@ -4,6 +4,7 @@ import 'authentication/authentication_steps.dart';
 import 'demands/demand_creation_steps.dart';
 import 'events/event_browsing_steps.dart';
 import 'events/event_capacity_steps.dart';
+import 'events/event_management_steps.dart';
 import 'faq/faq_consultation_steps.dart';
 import 'governance/institutional_publication_steps.dart';
 import 'management/default_roles_steps.dart';
@@ -28,6 +29,7 @@ final stepDefinitions = <StepDefinition>[
   ...demandCreationSteps,
   ...eventBrowsingSteps,
   ...eventCapacitySteps,
+  ...eventManagementSteps,
   ...faqConsultationSteps,
   ...institutionalPublicationSteps,
   ...managementMembersSteps,
