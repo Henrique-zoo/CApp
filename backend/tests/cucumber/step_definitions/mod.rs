@@ -11,6 +11,7 @@ mod associacao_dados_academicos;
 mod autenticacao_institucional;
 mod cargos_padrao_ca;
 mod consulta_faq;
+mod consulta_governanca;
 mod consulta_inscricao_eventos;
 mod consultas_estudantis;
 mod contexto_multi_ca;

@@ -8,6 +8,7 @@ import 'events/event_browsing_steps.dart';
 import 'events/event_capacity_steps.dart';
 import 'events/event_management_steps.dart';
 import 'faq/faq_consultation_steps.dart';
+import 'governance/governance_consultation_steps.dart';
 import 'governance/institutional_publication_steps.dart';
 import 'management/default_roles_steps.dart';
 import 'management/management_members_steps.dart';
@@ -36,6 +37,7 @@ final stepDefinitions = <StepDefinition>[
   ...eventCapacitySteps,
   ...eventManagementSteps,
   ...faqConsultationSteps,
+  ...governanceConsultationSteps,
   ...institutionalPublicationSteps,
   ...managementMembersSteps,
   ...manualPairingSteps,
