@@ -42,3 +42,5 @@ docker-compose.override.yaml
 docker-compose.override.yml
 
 *.local.code-workspace
+# Python virtual environments
+.venv/
