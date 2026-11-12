@@ -6,6 +6,9 @@ on:
       - "packages/api-contracts/**"
       - "backend/src/modules/**/api/**"
       - "backend/src/api/**"
+      - "mobile/lib/src/infrastructure/backend/**"
+      - "mobile/test/src/infrastructure/backend/**"
+      - "mobile/test/src/modules/identity/infrastructure/backend/**"
       - ".oasdiff-err-ignore.txt"
       - ".oasdiff.yaml"
       - ".oasdiff-levels.txt"
@@ -16,6 +19,9 @@ on:
       - "packages/api-contracts/**"
       - "backend/src/modules/**/api/**"
       - "backend/src/api/**"
+      - "mobile/lib/src/infrastructure/backend/**"
+      - "mobile/test/src/infrastructure/backend/**"
+      - "mobile/test/src/modules/identity/infrastructure/backend/**"
       - ".oasdiff-err-ignore.txt"
       - ".oasdiff.yaml"
       - ".oasdiff-levels.txt"
@@ -50,6 +56,13 @@ jobs:
           python -m pip install \
             --disable-pip-version-check \
             -r packages/api-contracts/requirements-ci.txt
+
+      - name: Test OpenAPI example validator
+        run: |
+          python -m unittest discover \
+            -s packages/api-contracts/scripts \
+            -p 'test_*.py' \
+            -v
 
       - name: Validate shared examples against OpenAPI schemas
         run: |
