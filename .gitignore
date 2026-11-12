@@ -44,3 +44,7 @@ docker-compose.override.yml
 *.local.code-workspace
 # Python virtual environments
 .venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]

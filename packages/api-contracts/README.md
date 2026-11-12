@@ -49,7 +49,7 @@ contrato contra a qual foi desenvolvida e testada.
 
 | Versão do contrato | Versão Flutter (`pubspec.yaml`) | Situação |
 | --- | --- | --- |
-| 1.0.0 | 1.0.0+1 | Linha de base atual do repositório; publicação em produção não registrada. |
+| 3.0.0 | 1.0.0+1 | Contrato atual com App Check e conta interna; publicação em produção não registrada. |
 
 A tabela deve ser atualizada ao preparar uma nova versão do aplicativo ou
 do contrato. Versões não registradas não recebem garantia de compatibilidade
@@ -57,6 +57,50 @@ por esta política.
 
 A versão de build do Flutter (`+N`) faz parte da identificação do aplicativo,
 mas não altera a versão SemVer do contrato.
+
+## Rastreabilidade dos endpoints implementados
+
+A especificação `openapi.yaml` documenta os endpoints HTTP atualmente
+registrados pelo backend. A tabela relaciona cada contrato à implementação,
+ao cliente Flutter e aos testes identificados, facilitando a análise de
+compatibilidade durante a evolução da API.
+
+| Endpoint | Implementação no backend | Cliente Flutter | Testes identificados |
+| --- | --- | --- | --- |
+| `GET /health` | `backend/src/api/router.rs` | `mobile/lib/src/infrastructure/backend/monitoring/monitoring_api.dart` | `mobile/test/src/infrastructure/backend/monitoring/monitoring_api_test.dart` |
+| `GET /ready` | `backend/src/api/router.rs` | `mobile/lib/src/infrastructure/backend/monitoring/monitoring_api.dart` | `mobile/test/src/infrastructure/backend/monitoring/monitoring_api_test.dart` |
+| `POST /auth/institutional/verify` | `backend/src/modules/identity/api/` | `mobile/lib/src/infrastructure/backend/identity/identity_api.dart` | `backend/src/modules/identity/api/tests.rs`, `backend/tests/integration/http/identity.rs`, `mobile/test/src/infrastructure/backend/identity/identity_api_test.dart` e `mobile/test/src/modules/identity/infrastructure/backend/backend_institutional_identity_gateway_test.dart` |
+| `GET /auth/session` | `backend/src/modules/identity/api/` | `mobile/lib/src/infrastructure/backend/identity/identity_api.dart` | `backend/tests/integration/http/identity.rs`, `mobile/test/src/infrastructure/backend/identity/identity_api_test.dart` e `mobile/test/src/modules/identity/application/account_session_test.dart` |
+| `PUT /users/me/profile` | `backend/src/modules/identity/api/` | `mobile/lib/src/infrastructure/backend/identity/identity_api.dart` | `backend/tests/integration/http/identity.rs`, `mobile/test/src/infrastructure/backend/identity/identity_api_test.dart` e `mobile/test/src/modules/identity/application/account_session_test.dart` |
+
+### Cobertura e validação de compatibilidade
+
+- **Saúde (`GET /health`):** o teste Flutter verifica a mensagem textual
+  definida no contrato e o caminho da requisição.
+- **Prontidão (`GET /ready`):** os testes Flutter verificam a requisição
+  pública e o tratamento de respostas HTTP que não confirmam prontidão.
+- **Identidade institucional (`POST /auth/institutional/verify`):**
+  os testes do backend exercitam a API de identidade; os testes Flutter
+  verificam requisições, respostas, erros e a conversão dos campos
+  recebidos, incluindo campos opcionais nulos.
+- **Conta interna:** os testes de restauração e conclusão do perfil verificam
+  a reutilização da evidência vigente, a conta incompleta e a ativação após
+  validar o perfil e a credencial interna.
+- **Exemplos OpenAPI:** o script
+  `packages/api-contracts/scripts/validate_examples.py` valida exemplos
+  externos (`externalValue`) e inline (`example` e `examples.*.value`)
+  contra os schemas correspondentes do OpenAPI 3.1.
+- **Alterações incompatíveis:** o workflow
+  `.github/workflows/api-contracts.yml` utiliza OASDiff para comparar
+  a especificação da pull request com o commit-base exato.
+
+Os testes HTTP específicos de `/health` e `/ready` no backend não foram
+identificados nesta revisão. Os testes Flutter e a validação dos exemplos
+não substituem testes de integração HTTP do backend.
+
+Esta matriz representa os endpoints atualmente implementados; novos
+endpoints devem ser acrescentados quando forem registrados e documentados
+no OpenAPI.
 
 ## Exemplos compartilhados e semântica dos campos
 
@@ -76,6 +120,12 @@ Os exemplos atuais cobrem:
 | `institutional-verification-non-student.json` | Pessoa sem participação no grupo estudantil. |
 | `api-error-unknown-institution.json` | Erro público para instituição não cadastrada. |
 
+As três respostas de verificação contêm o envelope atual: `user` com a conta
+incompleta e `verification` com perfil Microsoft, resumo da instituição e prazo.
+Os testes Rust comparam a serialização da evidência com `verification` dos
+exemplos; os testes Flutter desserializam a resposta completa e verificam os
+valores convertidos, incluindo os UUIDs e a sigla opcional da instituição.
+
 Os valores desses arquivos são fictícios e destinados exclusivamente à
 documentação e aos testes. Não devem conter tokens reais, credenciais ou
 dados pessoais.
@@ -87,13 +137,17 @@ são regras distintas do contrato:
 
 - `microsoftAccessToken` é obrigatório e deve ser uma string não vazia.
   O backend não aplica `trim` antes de consultar o provedor.
-- `profile.name` e `profile.email` devem estar presentes na resposta, mas
+- `user` e `verification` são obrigatórios na resposta da verificação.
+  Na restauração, `verification` pode ser nulo quando é necessário sincronizar.
+- `verification.profile.name` e `verification.profile.email` devem estar presentes, mas
   aceitam string ou `null`.
 - Quando `affiliation.type` é `student`, `courseName` deve estar presente,
   mas aceita string ou `null`.
 - Quando `affiliation.type` é `nonStudent`, `courseName` não é retornado.
-- `expiresAt` é obrigatório e representa a expiração da evidência institucional
-  em data e hora RFC 3339.
+- `verification.institution.acronym` deve estar presente, podendo ser nulo.
+- `verification.expiresAt` é obrigatório e representa a expiração da evidência
+  institucional em data e hora RFC 3339. A validade é de 120 dias e sua
+  reutilização não estende o prazo.
 
 Portanto, substituir um campo nulo por um campo omitido não é necessariamente
 uma alteração compatível. A propriedade `required` e a nulabilidade precisam
