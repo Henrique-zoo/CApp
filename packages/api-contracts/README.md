@@ -158,11 +158,36 @@ Todo PR que alterar o contrato deve:
 6. Descrever no PR o impacto sobre os consumidores e a estratégia de migração,
    quando aplicável.
 
-O workflow valida os arquivos JSON referenciados por `externalValue`,
-valida a especificação com Redocly e compara a versão proposta com a
-especificação da branch de destino usando OASDiff. Alterações em qualquer
-arquivo de `packages/api-contracts/` também acionam os workflows de testes
-do backend e do aplicativo.
+O workflow executa as seguintes verificações:
+
+1. Instala as dependências Python declaradas em `requirements-ci.txt`.
+2. Executa `scripts/validate_examples.py`, que percorre as operações HTTP
+   e valida cada arquivo JSON referenciado por `externalValue` contra o
+   schema correspondente de requisição ou resposta. A validação utiliza
+   JSON Schema Draft 2020-12, compatível com OpenAPI 3.1, e verifica também
+   se as referências são arquivos locais existentes dentro deste pacote.
+3. Valida a especificação OpenAPI com Redocly.
+4. Em pull requests, verifica se alterações na implementação HTTP do
+   backend estão acompanhadas de uma atualização do contrato.
+5. Compara a especificação proposta com a versão exata do commit-base da
+   pull request usando OASDiff, para identificar alterações incompatíveis.
+
+Para executar localmente a validação dos exemplos, instale as dependências
+em um ambiente virtual Python e execute:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r packages/api-contracts/requirements-ci.txt
+python packages/api-contracts/scripts/validate_examples.py
+deactivate
+```
+
+A comparação de compatibilidade utiliza o SHA-base registrado no evento da
+pull request, evitando que atualizações posteriores da branch de destino
+alterem a referência usada durante a execução do workflow. Alterações em
+qualquer arquivo de `packages/api-contracts/` também acionam os workflows
+de testes do backend e do aplicativo.
 
 A comparação de especificações identifica mudanças incompatíveis declaradas
 no OpenAPI; ela não substitui testes da implementação real. Os testes do

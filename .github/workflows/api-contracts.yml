@@ -40,51 +40,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate shared JSON examples
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install example validation dependencies
         run: |
-          python3 - <<'PY'
-          import json
-          import re
-          from pathlib import Path
+          python -m pip install \
+            --disable-pip-version-check \
+            -r packages/api-contracts/requirements-ci.txt
 
-          spec = Path("packages/api-contracts/openapi.yaml")
-          content = spec.read_text(encoding="utf-8")
-          references = re.findall(
-              r'^\s*externalValue:\s*(\S+)\s*$',
-              content,
-              flags=re.MULTILINE,
-          )
-
-          if not references:
-              raise SystemExit("Nenhuma referência externalValue encontrada.")
-
-          root = spec.parent.resolve()
-
-          for reference in references:
-              if "://" in reference:
-                  raise SystemExit(
-                      f"Esperada referência local, encontrada URL externa: {reference}"
-                  )
-
-              example = (spec.parent / reference).resolve()
-
-              try:
-                  example.relative_to(root)
-              except ValueError:
-                  raise SystemExit(
-                      f"Referência aponta para fora de packages/api-contracts: {reference}"
-                  )
-
-              if not example.is_file():
-                  raise SystemExit(f"Exemplo não encontrado: {reference}")
-
-              with example.open(encoding="utf-8") as file:
-                  json.load(file)
-
-              print(f"OK: {reference}")
-
-          print(f"\n{len(references)} exemplos externos válidos.")
-          PY
+      - name: Validate shared examples against OpenAPI schemas
+        run: |
+          python packages/api-contracts/scripts/validate_examples.py
 
       - name: Lint OpenAPI description
         run: |
@@ -94,24 +63,32 @@ jobs:
             redocly/cli:2.73.0 \
             lint packages/api-contracts/openapi.yaml --format=github-actions
 
-      - name: Fetch target branch
+      - name: Fetch exact pull request base commit
         if: github.event_name == 'pull_request'
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          git fetch --no-tags --depth=1 origin \
-            "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::SHA-base da pull request ausente ou inválido."
+            exit 1
+          fi
+
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git cat-file -e "${BASE_SHA}^{commit}"
 
       - name: Require OpenAPI update for backend API changes
         if: github.event_name == 'pull_request'
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          CHANGED_FILES="$(git diff --name-only "origin/${BASE_REF}" HEAD)"
-          API_FILES="$(printf '%s\n' "$CHANGED_FILES" | grep -E '^backend/src/api/.*\.rs$|^backend/src/modules/.*/api/.*\.rs$' | grep -v '/tests\.rs$' || true)"
+          CHANGED_FILES="$(git diff --name-only "$BASE_SHA" HEAD)"
+          API_FILES="$(printf '%s\n' "$CHANGED_FILES" \
+            | grep -E '^backend/src/api/.*\.rs$|^backend/src/modules/.*/api/.*\.rs$' \
+            | grep -v '/tests\.rs$' || true)"
 
           if [ -n "$API_FILES" ] &&
-             ! printf '%s\n' "$CHANGED_FILES" | grep -Fxq 'packages/api-contracts/openapi.yaml'; then
+             ! printf '%s\n' "$CHANGED_FILES" \
+               | grep -Fxq 'packages/api-contracts/openapi.yaml'; then
             echo "::error::Alterações na implementação HTTP do backend exigem atualização de packages/api-contracts/openapi.yaml no mesmo PR."
             echo "$API_FILES"
             exit 1
@@ -121,6 +98,6 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: oasdiff/oasdiff-action/breaking@v0
         with:
-          base: "origin/${{ github.base_ref }}:packages/api-contracts/openapi.yaml"
+          base: "${{ github.event.pull_request.base.sha }}:packages/api-contracts/openapi.yaml"
           revision: "HEAD:packages/api-contracts/openapi.yaml"
           review: false
