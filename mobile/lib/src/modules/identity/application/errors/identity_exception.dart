@@ -30,6 +30,13 @@ library;
 /// Os adaptadores traduzem os códigos de seus provedores para estas categorias.
 /// Uma categoria não substitui o diagnóstico original.
 enum IdentityFailureKind {
+  /// Firebase autenticou a identidade, mas seu primeiro provisionamento falta.
+  accountNotProvisioned,
+
+  /// O aplicativo não apresentou uma comprovação de origem aceita pelo serviço.
+  /// Não indica erro na senha nem perda da identidade Firebase selecionada.
+  appVerificationFailed,
+
   /// O usuário cancelou a interação de autenticação.
   authenticationCancelled,
 

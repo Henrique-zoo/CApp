@@ -1,83 +1,86 @@
-/// Coordenação da sessão e da política local de entrada no aplicativo.
+/// Coordenação da sessão, provisionamento e seleção de contas do CApp.
 ///
-/// A autenticação do provedor, a verificação institucional e sua cópia persistida
-/// possuem ciclos de vida diferentes. Esta biblioteca os coordena para que uma
-/// identidade Firebase isolada ou um registro local de outra conta não sejam
-/// interpretados como permissão para montar a área principal.
+/// Uma sessão Firebase, um perfil interno ativo e uma confirmação institucional
+/// são fatos distintos. Esta biblioteca coordena suas portas sem conhecer SDKs,
+/// DTOs, HTTP, preferências ou widgets. SessionGate apresenta o destino calculado;
+/// SessionLifecycleObserver informa retomadas do processo.
 ///
-/// ## Papel na arquitetura
+/// ## Restauração e entrada
 ///
-/// SessionController é a entrada das operações de sessão usadas pela apresentação.
-/// Consome AuthSession, SessionStore e InstitutionalAuthService; publica modelos
-/// de aplicação sem conhecer SDKs, transporte HTTP ou widgets.
-/// SessionGate apresenta seu destino, e SessionLifecycleObserver informa retomadas.
+/// start aguarda o UID selecionado pelo adaptador. Sem seleção, publica a entrada
+/// com contas salvas. Uma seleção só autentica se houver sessão SDK utilizável ou
+/// senha aceita; a referência local, por si só, não autentica.
 ///
-/// ## Restauração inicial
+/// Com conta, consulta o backend por AccountGateway, sem Microsoft. Perfil e
+/// evidência vigentes substituem as fotografias locais. Em falha temporária,
+/// fotografias válidas podem apresentar a mesma conta autenticada. Recusa de
+/// credencial, conta inativa e resposta incompatível não são substituídas por
+/// uma permissão do cache. O backend autoriza suas operações independentemente.
 ///
-/// 1. start registra a observação e aguarda o primeiro UID restaurado pelo SDK.
-/// 2. Sem conta, publica SessionSignedOut e não consulta o cache.
-/// 3. Com conta, mantém carregamento enquanto lê somente o registro daquele UID.
-/// 4. Uma verificação encontrada e ainda válida permite entrada direta.
-/// 5. Cache ausente, rejeitado, inacessível ou expirado mantém a entrada pendente.
+/// Perfil incompleto ou ausência da credencial interna seleciona profileRequired.
+/// completeProfile vincula e confirma a senha no mesmo UID, envia os dados
+/// acadêmicos e só publica prontidão após o backend aceitar a ativação. A senha
+/// é transitória e não participa de estados ou persistência.
 ///
-/// A restauração não abre Microsoft nem consulta o backend. O resultado de cache
-/// e seu diagnóstico permanecem no estado; continuar pela entrada não transforma
-/// falha de leitura em registro ausente.
+/// A opção Microsoft autentica no Firebase antes de consultar AccountGateway.
+/// Uma conta com evidência vigente é reutilizada, inclusive se estiver incompleta.
+/// Somente conta ausente ou evidência sem validade exige credencial Graph para
+/// confrontar as identidades e provisionar ou sincronizar a conta. O prazo de
+/// 120 dias é da evidência, independente dos tokens Firebase e Microsoft.
 ///
-/// ## Entrada e persistência
+/// ## Sincronização e tentativas controladas
 ///
-/// signIn escolhe login quando não existe conta e reautenticação quando ela já é
-/// conhecida. Microsoft e backend formam a mesma operação de entrada. Uma emissão
-/// de UID durante esse processo não libera a área principal antes da resposta.
+/// Evidência ausente, expirada ou a até cinco minutos do vencimento provoca uma
+/// tentativa silenciosa. Enquanto vigente, permite continuar com perfil ativo;
+/// vencida, exige confirmação antes de voltar à área principal. Somente uma
+/// necessidade explícita de interação permite que uma ação do usuário abra
+/// Microsoft. Uma falha de rede não abre a autenticação.
 ///
-/// A verificação precisa pertencer à conta ativa e estar válida no relógio local.
-/// O sucesso é publicado em memória antes da tentativa de gravação. Se somente
-/// a persistência falhar, a entrada continua permitida e a operação lança
-/// SessionCacheWriteException com o resultado confirmado e o diagnóstico original.
+/// Falhas temporárias aguardam 30 segundos, 1, 2, 4 e depois 5 minutos. O intervalo
+/// começa na conclusão da tentativa; retomadas não antecipam nem duplicam I/O.
+/// A restauração da sessão repete a consulta Firebase/backend; a sincronização
+/// repete MSAL/backend. Interação, cancelamento e recusas suspendem a repetição.
+/// Nenhuma falha prorroga a validade. Exemplo: falha às 12:00 permite tentar às
+/// 12:00:30; outra falha às 12:00:32 permite tentar às 12:01:32.
 ///
-/// ## Saída e limpeza local
+/// O timer só funciona durante a execução do processo e verifica prazos longos
+/// em intervalos de até um dia, sem consultar Microsoft diariamente. A agenda
+/// de tentativas pertence à seleção atual e não é persistida.
 ///
-/// signOut encerra a autenticação antes de remover o cache da conta. A ausência
-/// de UID já bloqueia a área principal, mas a entrada permanece ocupada até
-/// concluir a tentativa de remoção. Falha do provedor preserva a identidade
-/// efetivamente observada e seu diagnóstico, sem simular sucesso.
+/// ## Saída e concorrência
 ///
-/// Se somente a limpeza falhar, publica SessionSignedOut com o aviso e lança
-/// SessionCacheRemovalException. O cache remanescente não autentica a conta.
-/// Eventos ou conclusões de outra sessão não podem atualizar o contexto atual.
+/// signOut permite conservar sessão para seleção futura, exigir senha ou
+/// esquecer a conta. As duas primeiras opções preservam o perfil/verificação;
+/// esquecer remove somente os dados daquele UID, depois de encerrar credenciais.
+/// A flag de senha e a persistência SDK pertencem ao adaptador de autenticação.
+/// Falhas de limpeza permanecem explícitas e não fabricam sucesso.
 ///
-/// ## Validade e concorrência
+/// Revisões e contextos descartam resultados de outra operação/conta, inclusive
+/// em trocas A/B/A. I/O local é serializado para que esquecer não seja seguido
+/// por uma escrita antiga que recrie o cache. I/O já iniciado não é revertido.
+/// Falhas operacionais preservam causa e pilha, além de uma classificação pública;
+/// não se deve imprimir esses diagnósticos, pois podem conter dados sensíveis.
 ///
-/// O controlador calcula SessionState.access e agenda a expiração. refresh
-/// reavalia identidade e prazo na retomada, sem renovar pela rede. Ao expirar,
-/// a entrada volta a ser exigida; o backend continua autorizando cada requisição
-/// independentemente desse auxílio local.
-///
-/// Revisões e contextos de operação rejeitam conclusões obsoletas, inclusive
-/// após uma sequência de contas A/B/A. O acesso ao armazenamento é serializado.
-/// Essas guardas impedem publicação indevida, mas não revertem I/O já iniciado.
-///
-/// ## Falhas e encerramento
-///
-/// Falhas esperadas de login e verificação ficam no estado e também propagam
-/// pelo Future. Problemas na observação da autenticação possuem um estado próprio,
-/// sem fabricar logout. A interface usa a classificação pública e preserva a causa
-/// técnica.
-///
-/// O proprietário chama dispose para invalidar operações, cancelar o timer e a
-/// inscrição e fechar o stream. O encerramento é compartilhado e não aguarda
-/// todo I/O externo ou local pendente. Descarte não substitui signOut e não
-/// solicita logout ou limpeza de dados no provedor.
+/// dispose cancela inscrições e timers, sem executar logout. O proprietário deve
+/// aguardar seu Future. A composição fornece portas que compartilham a mesma
+/// seleção de identidade; construir o controlador não inicia efeitos externos.
 library;
 
 import 'dart:async';
 
 import 'errors/identity_exception.dart';
+import 'errors/microsoft_interaction_required_exception.dart';
 import 'errors/session_cache_removal_exception.dart';
 import 'errors/session_cache_write_exception.dart';
 import 'errors/session_identity_changed_exception.dart';
 import 'institutional_auth_service.dart';
-import 'models/institutional_verification_result.dart';
+import 'errors/account_password_required_exception.dart';
+import 'models/internal_user.dart';
+import 'models/saved_account.dart';
+import 'ports/account_authentication.dart';
+import 'ports/account_gateway.dart';
+import 'ports/account_profile_store.dart';
+import 'models/account_session_result.dart';
 import 'ports/auth_session.dart';
 import 'ports/session_store.dart';
 import 'session_cache_result.dart';
@@ -101,9 +104,9 @@ typedef SessionClock = DateTime Function();
 /// numa sequência A/B/A. Operações locais são serializadas, mas I/O já iniciado
 /// não é cancelado ou revertido por troca de conta.
 ///
-/// [signOut] encerra a autenticação e tenta remover o cache dessa conta.
+/// [signOut] aplica a forma de saída escolhida somente à conta selecionada.
 /// O proprietário encerra a instância com [dispose], sem executar logout.
-/// Provisionamento de usuário no backend não é implementado aqui.
+/// O backend é a autoridade para provisionamento e estado do perfil.
 final class SessionController {
   /// Conecta contratos referentes à mesma autenticação.
   ///
@@ -118,18 +121,37 @@ final class SessionController {
     required this._sessionStore,
     required this._authService,
     this._now = DateTime.now,
+    required this._accountAuthentication,
+    required this._accountGateway,
+    required this._accountProfileStore,
   });
+
+  final AccountAuthentication _accountAuthentication;
+  final AccountGateway _accountGateway;
+  final AccountProfileStore _accountProfileStore;
+  final Map<String, InternalUser> _users = {};
 
   final AuthSession _authSession;
   final SessionStore _sessionStore;
   final InstitutionalAuthService _authService;
   final SessionClock _now;
+  static const _automaticRenewalLead = Duration(minutes: 5);
+  static const _retryDelays = [
+    Duration(seconds: 30),
+    Duration(minutes: 1),
+    Duration(minutes: 2),
+    Duration(minutes: 4),
+    Duration(minutes: 5),
+  ];
+
+  /// Agenda da conta/evidência atual; nulo permite a primeira tentativa.
+  _RenewalSchedule? _renewalSchedule;
   final StreamController<SessionState> _changes =
       StreamController<SessionState>.broadcast();
   StreamSubscription<String?>? _authSubscription;
-  Timer? _expirationTimer;
+  Timer? _refreshTimer;
   SessionState _state = const SessionRestoring();
-  _VerificationOperation? _activeVerification;
+  _EntryOperation? _activeEntry;
 
   /// Contexto de saída, preservado durante a emissão esperada de UID nulo.
   _SignOutOperation? _activeSignOut;
@@ -147,6 +169,8 @@ final class SessionController {
 
   /// Geração local que distingue identidades e operações sucessivas.
   int _revision = 0;
+  bool _sessionRestorePending = false;
+  int _sessionRestoreFailures = 0;
 
   /// Fotografia atual, incluindo o destino local de apresentação.
   SessionState get state => _state;
@@ -164,7 +188,9 @@ final class SessionController {
   /// Lança [StateError] depois de iniciado o encerramento.
   void start() {
     if (_disposed) throw StateError('O controlador já foi encerrado');
+
     if (_started) return;
+
     _started = true;
 
     try {
@@ -175,65 +201,78 @@ final class SessionController {
       );
     } on Exception catch (error, stackTrace) {
       _started = false;
+
       _onAuthenticationError(error, stackTrace);
     }
   }
 
   /// Executa a operação única de entrada.
   ///
-  /// Escolhe login Microsoft sem conta autenticada ou reautenticação quando
-  /// a conta já foi restaurada, mas ainda precisa de uma verificação válida.
+  /// Sem conta autenticada, faz login Microsoft e consulta a conta antes de
+  /// decidir se precisa de sincronização. Com conta, retoma a restauração
+  /// pendente ou renova a confirmação institucional quando necessário.
+  /// Na conta existente, só permite autorização interativa após uma falha que
+  /// exija participação do usuário ou após o cancelamento dessa autorização.
+  /// Falha de rede oferece repetição silenciosa, sem executar novo login Firebase.
   ///
-  /// Retorna UID e verificação após persistir. Falhas externas propagam e ficam
-  /// no estado da sessão correspondente. Falha exclusiva de gravação lança
+  /// Retorna UID, perfil e verificação após persistir. Falhas externas propagam
+  /// e ficam no estado da sessão correspondente. Falha exclusiva de gravação lança
   /// [SessionCacheWriteException] e mantém a entrada permitida em memória.
   ///
   /// Exige restauração concluída, ausência de operação e entrada pendente.
   /// Violações lançam [StateError]; troca de conta pode lançar
   /// [SessionIdentityChangedException].
-  Future<InstitutionalVerificationResult> signIn() {
+  Future<AccountSessionResult> signIn() {
     if (_state.access == SessionAccess.ready) {
       throw StateError('A sessão já está pronta para entrar no aplicativo');
     }
-    return _runVerification(renewal: _state is SessionSignedIn);
+
+    return _runEntry(
+      renewal: _state is SessionSignedIn,
+      allowInteraction:
+          _state is! SessionSignedIn || _state.requiresMicrosoftInteraction,
+    );
   }
 
   /// Obtém outra verificação da conta atual, preservando o perfil anterior.
   ///
-  /// Exige autenticação e ociosidade. Não é disparada automaticamente e não
-  /// instala um botão de verificação na experiência de entrada.
+  /// Exige autenticação e ociosidade. A tentativa automática usa
+  /// [allowInteraction] falso; uma ação explícita pode manter o padrão verdadeiro
+  /// para autorizar a conta Microsoft se a obtenção silenciosa não for possível.
   ///
   /// Retorno e falhas seguem [signIn], mas uma sessão já pronta também pode
   /// solicitar esta operação explicitamente.
-  Future<InstitutionalVerificationResult> renewVerification() {
-    return _runVerification(renewal: true);
+  /// A validade só muda com uma nova resposta válida do backend. Falhas mantêm
+  /// a evidência anterior e seu prazo, mesmo quando esse prazo já venceu.
+  Future<AccountSessionResult> renewVerification({
+    bool allowInteraction = true,
+  }) {
+    return _runEntry(renewal: true, allowInteraction: allowInteraction);
   }
 
-  /// Encerra a autenticação e remove o cache somente da conta correspondente.
+  /// Desativa a seleção com a forma de saída escolhida.
   ///
-  /// Exige restauração concluída, uma conta autenticada e ausência de outra
-  /// operação; violações lançam [StateError]. Marca signingOut antes de aguardar
-  /// o provedor, impedindo chamadas simultâneas e novos logins durante a limpeza.
+  /// O padrão conserva a sessão SDK e as fotografias para entrada rápida. Exigir
+  /// senha encerra credenciais mantendo a referência. Esquecer encerra credenciais
+  /// e remove perfil/verificação somente deste UID. A saída permanece ocupada até
+  /// concluir a limpeza, inclusive depois do evento de UID nulo.
   ///
-  /// Primeiro solicita logout à [AuthSession]. Sua emissão de UID nulo mantém
-  /// a saída em andamento. Depois serializa a remoção com o restante do I/O
-  /// local, evitando que uma escrita anterior recrie o registro após a limpeza.
-  ///
-  /// Conclui sem valor quando ambas as etapas terminam. Falhas do provedor ficam
-  /// no estado e propagam com causa e pilha. Se apenas a remoção falhar, mantém
-  /// o usuário deslogado e lança [SessionCacheRemovalException] com o diagnóstico.
-  /// Troca de conta ou descarte lança [SessionIdentityChangedException] sem
-  /// publicar resultados na nova sessão. Efeitos já iniciados não são revertidos.
-  ///
-  /// Não revoga tokens de outros dispositivos nem remove evidências do backend.
-  Future<void> signOut() async {
+  /// Falhas do adaptador propagam e ficam no estado. Falha de remoção do cache
+  /// lança SessionCacheRemovalException; troca de contexto descarta a publicação.
+  /// Não exclui conta remota nem revoga sessões de outros dispositivos.
+  Future<void> signOut({
+    AccountSignOutMode mode = AccountSignOutMode.keepSession,
+  }) async {
     _requireReadyForOperation(requiresAuthentication: true);
+
     final previous = _state as SessionSignedIn;
     final operation = _SignOutOperation(
       firebaseUid: previous.firebaseUid,
       revision: ++_revision,
     );
+
     _activeSignOut = operation;
+
     _emit(
       SessionSignedIn(
         firebaseUid: previous.firebaseUid,
@@ -244,67 +283,403 @@ final class SessionController {
     );
 
     try {
-      await _authSession.signOut();
+      await _accountAuthentication.leaveAccount(mode);
       _requireSignedOutOperation(operation);
-      try {
-        await _withStore(() async {
-          _requireSignedOutOperation(operation);
-          await _sessionStore.remove(operation.firebaseUid);
-        });
-      } on SessionIdentityChangedException {
-        rethrow;
-      } on Exception catch (error, stackTrace) {
-        Error.throwWithStackTrace(
-          SessionCacheRemovalException(
-            firebaseUid: operation.firebaseUid,
-            cause: error,
-            causeStackTrace: stackTrace,
-          ),
-          stackTrace,
+
+      if (mode == AccountSignOutMode.forgetAccount) {
+        await _removeForgottenData(
+          operation.firebaseUid,
+          ensureCurrent: () => _requireSignedOutOperation(operation),
         );
+      } else {
+        await _withStore(() async => _requireSignedOutOperation(operation));
       }
+
       _requireSignedOutOperation(operation);
       _emit(const SessionSignedOut());
     } on Exception catch (error, stackTrace) {
       _publishSignOutFailure(operation, error, stackTrace);
       rethrow;
     } finally {
-      if (identical(_activeSignOut, operation)) _activeSignOut = null;
+      if (identical(_activeSignOut, operation)) {
+        _activeSignOut = null;
+
+        _scheduleRefresh();
+      }
+    }
+  }
+
+  /// Contas lembradas pelo dispositivo, sem credenciais no resultado.
+  Future<List<SavedAccount>> savedAccounts() =>
+      _accountAuthentication.savedAccounts();
+
+  bool get hasInternalPassword => _accountAuthentication.hasPassword;
+
+  String? get internalEmail => _accountAuthentication.currentEmail;
+
+  Future<void> selectAccount(String uid, {String? password}) => _enterInternal(
+    () => _accountAuthentication.selectAccount(uid, password: password),
+  );
+
+  Future<void> signInWithPassword({
+    required String email,
+    required String password,
+  }) => _enterInternal(
+    () => _accountAuthentication.signInWithPassword(
+      email: email,
+      password: password,
+    ),
+  );
+
+  Future<void> sendPasswordReset(String email) =>
+      _accountAuthentication.sendPasswordReset(email);
+
+  Future<void> _enterInternal(Future<void> Function() operation) async {
+    _requireReadyForOperation(requiresAuthentication: false);
+
+    if (_authSession.currentUserId != null) {
+      throw StateError('Entrada interna indisponível');
+    }
+
+    final revision = ++_revision;
+
+    _emit(const SessionSignedOut(operation: SessionOperation.signingIn));
+
+    try {
+      await operation();
+    } on AccountPasswordRequiredException {
+      if (_isSignedOutRevision(revision)) _emit(const SessionSignedOut());
+
+      rethrow;
+    } on Exception catch (error, stack) {
+      if (_isSignedOutRevision(revision)) {
+        _emit(
+          SessionSignedOut(
+            failure: _classifyFailure(error, _state),
+            failureDetails: SessionFailureDetails(
+              cause: error,
+              stackTrace: stack,
+            ),
+          ),
+        );
+      }
+
+      rethrow;
+    }
+  }
+
+  /// Remove uma conta lembrada sem selecionar ou autenticar sua sessão.
+  Future<void> forgetSavedAccount(String uid) async {
+    _requireReadyForOperation(requiresAuthentication: false);
+
+    if (_authSession.currentUserId != null) {
+      throw StateError('A seleção precisa estar desativada');
+    }
+
+    final revision = ++_revision;
+
+    _emit(const SessionSignedOut(operation: SessionOperation.signingOut));
+
+    try {
+      await _accountAuthentication.forgetSavedAccount(uid);
+      await _removeForgottenData(
+        uid,
+        ensureCurrent: () => _requireSignedOutRevision(revision),
+      );
+
+      if (!_isSignedOutRevision(revision)) {
+        throw const SessionIdentityChangedException();
+      }
+
+      _emit(const SessionSignedOut());
+    } on Exception catch (error, stack) {
+      if (_isSignedOutRevision(revision)) {
+        _emit(
+          SessionSignedOut(
+            failure: error is SessionCacheRemovalException
+                ? SessionFailure.cacheRemovalFailed
+                : SessionFailure.signOutFailed,
+            failureDetails: SessionFailureDetails(
+              cause: error,
+              stackTrace: stack,
+            ),
+          ),
+        );
+      }
+
+      rethrow;
+    }
+  }
+
+  bool _isSignedOutRevision(int revision) =>
+      !_disposed && _revision == revision && _authSession.currentUserId == null;
+
+  void _requireSignedOutRevision(int revision) {
+    if (!_isSignedOutRevision(revision)) {
+      throw const SessionIdentityChangedException();
+    }
+  }
+
+  /// Remove as duas fotografias sob a mesma fila, conferindo o contexto entre I/Os.
+  Future<void> _removeForgottenData(
+    String uid, {
+    required void Function() ensureCurrent,
+  }) async {
+    try {
+      await _withStore(() async {
+        ensureCurrent();
+        await _sessionStore.remove(uid);
+
+        ensureCurrent();
+        await _accountProfileStore.removeUser(uid);
+
+        ensureCurrent();
+        _users.remove(uid);
+      });
+    } on SessionIdentityChangedException {
+      rethrow;
+    } on Exception catch (error, stack) {
+      Error.throwWithStackTrace(
+        SessionCacheRemovalException(
+          firebaseUid: uid,
+          cause: error,
+          causeStackTrace: stack,
+        ),
+        stack,
+      );
+    }
+  }
+
+  /// Repete somente a limpeza que falhou após encerrar a autenticação.
+  Future<void> retryForgottenAccountCleanup() async {
+    _requireReadyForOperation(requiresAuthentication: false);
+
+    final cause = _state.failureDetails?.cause;
+
+    if (_authSession.currentUserId != null ||
+        cause is! SessionCacheRemovalException) {
+      throw StateError('Não existe limpeza pendente');
+    }
+
+    final revision = ++_revision;
+
+    _emit(const SessionSignedOut(operation: SessionOperation.signingOut));
+
+    try {
+      await _removeForgottenData(
+        cause.firebaseUid,
+        ensureCurrent: () => _requireSignedOutRevision(revision),
+      );
+
+      if (!_isSignedOutRevision(revision)) {
+        throw const SessionIdentityChangedException();
+      }
+
+      _emit(const SessionSignedOut());
+    } on Exception catch (error, stack) {
+      if (_isSignedOutRevision(revision)) {
+        _emit(
+          SessionSignedOut(
+            failure: SessionFailure.cacheRemovalFailed,
+            failureDetails: SessionFailureDetails(
+              cause: error,
+              stackTrace: stack,
+            ),
+          ),
+        );
+      }
+
+      rethrow;
+    }
+  }
+
+  /// Repete a consulta da conta sem solicitar token Microsoft.
+  Future<void> retryAccountSession() async {
+    _requireReadyForOperation(requiresAuthentication: true);
+
+    final uid = _authSession.currentUserId!;
+    final previous = _state as SessionSignedIn;
+    final revision = ++_revision;
+
+    _emit(
+      SessionSignedIn(
+        firebaseUid: uid,
+        verification: previous.verification,
+        operation: SessionOperation.restoringCache,
+      ),
+    );
+
+    await _restoreCache(firebaseUid: uid, revision: revision);
+  }
+
+  /// Vincula a senha ao UID atual e conclui o perfil somente após o backend aceitar.
+  Future<void> completeProfile({
+    required String email,
+    required String password,
+    required ProfileCompletion profile,
+  }) async {
+    _requireReadyForOperation(requiresAuthentication: true);
+
+    final previous = _state as SessionSignedIn;
+    final revision = ++_revision;
+
+    if (!previous.hasUnexpiredVerificationAt(_now())) {
+      throw StateError('Perfil indisponível');
+    }
+
+    _emit(
+      SessionSignedIn(
+        firebaseUid: previous.firebaseUid,
+        verification: previous.verification,
+        operation: SessionOperation.completingProfile,
+      ),
+    );
+
+    try {
+      await _accountAuthentication.setUpPassword(
+        email: email,
+        password: password,
+      );
+
+      if (!_isCurrent(previous.firebaseUid, revision)) {
+        throw const SessionIdentityChangedException();
+      }
+
+      final user = await _accountGateway.completeProfile(profile);
+
+      if (!_isCurrent(previous.firebaseUid, revision)) {
+        throw const SessionIdentityChangedException();
+      }
+
+      _users[previous.firebaseUid] = user;
+
+      await _withStore(() async {
+        if (!_isCurrent(previous.firebaseUid, revision)) {
+          throw const SessionIdentityChangedException();
+        }
+
+        await _accountProfileStore.saveUser(previous.firebaseUid, user);
+      });
+
+      if (!_isCurrent(previous.firebaseUid, revision)) {
+        throw const SessionIdentityChangedException();
+      }
+
+      _emit(
+        SessionSignedIn(
+          firebaseUid: previous.firebaseUid,
+          verification: previous.verification,
+        ),
+      );
+    } on Exception catch (error, stack) {
+      if (_isCurrent(previous.firebaseUid, revision)) {
+        _emit(
+          SessionSignedIn(
+            firebaseUid: previous.firebaseUid,
+            verification: previous.verification,
+            failure:
+                error is IdentityException &&
+                    (error.kind == IdentityFailureKind.communicationFailed ||
+                        error.kind == IdentityFailureKind.serviceUnavailable)
+                ? _classifyFailure(error, previous)
+                : SessionFailure.profileCompletionFailed,
+            failureDetails: SessionFailureDetails(
+              cause: error,
+              stackTrace: stack,
+            ),
+          ),
+        );
+      }
+
+      rethrow;
     }
   }
 
   /// Reavalia identidade e validade ao retomar a aplicação.
   ///
-  /// Não consulta o backend, abre login ou remove cache. Antes da primeira
-  /// identidade restaurada ou depois do descarte, não executa ações.
-  /// Uma divergência de UID inicia a restauração da conta atual.
+  /// Pode iniciar recuperação de evidência ausente ou renovação de evidência
+  /// expirada ou próxima do vencimento, sempre sem abrir autorização Microsoft.
+  /// Repetições após falhas temporárias respeitam a espera progressiva.
+  /// Antes da primeira identidade restaurada ou depois do descarte, não age.
+  /// Uma divergência de UID inicia a restauração da conta atual. Retorna sem
+  /// aguardar a renovação; atividade, resultado e falhas aparecem em [states].
   void refresh() {
     if (_disposed || !_started || !_receivedUser) return;
+
     final actualUid = _authSession.currentUserId;
+
     if (actualUid != _currentUid) {
       _onUserChanged(actualUid);
     } else {
       _emit(_state);
+      _maybeRenewAutomatically();
     }
   }
 
-  /// Mantém o contexto da verificação até concluir a tentativa de persistência.
+  /// Recupera ou renova a evidência respeitando a agenda da sessão atual.
+  ///
+  /// Ausência de evidência também permite obtenção silenciosa. Uma operação
+  /// pendente, uma falha definitiva ou a espera de nova tentativa impedem I/O.
+  void _maybeRenewAutomatically() {
+    final current = _state;
+
+    if (_disposed ||
+        !_started ||
+        !_receivedUser ||
+        current is! SessionSignedIn ||
+        current.isBusy ||
+        _activeEntry != null ||
+        _activeSignOut != null ||
+        _authSession.currentUserId != current.firebaseUid) {
+      return;
+    }
+
+    final dueAt = _automaticRenewalAt(current);
+
+    if (dueAt == null || dueAt.isAfter(_now())) return;
+
+    unawaited(_runAutomaticRenewal());
+  }
+
+  /// Consome falhas já publicadas sem abrir autorização ou perder diagnóstico.
+  Future<void> _runAutomaticRenewal() async {
+    try {
+      if (_sessionRestorePending) {
+        await retryAccountSession();
+      } else {
+        await renewVerification(allowInteraction: false);
+      }
+    } on Exception {
+      // Falhas da operação ficam no estado. Conclusões de outra sessão
+      // são descartadas pelas guardas já existentes no controlador.
+    }
+  }
+
+  /// Mantém o contexto de entrada ou renovação até concluir a persistência.
   ///
   /// Publica sucesso em memória antes de gravar. Só o próprio contexto é
   /// liberado ao terminar; uma operação antiga não encerra a de outra conta.
-  Future<InstitutionalVerificationResult> _runVerification({
+  Future<AccountSessionResult> _runEntry({
     required bool renewal,
+    bool allowInteraction = true,
   }) async {
     _requireReadyForOperation(requiresAuthentication: renewal);
+
     final previous = _state;
-    final operation = _VerificationOperation(
+    final operation = _EntryOperation(
       renewal: renewal,
       firebaseUid: renewal ? _currentUid : null,
       revision: ++_revision,
     );
-    _activeVerification = operation;
+
+    _activeEntry = operation;
 
     if (previous is SessionSignedIn) {
+      final schedule = _scheduleFor(previous);
+
+      // Bloqueia repetições até esta operação concluir e definir outra agenda.
+      schedule.nextAttemptAt = null;
+
       _emit(
         SessionSignedIn(
           firebaseUid: previous.firebaseUid,
@@ -318,15 +693,33 @@ final class SessionController {
     }
 
     try {
-      final InstitutionalVerificationResult result;
+      AccountSessionResult result;
+      late final InternalUser accountUser;
+
       try {
-        result = renewal
-            ? await _authService.reauthenticateAndVerify()
-            : await _authService.signInAndVerify();
+        if (!renewal) {
+          await _authService.signIn();
+        }
+
+        result = !renewal || _sessionRestorePending
+            ? await _restoreOrVerify(
+                operation,
+                allowInteraction: allowInteraction,
+              )
+            : await _authService.renewVerification(
+                allowInteraction: allowInteraction,
+              );
+
+        _requireActiveOperation(operation, result.firebaseUid);
+
+        accountUser = result.user;
+        _users[result.firebaseUid] = accountUser;
+
         if (!result.verification.isValidAt(_now())) {
           final cause = const FormatException(
             'A verificação recebida já está expirada no relógio local',
           );
+
           throw IdentityException(
             kind: IdentityFailureKind.invalidResponse,
             cause: cause,
@@ -334,11 +727,23 @@ final class SessionController {
           );
         }
       } on Exception catch (error, stackTrace) {
-        _publishVerificationFailure(operation, error, stackTrace);
+        _publishEntryFailure(operation, error, stackTrace);
         rethrow;
       }
 
       _requireActiveOperation(operation, result.firebaseUid);
+
+      final now = _now();
+      final anticipated = result.verification.expiresAt.subtract(
+        _automaticRenewalLead,
+      );
+      final earliest = now.add(_retryDelays.first);
+
+      _renewalSchedule = _RenewalSchedule(
+        key: (result.firebaseUid, result.verification.expiresAt),
+        nextAttemptAt: anticipated.isAfter(earliest) ? anticipated : earliest,
+      );
+
       _emit(
         SessionSignedIn(
           firebaseUid: result.firebaseUid,
@@ -350,6 +755,7 @@ final class SessionController {
       try {
         await _withStore(() async {
           _requireActiveOperation(operation, result.firebaseUid);
+          await _accountProfileStore.saveUser(result.firebaseUid, accountUser);
           await _sessionStore.save(
             firebaseUid: result.firebaseUid,
             verification: result.verification,
@@ -363,6 +769,7 @@ final class SessionController {
           cause: error,
           causeStackTrace: stackTrace,
         );
+
         if (_canPublish(operation, result.firebaseUid)) {
           _emit(
             SessionSignedIn(
@@ -376,6 +783,7 @@ final class SessionController {
             ),
           );
         }
+
         Error.throwWithStackTrace(failure, stackTrace);
       }
 
@@ -386,12 +794,61 @@ final class SessionController {
           verification: result.verification,
         ),
       );
+
       return result;
     } finally {
-      if (identical(_activeVerification, operation)) {
-        _activeVerification = null;
+      if (identical(_activeEntry, operation)) {
+        _activeEntry = null;
+
+        _scheduleRefresh();
       }
     }
+  }
+
+  /// Recupera a conta antes de decidir se precisa de uma consulta institucional.
+  ///
+  /// Uma evidência válida é reutilizada sem obter token Microsoft nem prolongar
+  /// seu prazo. Conta ausente ou evidência vencida exige verificação. Outras
+  /// recusas propagam; uma falha de rede mantém a restauração pendente para que
+  /// a próxima tentativa repita a consulta da sessão, em vez de chamar o Graph.
+  /// As guardas protegem também as etapas entre autenticação e restauração.
+  Future<AccountSessionResult> _restoreOrVerify(
+    _EntryOperation operation, {
+    required bool allowInteraction,
+  }) async {
+    final firebaseUid = _authSession.currentUserId;
+
+    if (firebaseUid == null) {
+      throw const SessionIdentityChangedException();
+    }
+
+    _requireActiveOperation(operation, firebaseUid);
+
+    _sessionRestorePending = true;
+
+    AccountSession? restored;
+
+    try {
+      restored = await _accountGateway.restoreSession();
+    } on IdentityException catch (error) {
+      if (error.kind != IdentityFailureKind.accountNotProvisioned) rethrow;
+    }
+
+    _requireActiveOperation(operation, firebaseUid);
+
+    _sessionRestorePending = false;
+
+    final proof = restored?.verification;
+
+    if (restored != null && proof != null && proof.isValidAt(_now())) {
+      return AccountSessionResult(
+        firebaseUid: firebaseUid,
+        user: restored.user,
+        verification: proof,
+      );
+    }
+
+    return _authService.renewVerification(allowInteraction: allowInteraction);
   }
 
   /// Confere restauração, exclusão mútua e identidade antes de uma operação.
@@ -400,21 +857,24 @@ final class SessionController {
   /// Divergência de UID é sincronizada antes de sinalizar contexto alterado.
   void _requireReadyForOperation({required bool requiresAuthentication}) {
     if (_disposed) throw StateError('O controlador já foi encerrado');
+
     if (!_started ||
         !_receivedUser ||
         _state.access == SessionAccess.restorationFailed) {
       throw StateError('A autenticação inicial ainda não foi restaurada');
     }
-    if (_activeVerification != null ||
-        _activeSignOut != null ||
-        _state.isBusy) {
+
+    if (_activeEntry != null || _activeSignOut != null || _state.isBusy) {
       throw StateError('Já existe uma operação de sessão em andamento');
     }
+
     final actualUid = _authSession.currentUserId;
+
     if (actualUid != _currentUid) {
       _onUserChanged(actualUid);
       throw const SessionIdentityChangedException();
     }
+
     if (requiresAuthentication && _state is! SessionSignedIn) {
       throw StateError('A operação exige uma conta autenticada');
     }
@@ -427,21 +887,31 @@ final class SessionController {
   /// Outras mudanças invalidam a tentativa anterior.
   void _onUserChanged(String? firebaseUid) {
     if (_disposed) return;
+
     if (_receivedUser && firebaseUid == _currentUid) return;
+
     final signOut = _activeSignOut;
+
     if (signOut != null &&
         firebaseUid == null &&
         _currentUid == signOut.firebaseUid &&
         _revision == signOut.revision) {
       _receivedUser = true;
       _currentUid = null;
+
       _emit(const SessionSignedOut(operation: SessionOperation.signingOut));
+
       return;
     }
+
     _receivedUser = true;
     _currentUid = firebaseUid;
+    _renewalSchedule = null;
+    _sessionRestorePending = false;
+    _sessionRestoreFailures = 0;
+
     final revision = ++_revision;
-    final operation = _activeVerification;
+    final operation = _activeEntry;
 
     if (operation != null &&
         !operation.renewal &&
@@ -449,27 +919,33 @@ final class SessionController {
         firebaseUid != null) {
       operation.firebaseUid = firebaseUid;
       operation.revision = revision;
+
       _emit(
         SessionSignedIn(
           firebaseUid: firebaseUid,
           operation: SessionOperation.verifyingInstitution,
         ),
       );
+
       return;
     }
 
-    _activeVerification = null;
+    _activeEntry = null;
     _activeSignOut = null;
+
     if (firebaseUid == null) {
       _emit(const SessionSignedOut());
+
       return;
     }
+
     _emit(
       SessionSignedIn(
         firebaseUid: firebaseUid,
         operation: SessionOperation.restoringCache,
       ),
     );
+
     unawaited(_restoreCache(firebaseUid: firebaseUid, revision: revision));
   }
 
@@ -482,8 +958,137 @@ final class SessionController {
     required String firebaseUid,
     required int revision,
   }) async {
-    final result = await _withStore(() => _sessionStore.load(firebaseUid));
+    var result = await _withStore(() => _sessionStore.load(firebaseUid));
+
     if (!_isCurrent(firebaseUid, revision)) return;
+
+    Exception? restorationError;
+    StackTrace? restorationStack;
+    bool receivedBackendResponse = false;
+    bool cacheWriteFailed = false;
+
+    try {
+      final cached = await _accountProfileStore.loadUser(firebaseUid);
+
+      if (!_isCurrent(firebaseUid, revision)) return;
+
+      if (cached != null) _users[firebaseUid] = cached;
+    } on Exception {
+      /* Cache inválido não impede buscar a fonte de verdade. */
+    }
+
+    try {
+      final restored = await _accountGateway.restoreSession();
+
+      if (!_isCurrent(firebaseUid, revision)) return;
+
+      receivedBackendResponse = true;
+      _users[firebaseUid] = restored.user;
+
+      final proof = restored.verification;
+      final local = result;
+      final invalidateLocal =
+          proof == null &&
+          local is SessionCacheFound &&
+          local.verification.isValidAt(_now());
+
+      if (proof != null) {
+        result = SessionCacheFound(proof);
+      } else if (invalidateLocal) {
+        result = const SessionCacheMissing();
+      }
+
+      await _withStore(() async {
+        if (!_isCurrent(firebaseUid, revision)) return;
+
+        await _accountProfileStore.saveUser(firebaseUid, restored.user);
+
+        if (proof != null &&
+            (local is! SessionCacheFound || local.verification != proof)) {
+          await _sessionStore.save(
+            firebaseUid: firebaseUid,
+            verification: proof,
+          );
+        } else if (invalidateLocal) {
+          await _sessionStore.remove(firebaseUid);
+        }
+      });
+    } on IdentityException catch (error, stack) {
+      if (!_isCurrent(firebaseUid, revision)) return;
+
+      restorationError = error;
+      restorationStack = stack;
+
+      if (error.kind == IdentityFailureKind.appVerificationFailed) {
+        // A origem do app foi recusada, não o usuário: bloqueia o acesso desta
+        // tentativa sem apagar as fotografias da conta para uma recuperação.
+        result = const SessionCacheMissing();
+      } else if (error.kind != IdentityFailureKind.communicationFailed &&
+          error.kind != IdentityFailureKind.serviceUnavailable) {
+        _users.remove(firebaseUid);
+
+        result = const SessionCacheMissing();
+
+        try {
+          await _withStore(() async {
+            if (!_isCurrent(firebaseUid, revision)) return;
+
+            await _sessionStore.remove(firebaseUid);
+            await _accountProfileStore.removeUser(firebaseUid);
+          });
+
+          if (error.kind == IdentityFailureKind.accountNotProvisioned) {
+            // A primeira confirmação ainda não ocorreu. Permite a tentativa
+            // silenciosa de provisionamento, sem tratar ausência como recusa.
+            restorationError = null;
+            restorationStack = null;
+          }
+        } on Exception catch (cleanup, cleanupStack) {
+          restorationError = IdentityException(
+            kind: error.kind,
+            cause: (
+              refusal: error,
+              cleanup: cleanup,
+              cleanupStack: cleanupStack,
+            ),
+            stackTrace: stack,
+            backendCode: error.backendCode,
+            publicMessage: error.publicMessage,
+          );
+        }
+      }
+    } on Exception catch (error, stack) {
+      restorationError = error;
+      restorationStack = stack;
+      cacheWriteFailed = receivedBackendResponse;
+    }
+
+    if (!_isCurrent(firebaseUid, revision)) return;
+
+    _sessionRestorePending =
+        restorationError is IdentityException &&
+        (restorationError.kind == IdentityFailureKind.communicationFailed ||
+            restorationError.kind == IdentityFailureKind.serviceUnavailable);
+
+    if (restorationError != null && !cacheWriteFailed) {
+      final delay = _retryDelays[_sessionRestoreFailures];
+
+      if (_sessionRestorePending &&
+          _sessionRestoreFailures < _retryDelays.length - 1) {
+        _sessionRestoreFailures++;
+      }
+
+      _renewalSchedule = _RenewalSchedule(
+        key: (
+          firebaseUid,
+          result is SessionCacheFound ? result.verification.expiresAt : null,
+        ),
+        nextAttemptAt: _sessionRestorePending ? _now().add(delay) : null,
+      );
+    } else {
+      _sessionRestoreFailures = 0;
+      _renewalSchedule = null;
+    }
 
     _emit(
       SessionSignedIn(
@@ -493,33 +1098,66 @@ final class SessionController {
           _ => null,
         },
         cacheLoadResult: result,
-        failure: switch (result) {
-          SessionCacheRejected() => SessionFailure.cacheRejected,
-          SessionCacheReadFailed() => SessionFailure.cacheReadFailed,
-          _ => null,
-        },
+        failure: cacheWriteFailed
+            ? SessionFailure.cacheWriteFailed
+            : restorationError != null
+            ? _classifyFailure(restorationError, _state)
+            : switch (result) {
+                SessionCacheRejected() => SessionFailure.cacheRejected,
+                SessionCacheReadFailed() => SessionFailure.cacheReadFailed,
+                _ => null,
+              },
+        failureDetails: restorationError == null
+            ? null
+            : SessionFailureDetails(
+                cause: restorationError,
+                stackTrace: restorationStack!,
+              ),
       ),
     );
+
+    _maybeRenewAutomatically();
   }
 
   /// Preserva a falha e seu diagnóstico somente na sessão correspondente.
   ///
   /// Uma exceção de contexto antigo continua no Future original, mas não
   /// substitui os dados da conta atual.
-  void _publishVerificationFailure(
-    _VerificationOperation operation,
+  void _publishEntryFailure(
+    _EntryOperation operation,
     Exception error,
     StackTrace stackTrace,
   ) {
-    if (_disposed || !identical(_activeVerification, operation)) return;
+    if (_disposed || !identical(_activeEntry, operation)) return;
+
     final actualUid = _authSession.currentUserId;
+
     if (actualUid != _currentUid) _onUserChanged(actualUid);
-    if (!identical(_activeVerification, operation)) return;
+
+    if (!identical(_activeEntry, operation)) return;
 
     final current = _state;
     final details = SessionFailureDetails(cause: error, stackTrace: stackTrace);
     final failure = _classifyFailure(error, current);
+
     if (current is SessionSignedIn) {
+      final schedule = _scheduleFor(current);
+
+      if (error is IdentityException &&
+          (error.kind == IdentityFailureKind.communicationFailed ||
+              error.kind == IdentityFailureKind.serviceUnavailable)) {
+        final index = schedule.transientFailures;
+        final delay = _retryDelays[index];
+
+        if (index < _retryDelays.length - 1) schedule.transientFailures++;
+
+        schedule.nextAttemptAt = _now().add(delay);
+      } else {
+        // Interação, cancelamento, recusa e falhas não classificadas exigem
+        // ação explícita. O diagnóstico não é convertido em falha de rede.
+        schedule.nextAttemptAt = null;
+      }
+
       _emit(
         SessionSignedIn(
           firebaseUid: current.firebaseUid,
@@ -542,8 +1180,11 @@ final class SessionController {
     if (_disposed || !identical(_activeSignOut, operation)) {
       throw const SessionIdentityChangedException();
     }
+
     final actualUid = _authSession.currentUserId;
+
     if (actualUid != _currentUid) _onUserChanged(actualUid);
+
     if (!identical(_activeSignOut, operation) ||
         _revision != operation.revision ||
         _currentUid != null ||
@@ -562,8 +1203,11 @@ final class SessionController {
     StackTrace stackTrace,
   ) {
     if (_disposed || !identical(_activeSignOut, operation)) return;
+
     final actualUid = _authSession.currentUserId;
+
     if (actualUid != _currentUid) _onUserChanged(actualUid);
+
     if (!identical(_activeSignOut, operation) ||
         _revision != operation.revision) {
       return;
@@ -574,6 +1218,7 @@ final class SessionController {
         : SessionFailure.signOutFailed;
     final details = SessionFailureDetails(cause: error, stackTrace: stackTrace);
     final current = _state;
+
     if (current is SessionSignedIn) {
       _emit(
         SessionSignedIn(
@@ -593,6 +1238,10 @@ final class SessionController {
   ///
   /// A exceção original continua em SessionFailureDetails e no Future público.
   SessionFailure _classifyFailure(Exception error, SessionState current) {
+    if (error is MicrosoftInteractionRequiredException) {
+      return SessionFailure.microsoftInteractionRequired;
+    }
+
     if (error is IdentityException) {
       return switch (error.kind) {
         IdentityFailureKind.authenticationCancelled =>
@@ -608,6 +1257,7 @@ final class SessionController {
         _ => SessionFailure.institutionalVerificationFailed,
       };
     }
+
     return current is SessionSignedIn
         ? SessionFailure.institutionalVerificationFailed
         : SessionFailure.authenticationFailed;
@@ -617,29 +1267,31 @@ final class SessionController {
   ///
   /// Divergências invalidam a tentativa e restauram a identidade consultada.
   /// Não desfaz operações externas já iniciadas.
-  void _requireActiveOperation(
-    _VerificationOperation operation,
-    String firebaseUid,
-  ) {
-    if (_disposed || !identical(_activeVerification, operation)) {
+  void _requireActiveOperation(_EntryOperation operation, String firebaseUid) {
+    if (_disposed || !identical(_activeEntry, operation)) {
       throw const SessionIdentityChangedException();
     }
+
     final actualUid = _authSession.currentUserId;
+
     if (actualUid != _currentUid) _onUserChanged(actualUid);
+
     if (_canPublish(operation, firebaseUid)) return;
 
-    if (identical(_activeVerification, operation)) {
-      _activeVerification = null;
+    if (identical(_activeEntry, operation)) {
+      _activeEntry = null;
       _receivedUser = false;
+
       _onUserChanged(actualUid);
     }
+
     throw const SessionIdentityChangedException();
   }
 
   /// Confere o contexto e a identidade vinculados a uma publicação.
-  bool _canPublish(_VerificationOperation operation, String firebaseUid) {
+  bool _canPublish(_EntryOperation operation, String firebaseUid) {
     return !_disposed &&
-        identical(_activeVerification, operation) &&
+        identical(_activeEntry, operation) &&
         operation.firebaseUid == firebaseUid &&
         _isCurrent(firebaseUid, operation.revision);
   }
@@ -659,8 +1311,11 @@ final class SessionController {
   Future<T> _withStore<T>(Future<T> Function() operation) async {
     final previous = _storeTurn;
     final released = Completer<void>();
+
     _storeTurn = released.future;
+
     await previous;
+
     try {
       return await operation();
     } finally {
@@ -674,12 +1329,16 @@ final class SessionController {
   /// Não fabrica logout nem remove autenticação no provedor.
   void _onAuthenticationError(Object error, StackTrace stackTrace) {
     if (_disposed) return;
+
     if (error is! Exception) Error.throwWithStackTrace(error, stackTrace);
+
     ++_revision;
-    _activeVerification = null;
+
+    _activeEntry = null;
     _activeSignOut = null;
     _currentUid = null;
     _receivedUser = false;
+
     _emit(SessionRestorationFailed(cause: error, stackTrace: stackTrace));
   }
 
@@ -688,9 +1347,12 @@ final class SessionController {
   /// Uma chamada posterior a start pode registrar outra observação.
   void _onAuthenticationDone() {
     if (_disposed) return;
+
     _started = false;
     _authSubscription = null;
+
     final stack = StackTrace.current;
+
     _onAuthenticationError(
       IdentityException(
         kind: IdentityFailureKind.unexpectedExternalFailure,
@@ -703,16 +1365,15 @@ final class SessionController {
 
   /// Calcula o acesso local e publica a fotografia antes de notificar ouvintes.
   ///
-  /// O timer é rearmado para a evidência atual. Dados e diagnósticos permanecem
-  /// preservados quando a política muda por expiração.
+  /// O timer é rearmado para a expiração ou próxima tentativa. Dados e
+  /// diagnósticos permanecem preservados quando a política muda por expiração.
   void _emit(SessionState next) {
     if (_disposed) return;
-    _expirationTimer?.cancel();
-    _expirationTimer = null;
 
     if (next is SessionSignedIn) {
       next = SessionSignedIn(
         firebaseUid: next.firebaseUid,
+        user: _users[next.firebaseUid],
         verification: next.verification,
         cacheLoadResult: next.cacheLoadResult,
         operation: next.operation,
@@ -721,25 +1382,81 @@ final class SessionController {
         access: next.operation == SessionOperation.restoringCache
             ? SessionAccess.restoring
             : next.hasUnexpiredVerificationAt(_now())
-            ? SessionAccess.ready
+            ? ((_users[next.firebaseUid]?.status != InternalUserStatus.active ||
+                      !(_accountAuthentication.hasPassword))
+                  ? SessionAccess.profileRequired
+                  : SessionAccess.ready)
             : SessionAccess.entryRequired,
       );
     }
 
     _state = next;
+
     _changes.add(next);
-    if (next is SessionSignedIn && next.access == SessionAccess.ready) {
-      final remaining = next.verification!.expiresAt.difference(_now());
-      if (remaining <= Duration.zero) {
-        _expirationTimer = Timer(Duration.zero, refresh);
-      } else {
-        // Mantém a espera dentro de um intervalo suportado também na web.
-        final delay = remaining > const Duration(days: 1)
-            ? const Duration(days: 1)
-            : remaining;
-        _expirationTimer = Timer(delay, refresh);
+    _scheduleRefresh();
+  }
+
+  /// Obtém a agenda pertencente à conta e à evidência desta fotografia.
+  _RenewalSchedule _scheduleFor(SessionSignedIn current) {
+    final key = (current.firebaseUid, current.verification?.expiresAt);
+
+    if (_renewalSchedule?.key != key) {
+      _renewalSchedule = _RenewalSchedule(key: key);
+    }
+
+    return _renewalSchedule!;
+  }
+
+  /// Próximo instante elegível; nulo representa espera por ação explícita.
+  ///
+  /// Sem agenda, a primeira tentativa ocorre na janela de antecipação ou
+  /// imediatamente se o cache não forneceu evidência. A leitura é pura.
+  DateTime? _automaticRenewalAt(SessionSignedIn current) {
+    final key = (current.firebaseUid, current.verification?.expiresAt);
+
+    if (_renewalSchedule?.key == key) return _renewalSchedule!.nextAttemptAt;
+
+    return current.verification?.expiresAt.subtract(_automaticRenewalLead) ??
+        _now();
+  }
+
+  /// Agenda o próximo vencimento ou tentativa, inclusive com acesso pendente.
+  ///
+  /// Uma operação em curso mantém apenas o timer de expiração. Seu finally
+  /// rearma a agenda após liberar a exclusão mútua. Retomadas preservam os
+  /// instantes absolutos, sem reiniciar ou antecipar a espera progressiva.
+  void _scheduleRefresh() {
+    _refreshTimer?.cancel();
+
+    _refreshTimer = null;
+
+    final current = _state;
+
+    if (_disposed || current is! SessionSignedIn) return;
+
+    final now = _now();
+    DateTime? nextAt = current.hasUnexpiredVerificationAt(now)
+        ? current.verification!.expiresAt
+        : null;
+
+    if (!current.isBusy && _activeEntry == null && _activeSignOut == null) {
+      final renewalAt = _automaticRenewalAt(current);
+
+      if (renewalAt != null && (nextAt == null || renewalAt.isBefore(nextAt))) {
+        nextAt = renewalAt;
       }
     }
+
+    if (nextAt == null) return;
+
+    final remaining = nextAt.difference(now);
+    final delay = remaining <= Duration.zero
+        ? Duration.zero
+        : remaining > const Duration(days: 1)
+        ? const Duration(days: 1)
+        : remaining;
+
+    _refreshTimer = Timer(delay, refresh);
   }
 
   /// Solicita o encerramento e compartilha o mesmo Future entre chamadas.
@@ -755,16 +1472,39 @@ final class SessionController {
   /// Fecha os recursos próprios mesmo quando cancelar a inscrição falha.
   Future<void> _disposeResources() async {
     _disposed = true;
+
     ++_revision;
-    _activeVerification = null;
+
+    _activeEntry = null;
     _activeSignOut = null;
-    _expirationTimer?.cancel();
+
+    _refreshTimer?.cancel();
+
     try {
       await _authSubscription?.cancel();
     } finally {
       await _changes.close();
     }
   }
+}
+
+/// Agenda efêmera de recuperação de uma conta e sua evidência conhecida.
+///
+/// Expiração nula identifica recuperação sem cache. Trocas de identidade
+/// descartam a agenda; resultados obsoletos não podem alterá-la. O contador
+/// satura no último intervalo, sem crescer indefinidamente durante falhas.
+final class _RenewalSchedule {
+  /// Inicia a agenda sem falhas transitórias para a conta/evidência informada.
+  _RenewalSchedule({required this.key, this.nextAttemptAt});
+
+  /// UID e vencimento conhecidos; vencimento nulo representa cache sem evidência.
+  final (String, DateTime?) key;
+
+  /// Próxima tentativa permitida; nulo suspende a repetição automática.
+  DateTime? nextAttemptAt;
+
+  /// Índice saturado da espera após falhas transitórias consecutivas.
+  int transientFailures = 0;
 }
 
 /// Identidade e revisão de uma saída, incluindo a limpeza após UID nulo.
@@ -780,15 +1520,15 @@ final class _SignOutOperation {
 }
 
 /// Contexto de uma tentativa, distinto mesmo quando o UID se repete.
-final class _VerificationOperation {
+final class _EntryOperation {
   /// Captura a intenção, a identidade esperada e sua revisão inicial.
-  _VerificationOperation({
+  _EntryOperation({
     required this.renewal,
     required this.firebaseUid,
     required this.revision,
   });
 
-  /// Distingue reautenticação da primeira identidade esperada durante login.
+  /// Distingue renovação da primeira identidade esperada durante login.
   final bool renewal;
 
   /// UID esperado ou associado ao primeiro evento da autenticação.

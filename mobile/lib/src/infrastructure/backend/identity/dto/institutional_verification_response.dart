@@ -1,8 +1,8 @@
 /// Envelope HTTP do perfil, da instituição e da data de expiração da evidência.
 ///
-/// Esta biblioteca representa a resposta de sucesso do endpoint de verificação.
-/// O protocolo agrupa profile, institution e expiresAt, sem incluir o UID Firebase
-/// da conta que solicitou a operação.
+/// Este DTO representa a evidência presente nas respostas de verificação e de
+/// restauração da sessão. O protocolo agrupa profile, institution e expiresAt
+/// dentro de verification, ao lado do perfil interno em user.
 ///
 /// ## Participação no fluxo
 ///
@@ -90,7 +90,7 @@ class InstitutionalVerificationResponse {
 
   /// Expiração da evidência institucional, recebida em UTC no formato RFC 3339.
   ///
-  /// Corresponde a 24 horas após o início das consultas institucionais.
+  /// Corresponde a 120 dias após o início das consultas institucionais.
   /// É independente da expiração do token Firebase e não substitui a
   /// validação no servidor. A resposta não inclui um campo de TTL separado.
   @JsonKey(name: r'expiresAt', required: true, includeIfNull: false)
@@ -115,7 +115,7 @@ class InstitutionalVerificationResponse {
   /// Perfil, instituição e expiração são obrigatórios e não nulos. Propriedades
   /// desconhecidas são aceitas; dados inválidos causam falha de desserialização.
   /// A data segue `DateTime.parse`; o cliente não verifica que o texto recebido
-  /// estava em UTC ou representa a política de 24 horas do servidor. Falhas são
+  /// estava em UTC ou representa a política de 120 dias do servidor. Falhas são
   /// encapsuladas pela conversão checked, inclusive datas e UUIDs incompatíveis.
   factory InstitutionalVerificationResponse.fromJson(
     Map<String, dynamic> json,

@@ -28,7 +28,9 @@ final class FakePreferences implements SharedPreferencesAsync {
   @override
   Future<Map<String, Object?>> getAll({Set<String>? allowList}) async {
     final failure = readFailure.value;
+
     if (failure != null) Error.throwWithStackTrace(failure, StackTrace.current);
+
     return Map.fromEntries(
       values.entries.where(
         (entry) => allowList == null || allowList.contains(entry.key),
@@ -36,11 +38,18 @@ final class FakePreferences implements SharedPreferencesAsync {
     );
   }
 
+  /// Lê uma string pela mesma fronteira de falha usada por getAll.
+  @override
+  Future<String?> getString(String key) async =>
+      (await getAll(allowList: {key}))[key] as String?;
+
   /// Substitui o texto somente quando a etapa de gravação não falha.
   @override
   Future<void> setString(String key, String value) async {
     final failure = writeFailure.value;
+
     if (failure != null) Error.throwWithStackTrace(failure, StackTrace.current);
+
     values[key] = value;
   }
 
@@ -48,7 +57,9 @@ final class FakePreferences implements SharedPreferencesAsync {
   @override
   Future<void> remove(String key) async {
     final failure = removeFailure.value;
+
     if (failure != null) Error.throwWithStackTrace(failure, StackTrace.current);
+
     values.remove(key);
   }
 
