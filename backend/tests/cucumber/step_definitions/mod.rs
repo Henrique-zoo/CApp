@@ -14,6 +14,7 @@ mod consulta_faq;
 mod consulta_governanca;
 mod consulta_inscricao_eventos;
 mod consultas_estudantis;
+mod contas_e_sessoes;
 mod contexto_multi_ca;
 mod controle_vagas_eventos;
 mod criacao_centro_academico;
