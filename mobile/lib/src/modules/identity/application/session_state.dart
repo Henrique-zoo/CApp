@@ -10,9 +10,13 @@
 /// e falha de acompanhamento. SessionSignedIn significa que existe uma conta
 /// autenticada; sua verificação institucional ainda pode estar ausente ou expirada.
 ///
+/// SessionAccess também distingue conclusão de perfil de confirmação institucional.
 /// SessionAccess publica o destino calculado pelo controlador. SessionOperation
 /// indica a atividade em andamento e permite bloquear interações repetidas.
 /// Essas dimensões não devem ser inferidas apenas pelo tipo SessionSignedIn.
+/// requiresMicrosoftInteraction distingue confirmação de conta de repetição
+/// operacional: a interface oferece Microsoft somente quando a aplicação
+/// publica essa necessidade, sem interpretar exceções de SDK ou expiração.
 ///
 /// ## Falhas e validade
 ///
@@ -28,6 +32,7 @@
 library;
 
 import 'models/institutional_verification.dart';
+import 'models/internal_user.dart';
 import 'session_cache_result.dart';
 
 /// Destino local da interface, calculado pelo controlador da sessão.
@@ -41,7 +46,10 @@ enum SessionAccess {
   /// É necessário concluir a operação de entrada Microsoft e backend.
   entryRequired,
 
-  /// Existe autenticação e verificação institucional dentro do prazo local.
+  /// A identidade foi confirmada, mas falta concluir o perfil/credencial interna.
+  profileRequired,
+
+  /// Perfil interno ativo, credencial interna e confirmação institucional vigente.
   ready,
 
   /// Não foi possível determinar ou acompanhar a autenticação.
@@ -83,6 +91,9 @@ enum SessionOperation {
   /// Encerrando a sessão.
   signingOut,
 
+  /// Vinculando credenciais e concluindo o perfil no backend.
+  completingProfile,
+
   /// Recuperando o cache do usuário autenticado.
   restoringCache,
 }
@@ -95,6 +106,9 @@ enum SessionOperation {
 /// sua causa em SessionFailureDetails. Falha de limpeza após logout não implica
 /// que a autenticação permaneça ativa.
 enum SessionFailure {
+  /// A obtenção silenciosa exige confirmação ou autorização Microsoft.
+  microsoftInteractionRequired,
+
   /// Uma operação externa foi cancelada, sem implicar logout.
   operationCancelled,
 
@@ -109,6 +123,9 @@ enum SessionFailure {
 
   /// Não foi possível concluir a verificação institucional.
   institutionalVerificationFailed,
+
+  /// Não foi possível vincular a credencial ou concluir o perfil interno.
+  profileCompletionFailed,
 
   /// Uma dependência está temporariamente indisponível.
   serviceUnavailable,
@@ -174,6 +191,15 @@ sealed class SessionState {
   /// Indica se existe uma operação em andamento.
   /// Deriva exclusivamente de [operation], sem consultar tarefas ou streams.
   bool get isBusy => operation != SessionOperation.idle;
+
+  /// A recuperação pode apresentar autorização após uma ação do usuário.
+  ///
+  /// Necessidade explícita de interação ou seu cancelamento permitem oferecer
+  /// a ação Microsoft. Falhas de rede, expiração e ausência de cache não são
+  /// evidência dessa necessidade. A obtenção ainda começa silenciosamente.
+  bool get requiresMicrosoftInteraction =>
+      failure == SessionFailure.microsoftInteractionRequired ||
+      failure == SessionFailure.authenticationCancelled;
 }
 
 /// Aguardando o primeiro estado restaurado da autenticação.
@@ -217,6 +243,7 @@ final class SessionSignedIn extends SessionState {
   /// verificação presente e válida no instante da publicação.
   const SessionSignedIn({
     required this.firebaseUid,
+    this.user,
     this.verification,
     this.cacheLoadResult,
     super.access,
@@ -227,6 +254,9 @@ final class SessionSignedIn extends SessionState {
 
   /// UID ao qual pertencem os dados deste estado.
   final String firebaseUid;
+
+  /// Perfil interno conhecido; nulo enquanto não foi possível restaurá-lo.
+  final InternalUser? user;
 
   /// Última verificação institucional conhecida para esta conta.
   ///

@@ -68,6 +68,7 @@ lib/
             ├── infrastructure/
             │   ├── backend/          # Implementação das portas sobre clientes HTTP.
             │   ├── firebase/         # Adaptação do SDK às portas do módulo.
+            │   ├── microsoft/        # Inicialização MSAL e credenciais Graph.
             │   └── preferences/      # Persistência e codec do formato local.
             └── presentation/         # Telas, componentes e mensagens do módulo.
 ~~~
@@ -303,14 +304,64 @@ e sessão estão nos Dartdocs, principalmente:
   restauração, entrada, prazo, concorrência, persistência e encerramento.
 - [InstitutionalAuthService](lib/src/modules/identity/application/institutional_auth_service.dart):
   associação da operação à identidade autenticada.
+- [FirebaseAccountAuth](lib/src/modules/identity/infrastructure/firebase/firebase_account_auth.dart):
+  seleção de contas, credenciais internas e políticas de saída.
 - [FirebaseMicrosoftAuth](lib/src/modules/identity/infrastructure/firebase/firebase_microsoft_auth.dart):
-  observação do SDK, interação Microsoft e credenciais.
+  observação Firebase e integração entre login e credenciais Microsoft.
+- [MicrosoftTokenProvider](lib/src/modules/identity/application/ports/microsoft_token_provider.dart):
+  contrato de obtenção silenciosa, autorização interativa e limpeza da conta.
+- [MsalMicrosoftTokenProvider](lib/src/modules/identity/infrastructure/microsoft/msal_microsoft_token_provider.dart):
+  cache de credenciais pelo SDK e tradução de falhas MSAL.
 - [Gateway institucional](lib/src/modules/identity/infrastructure/backend/backend_institutional_identity_gateway.dart):
   tradução entre protocolo e contrato de aplicação.
 - [SessionCacheCodec](lib/src/modules/identity/infrastructure/preferences/session_cache_codec.dart):
   formato persistente e compatibilidade.
 - [SessionGate](lib/src/app/session_gate.dart):
   seleção visual e propriedade das subárvores.
+
+## Conta interna e contas salvas
+
+O primeiro acesso Microsoft provisiona uma conta `Incomplete`. Para concluir o
+cadastro, o usuário informa apelido, período atual do curso e semestre de ingresso
+na instituição, além de configurar e-mail e senha. O e-mail institucional é uma
+sugestão; outro endereço pode ser escolhido. A credencial é vinculada ao mesmo
+UID Firebase, e o backend ativa a conta após validar o perfil e a autenticação
+com senha. A verificação institucional devolve usuário e evidência juntos,
+dispensando outra consulta de restauração após a verificação.
+
+Dados não nulos do Microsoft Graph são preservados. Ausências podem receber
+complementos declarados pelo usuário, armazenados no perfil CApp sem substituir
+a evidência institucional.
+
+A entrada permite selecionar uma conta salva, autenticar com e-mail/senha ou
+iniciar o acesso Microsoft. Cada conta salva usa um FirebaseApp nomeado do mesmo
+projeto, com persistência de credenciais administrada pelo SDK. O índice local
+guarda referências e rótulos; senhas e tokens não são copiados para preferências.
+Selecionar uma conta tenta reutilizar sua sessão, respeitando a política de saída
+e a validade institucional. Sair não seleciona outra conta automaticamente.
+
+O logout oferece três políticas:
+
+- **Manter entrada rápida:** conserva a sessão local para uma futura seleção.
+- **Exigir login:** encerra as credenciais locais e mantém a conta lembrada,
+  exigindo senha na próxima seleção. É a opção padrão para contas com senha.
+- **Esquecer conta:** encerra as credenciais e remove a referência e os caches de
+  perfil e verificação daquela conta, preservando as demais contas e o cadastro
+  remoto.
+
+O retorno à entrada aguarda o término da tentativa de limpeza. Falhas são
+informadas; a remoção dos caches pode ser repetida sem novo login.
+
+A confirmação institucional vale **120 dias**, independentemente da sessão
+Firebase. Após autenticar, inclusive pela opção Microsoft, o aplicativo consulta
+`GET /auth/session`. Uma confirmação vigente é reutilizada sem solicitar token
+MSAL, consultar o Graph ou estender o prazo. Cadastro incompleto retoma o formulário.
+Conta ainda não provisionada (`404 account_not_provisioned`) ou confirmação ausente
+exige verificação institucional; falhas temporárias repetem a restauração, sem
+serem interpretadas como primeiro acesso. Quando é necessário sincronizar, o MSAL tenta obter autorização
+silenciosamente e solicita interação quando exigida. Falhas temporárias seguem
+as tentativas controladas do controlador. O backend continua responsável pela
+validade da evidência e pela autorização das operações.
 
 ## Organização dos testes
 
@@ -346,6 +397,10 @@ test/
 │       ├── infrastructure/
 │       │   ├── backend/
 │       │   │   └── backend_institutional_identity_gateway_test.dart
+│       │   ├── firebase/
+│       │   │   └── firebase_microsoft_auth_test.dart
+│       │   ├── microsoft/
+│       │   │   └── msal_microsoft_token_provider_test.dart
 │       │   └── preferences/
 │       │       ├── preferences_session_store_test.dart
 │       │       └── session_cache_codec_test.dart
@@ -376,6 +431,13 @@ As verificações transversais de arquitetura ficam em architecture/; as do runn
 Gherkin, em bdd/. Essas suítes não correspondem a um arquivo de lib/. Os fakes
 compartilhados ficam em support/ e não fazem parte da implementação distribuída.
 
+A renovação automática integra a suíte de SessionController. Ela verifica
+temporização, espera progressiva após falhas temporárias, recuperação sem cache,
+necessidade de interação, preservação do prazo após falha e isolamento entre
+contas. A apresentação distingue confirmação Microsoft de repetição de conexão.
+As suítes de FirebaseMicrosoftAuth e do provedor MSAL
+controlam a fronteira dos SDKs sem executar autenticação nativa.
+
 [architecture_boundaries_test.dart](test/architecture/architecture_boundaries_test.dart)
 verifica as diretivas de importação e exportação do módulo atual: aplicação
 sem dependência das outras camadas, apresentação sem adaptadores, transporte sem
@@ -400,7 +462,41 @@ flutter test --no-pub test/src/infrastructure/backend
 flutter test --no-pub test/src/modules/identity/application
 ~~~
 
+## Configuração e execução Android
+
+No Firebase Console, habilite os provedores **Microsoft** e **E-mail/senha** e
+configure a recuperação de senha. A política de senha do Firebase determina sua
+força; as credenciais são associadas pelo fluxo de
+[account linking](https://firebase.google.com/docs/auth/flutter/account-linking).
+
+A composição atual mantém autenticação Firebase e usa MSAL para obter
+credenciais Microsoft. O bootstrap Firebase precisa estar configurado; o registro
+Microsoft também precisa contemplar o aplicativo Android e sua assinatura.
+O filtro de `BrowserTabActivity` em `android/app/src/main/AndroidManifest.xml`
+deve corresponder à redirect URI do registro. A configuração de múltiplas contas
+fica em `assets/auth/msal_config.json`, declarado no `pubspec.yaml`.
+
+A partir de `mobile`, forneça os valores públicos do seu registro Microsoft:
+
+~~~bash
+flutter run \
+  --dart-define=MSAL_CLIENT_ID='<application-client-id>' \
+  --dart-define=MSAL_ANDROID_REDIRECT_URI='<redirect-uri-do-registro-android>' \
+  --dart-define=BACKEND_BASE_URL=http://10.0.2.2:3000
+~~~
+
+Use a redirect URI no formato fornecido pelo registro; o `android:path` do
+manifesto contém o hash da assinatura sem a codificação percentual da URI.
+Não há client secret no aplicativo. Os dois parâmetros MSAL são obrigatórios;
+valores vazios interrompem a inicialização. O endereço de backend mostrado
+atende ao emulador Android; dispositivos físicos precisam de um endereço
+alcançável. A composição MSAL atual ainda não configura as outras plataformas.
+
 ## Documentação e validação
+
+O README concentra arquitetura, configuração, execução e um resumo dos fluxos.
+Detalhes operacionais e decisões dos componentes ficam nos Dartdocs das
+bibliotecas responsáveis.
 
 Cada biblioteca autoral descreve em Dartdoc sua motivação, posição na arquitetura,
 responsabilidades, percurso dos dados e limites. Tipos e operações detalham
@@ -464,3 +560,87 @@ continua registrando testes ignorados em vez de falhar por ausência de testes.
 A CI gera os cenários antes de `flutter analyze` e verifica os filtros com
 os testes de `test/`; executar os cenários de integração exige um dispositivo
 ou emulador Flutter disponível.
+
+
+## Firebase App Check
+
+O bootstrap ativa App Check antes de Firebase Auth. No Android, builds debug usam
+AndroidDebugProvider; profile/release usam Play Integrity. Cada FirebaseApp
+nomeado do seletor também é ativado antes do FirebaseAuth correspondente. O SDK
+possui o cache e a renovação; não copiamos JWTs App Check para preferências.
+Requisições de identidade levam `X-Firebase-AppCheck` e o Bearer da conta ativa.
+As sondagens `/health` e `/ready` continuam públicas. Falhas da comprovação são
+classificadas separadamente de senha incorreta e preservam os caches da conta.
+
+Para desenvolvimento com várias contas, use **um token de depuração compartilhado**
+por todas as instâncias. Gere um UUID uma vez, cadastre-o no Console e defina
+`FIREBASE_APP_CHECK_DEBUG_TOKEN` no arquivo local usado pelo Flutter, por exemplo
+`mobile/.env` (ignorado pelo Git). Sem valor explícito, o SDK gera segredos por
+instância, o que exigiria cadastros adicionais ao criar contêineres de contas.
+Nunca use o segredo de depuração como JWT no cabeçalho HTTP.
+
+1. No Firebase Console do projeto `capp-a331b`, abra **Security > App Check > Apps**.
+2. Cadastre o Android `br.com.capp`, App ID
+   `1:13241645392:android:f9927433685734e2a45455`, com Play Integrity e o SHA-256
+   do certificado usado na distribuição. Configure a vinculação com o projeto
+   Cloud e os veredictos conforme o canal de distribuição (Play ou instalação externa).
+   Na distribuição pelo Google Play, use o certificado de assinatura do aplicativo
+   indicado no Play Console. O certificado identifica a assinatura do APK, não o
+   computador ou o celular. Builds debug usam o segredo do próximo passo, sem
+   atestado Play Integrity; cadastrar um SHA-256 debug não substitui esse segredo.
+3. Em **Manage debug tokens**, cadastre o UUID privado do seu ambiente. Configure
+   o mesmo valor em `mobile/.env`, junto aos parâmetros Microsoft já existentes:
+
+   ```dotenv
+   FIREBASE_APP_CHECK_DEBUG_TOKEN=UUID_PRIVADO_CADASTRADO_NO_CONSOLE
+   ```
+
+4. Execute com `flutter run --dart-define-from-file=.env` a partir de `mobile/`.
+   Se usar parâmetros individuais, acrescente
+   `--dart-define=FIREBASE_APP_CHECK_DEBUG_TOKEN=UUID_PRIVADO` ao comando habitual.
+   O parâmetro é usado somente no modo debug; a produção continua usando Play Integrity.
+5. Habilite enforcement dos produtos Firebase somente depois de cadastrar os apps
+   utilizados e verificar as métricas. O backend Rust já fiscaliza suas próprias
+   rotas e não depende desse botão do Console.
+
+Se a obtenção do atestado retornar `403` com `API_KEY_SERVICE_BLOCKED` ou
+`Requests to this API firebaseappcheck.googleapis.com ... are blocked`, confira
+a chave Android usada por `firebase_options.dart` e `google-services.json` em
+**Google Cloud > APIs e serviços > Credenciais**. Nas **Restrições de API** dessa
+chave, acrescente **Firebase App Check API** (`firebaseappcheck.googleapis.com`),
+preservando as demais APIs permitidas. Se a API não estiver disponível na lista,
+habilite-a em **APIs e serviços > Biblioteca**. Esse bloqueio ocorre antes da
+validação do segredo de depuração e é independente do cadastro do certificado.
+Consulte a [lista oficial de APIs necessárias para cada serviço Firebase](https://firebase.google.com/docs/projects/api-keys#required-apis-for-firebase-services).
+
+O login Microsoft atual usa `FirebaseAuth.signInWithProvider`, que abre uma
+etapa OAuth no navegador antes da autorização Graph pelo MSAL. A chave também
+é usada nessa etapa web. Restringi-la a **Apps Android** pode bloquear a consulta
+de configuração do Firebase Auth com `API_KEY_ANDROID_APP_BLOCKED` e
+`androidPackage: <empty>`, mesmo quando pacote e SHA-1 estão corretos: essa
+requisição não envia a identificação Android. Nesse fluxo, mantenha
+**Restrições do aplicativo > Nenhum** para a chave usada pelo Firebase Auth e
+preserve as **Restrições de API**, incluindo Identity Toolkit API, Token Service
+API e Firebase App Check API, além das demais APIs Firebase utilizadas.
+O SHA-1 continua cadastrado no aplicativo Android do Firebase; remover a
+restrição de aplicativo da chave não desativa App Check ou sua fiscalização
+no backend. A [limitação da etapa web é documentada pelos mantenedores do Firebase](https://github.com/firebase/firebase-android-sdk/issues/1757#issuecomment-655777739).
+
+Para confirmar que o backend em execução já aplica App Check, faça uma chamada
+sem credenciais a `GET /auth/session`. A resposta deve ser `403` com código
+`app_check_required`. Se retornar `401 unauthorized`, a autenticação Firebase foi
+atingida antes dessa proteção: confira se está acessando o endereço correto e
+recrie o serviço com `docker compose --profile backend up -d --build backend`
+a partir da raiz do repositório.
+
+O `.env` da raiz do repositório configura o backend com o número público do
+projeto e a lista de App IDs permitidos, conforme `.env.example`. O arquivo local
+do mobile configura o build Flutter; não passe o `.env` do banco ao Flutter.
+Recompile e reinicie o backend após atualizar suas variáveis, e faça uma nova
+execução do Flutter: um plugin nativo novo não é carregado por hot reload.
+
+A preparação inclui provedores Apple debug/App Attest com fallback Device Check,
+mas o fluxo MSAL atual segue focado em Android; web e desktop precisam de uma
+configuração própria. Consulte a [ativação oficial Flutter](https://firebase.google.com/docs/app-check/flutter/default-providers),
+o [provedor debug](https://firebase.google.com/docs/app-check/flutter/debug-provider)
+e a [configuração Play Integrity](https://firebase.google.com/docs/app-check/android/play-integrity-provider).

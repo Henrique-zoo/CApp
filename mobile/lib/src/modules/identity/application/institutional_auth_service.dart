@@ -1,20 +1,28 @@
-/// Caso de uso de autenticação Microsoft e verificação institucional.
+/// Casos de uso de entrada e renovação da verificação institucional.
 ///
-/// Esta biblioteca reúne duas integrações que precisam referir-se à mesma conta:
-/// obter uma credencial Microsoft e solicitar a verificação ao backend.
+/// Esta biblioteca separa a autenticação Firebase da renovação institucional.
+/// Na renovação, obter uma credencial Microsoft e solicitar a verificação ao
+/// backend precisam referir-se à mesma conta. Obter
+/// um token, inclusive silenciosamente, não comprova por si só o vínculo atual.
 /// A coordenação depende de portas da aplicação, mantendo o caso de uso utilizável
 /// sem SDK Firebase, Dio, JSON ou widgets.
 ///
 /// ## Fluxo de uma verificação
 ///
-/// No primeiro login, MicrosoftSignIn obtém o access token e AuthSession informa
-/// o UID estabelecido. Na reautenticação, o UID é capturado antes de abrir o
-/// provedor, de modo que outra conta não seja aceita como renovação.
+/// No login, MicrosoftSignIn estabelece a autenticação e AuthSession informa
+/// o UID. O controlador consulta a conta e só solicita renovação se não houver
+/// confirmação institucional válida. Na renovação, o UID é capturado antes de solicitar a
+/// credencial da conta atual, para detectar mudanças durante essa obtenção.
+/// A operação pode concluir sem interação; allowInteraction: false impede
+/// a abertura do provedor quando iniciada automaticamente pelo controlador.
 ///
 /// O serviço confere a identidade antes da chamada ao InstitutionalIdentityGateway
-/// e depois de sua conclusão. A resposta é envolvida em
-/// InstitutionalVerificationResult junto ao UID correspondente, pois o contrato
+/// e depois de sua conclusão. A conta e a evidência são envolvidas em
+/// AccountSessionResult junto ao UID correspondente, pois o contrato
 /// HTTP não inclui esse identificador Firebase.
+/// Essa conferência local protege a associação do resultado à sessão; a
+/// correspondência entre o token Microsoft e a identidade vinculada ao Firebase
+/// é validada pelo backend, e não pelo UID informado no mobile.
 ///
 /// ## Relação com o controlador
 ///
@@ -31,8 +39,9 @@ library;
 import 'package:capp/src/modules/identity/application/ports/institutional_identity_gateway.dart';
 
 import 'errors/session_identity_changed_exception.dart';
+import 'errors/identity_exception.dart';
 import 'ports/auth_session.dart';
-import 'models/institutional_verification_result.dart';
+import 'models/account_session_result.dart';
 import 'ports/microsoft_sign_in.dart';
 
 /// Executa autenticação e verificação para uma mesma identidade.
@@ -60,38 +69,44 @@ final class InstitutionalAuthService {
   final MicrosoftSignIn _microsoftSignIn;
   final AuthSession _authSession;
 
-  /// Autentica com Microsoft e verifica a identidade institucional.
+  /// Estabelece a identidade Firebase para a entrada Microsoft.
   ///
-  /// Captura o UID estabelecido pela autenticação e confere sua permanência
-  /// durante a verificação externa.
-  ///
-  /// Retorna a verificação associada à conta correspondente.
-  /// Falhas dos contratos recebidos propagam sem conversão em resultado nulo.
-  ///
-  /// Lança [SessionIdentityChangedException] se não houver identidade
-  /// após autenticar ou se ela mudar durante a verificação.
-  Future<InstitutionalVerificationResult> signInAndVerify() async {
-    final accessToken = await _microsoftSignIn.signInAndGetAccessToken();
-    final firebaseUid = _requireCurrentUserId();
-
-    return _verify(firebaseUid: firebaseUid, microsoftAccessToken: accessToken);
+  /// SessionController restaura a conta autenticada antes de decidir se precisa
+  /// de uma verificação. O retorno exige um UID, mas não solicita token MSAL,
+  /// consulta o Graph ou determina se o perfil interno está completo.
+  Future<void> signIn() async {
+    await _microsoftSignIn.signIn();
+    _requireCurrentUserId();
   }
 
-  /// Reautentica a conta atual e obtém uma nova verificação institucional.
+  /// Renova a verificação institucional para a conta autenticada.
   ///
-  /// Captura o UID antes da interação Microsoft, impedindo que outra conta
-  /// seja aceita como renovação da identidade anterior.
+  /// Tenta obter a credencial Microsoft silenciosamente.
+  /// [allowInteraction] permite apresentar autorização Microsoft
+  /// quando a operação foi iniciada pelo usuário.
   ///
-  /// Reautenticar não prorroga a evidência por si só: a verificação externa
-  /// também precisa concluir.
+  /// Com interação desabilitada, a necessidade de participação
+  /// do usuário é propagada ao chamador.
   ///
-  /// Falhas propagam com seus diagnósticos. A ausência ou mudança da conta
-  /// lança [SessionIdentityChangedException].
-  Future<InstitutionalVerificationResult> reauthenticateAndVerify() async {
+  /// Confere a permanência do UID antes e depois da verificação.
+  /// Retorna o UID, o perfil interno e a nova evidência; não grava cache nem altera o estado
+  /// observável. Ausência ou mudança de conta lança
+  /// [SessionIdentityChangedException]. Falhas das portas propagam.
+  ///
+  /// Por exemplo, uma coordenação que não admite autorização interativa usa:
+  /// ```dart
+  /// final result = await service.renewVerification(allowInteraction: false);
+  /// ```
+  /// O chamador deve tratar a necessidade de interação e preservar o prazo da
+  /// evidência anterior se a operação falhar.
+  Future<AccountSessionResult> renewVerification({
+    bool allowInteraction = true,
+  }) async {
     final firebaseUid = _requireCurrentUserId();
 
-    final accessToken = await _microsoftSignIn
-        .reauthenticateAndGetAccessToken();
+    final accessToken = await _microsoftSignIn.getAccessTokenForCurrentUser(
+      allowInteraction: allowInteraction,
+    );
 
     return _verify(firebaseUid: firebaseUid, microsoftAccessToken: accessToken);
   }
@@ -103,20 +118,31 @@ final class InstitutionalAuthService {
   ///
   /// A revisão do controlador continua necessária para detectar contextos
   /// obsoletos mesmo quando o UID volta a ser o mesmo.
-  Future<InstitutionalVerificationResult> _verify({
+  Future<AccountSessionResult> _verify({
     required String firebaseUid,
     required String microsoftAccessToken,
   }) async {
     _requireSameUser(firebaseUid);
 
-    final verification = await _identityGateway.verify(
+    final session = await _identityGateway.verify(
       microsoftAccessToken: microsoftAccessToken,
     );
 
     _requireSameUser(firebaseUid);
 
-    return InstitutionalVerificationResult(
+    final verification = session.verification;
+
+    if (verification == null) {
+      throw IdentityException(
+        kind: IdentityFailureKind.invalidResponse,
+        cause: const FormatException('Verificação institucional ausente'),
+        stackTrace: StackTrace.current,
+      );
+    }
+
+    return AccountSessionResult(
       firebaseUid: firebaseUid,
+      user: session.user,
       verification: verification,
     );
   }

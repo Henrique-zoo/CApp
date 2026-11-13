@@ -18,15 +18,20 @@ void main() {
     var tokenCalls = 0;
     final backend = BackendApi(
       baseUrl: 'https://backend.example.invalid',
+      getFirebaseAppCheckToken: () async =>
+          throw StateError('Ready não consulta App Check'),
       getFirebaseIdToken: () async {
         tokenCalls++;
+
         return null;
       },
       dio: createTestDio(adapter),
     );
+
     addTearDown(() => backend.close(force: true));
 
     await backend.monitoring.getReadiness();
+
     expect(tokenCalls, 0);
     expect(adapter.requests, hasLength(1));
     expect(adapter.requests.single.path, '/ready');
@@ -43,6 +48,7 @@ void main() {
         (_) => ResponseBody.fromString('', status),
       );
       final api = MonitoringApi(createTestDio(adapter));
+
       await expectLater(
         api.getReadiness(),
         throwsA(
@@ -53,6 +59,7 @@ void main() {
           ),
         ),
       );
+
       expect(adapter.requests, hasLength(1));
     });
   }

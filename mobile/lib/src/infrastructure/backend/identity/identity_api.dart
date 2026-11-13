@@ -12,7 +12,7 @@
 /// interceptor que acrescente o ID token Firebase em Authorization.
 ///
 /// Somente HTTP 200 é tratado como sucesso. O corpo precisa ser um objeto JSON
-/// e é desserializado em InstitutionalVerificationResponse.
+/// e é desserializado em InstitutionalAuthResponse.
 /// Corpos de respostas rejeitadas continuam disponíveis ao gateway.
 ///
 /// ## Fronteira com o módulo
@@ -21,15 +21,16 @@
 /// e classifica falhas reconhecidas. O cliente HTTP propaga DioException e
 /// falhas de formato; não decide se a tela permanece na entrada.
 ///
-/// A operação não provisiona usuário interno ou cria uma sessão independente
-/// no backend. O cliente também não persiste o perfil, renova tokens Microsoft
+/// A verificação devolve a conta provisionada e a evidência na mesma resposta.
+/// Restauração e conclusão do perfil continuam disponíveis por endpoints próprios. O Firebase continua administrando a sessão. O cliente também não persiste o perfil, renova tokens Microsoft
 /// ou repete automaticamente requisições canceladas.
 library;
 
 import 'package:dio/dio.dart';
 
 import 'dto/institutional_auth_request.dart';
-import 'dto/institutional_verification_response.dart';
+import 'dto/account_session_response.dart';
+import 'dto/institutional_auth_response.dart';
 
 /// Endpoints HTTP do módulo de identidade definidos no OpenAPI.
 final class IdentityApi {
@@ -64,7 +65,7 @@ final class IdentityApi {
   ///
   /// O cancelamento do transporte não garante a reversão de operações
   /// já executadas no backend.
-  Future<InstitutionalVerificationResponse> verifyInstitutionalIdentity({
+  Future<InstitutionalAuthResponse> verifyInstitutionalIdentity({
     required InstitutionalAuthRequest request,
     CancelToken? cancelToken,
   }) async {
@@ -76,7 +77,7 @@ final class IdentityApi {
         responseType: ResponseType.json,
         receiveDataWhenStatusError: true,
         validateStatus: (status) => status == 200,
-        extra: const {'firebaseAuth': true},
+        extra: const {'firebaseAuth': true, 'firebaseAppCheck': true},
       ),
       cancelToken: cancelToken,
     );
@@ -86,6 +87,59 @@ final class IdentityApi {
     if (data is! Map<String, dynamic>) {
       throw const FormatException('Resposta institucional sem objeto JSON');
     }
-    return InstitutionalVerificationResponse.fromJson(data);
+
+    return InstitutionalAuthResponse.fromJson(data);
+  }
+
+  /// Restaura a conta autenticada sem obter uma credencial Microsoft.
+  Future<AccountSessionResponse> restoreSession() async =>
+      AccountSessionResponse.fromJson(await _accountRequest('/auth/session'));
+
+  /// Envia dados de perfil e complementos de ausências do Graph.
+  /// Senha e e-mail de login são tratados pelo Firebase; institutionalEmail é
+  /// um contato declarado separado, sem comprovação automática.
+  Future<InternalUserResponse> completeProfile({
+    required String nickname,
+    required int currentSemester,
+    required String institutionEntrySemester,
+    String? name,
+    String? institutionalEmail,
+    String? courseName,
+  }) async => InternalUserResponse.fromJson(
+    await _accountRequest(
+      '/users/me/profile',
+      data: {
+        'nickname': nickname,
+        'currentSemester': currentSemester,
+        'institutionEntrySemester': institutionEntrySemester,
+        'name': ?name,
+        'institutionalEmail': ?institutionalEmail,
+        'courseName': ?courseName,
+      },
+    ),
+  );
+
+  Future<Map<String, dynamic>> _accountRequest(
+    String path, {
+    Map<String, Object>? data,
+  }) async {
+    final response = await _dio.request<Object?>(
+      path,
+      data: data,
+      options: Options(
+        method: data == null ? 'GET' : 'PUT',
+        contentType: Headers.jsonContentType,
+        responseType: ResponseType.json,
+        validateStatus: (status) => status == 200,
+        receiveDataWhenStatusError: true,
+        extra: const {'firebaseAuth': true, 'firebaseAppCheck': true},
+      ),
+    );
+
+    if (response.data is! Map<String, dynamic>) {
+      throw const FormatException('Resposta sem objeto JSON');
+    }
+
+    return response.data! as Map<String, dynamic>;
   }
 }

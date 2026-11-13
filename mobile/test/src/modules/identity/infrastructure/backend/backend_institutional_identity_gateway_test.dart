@@ -26,6 +26,70 @@ BackendInstitutionalIdentityGateway _gateway(
 
 /// Registra conversões e preservação de falhas na fronteira do módulo.
 void main() {
+  test('restauração sem conta distingue primeiro acesso de recusa', () async {
+    final gateway = _gateway((options) {
+      expect(options.method, 'GET');
+      expect(options.path, '/auth/session');
+
+      return jsonTestResponse(
+        backendErrorBody('account_not_provisioned'),
+        status: 404,
+      );
+    });
+
+    await expectLater(
+      gateway.restoreSession(),
+      throwsA(
+        isA<IdentityException>()
+            .having(
+              (e) => e.kind,
+              'categoria',
+              IdentityFailureKind.accountNotProvisioned,
+            )
+            .having((e) => e.backendCode, 'código', 'account_not_provisioned'),
+      ),
+    );
+  });
+
+  test('404 genérico não é interpretado como conta não provisionada', () async {
+    final gateway = _gateway(
+      (_) => jsonTestResponse(backendErrorBody('route_not_found'), status: 404),
+    );
+
+    await expectLater(
+      gateway.restoreSession(),
+      throwsA(
+        isA<IdentityException>().having(
+          (e) => e.kind,
+          'categoria',
+          isNot(IdentityFailureKind.accountNotProvisioned),
+        ),
+      ),
+    );
+  });
+
+  test(
+    'perfil semanticamente inválido é rejeitado ao converter o DTO',
+    () async {
+      final body = backendInstitutionalAuthBody();
+
+      (body['user'] as Map)['status'] = 'active';
+
+      final gateway = _gateway((_) => jsonTestResponse(body));
+
+      await expectLater(
+        gateway.verify(microsoftAccessToken: 'microsoft-test-token'),
+        throwsA(
+          isA<IdentityException>().having(
+            (e) => e.kind,
+            'categoria',
+            IdentityFailureKind.invalidResponse,
+          ),
+        ),
+      );
+    },
+  );
+
   test('não estudante é sucesso com modelos próprios', () async {
     final gateway = _gateway((options) {
       expect(options.path, '/auth/institutional/verify');
@@ -33,43 +97,49 @@ void main() {
         (options.data as Map)['microsoftAccessToken'],
         'microsoft-test-token',
       );
-      return jsonTestResponse(backendVerificationBody());
+
+      return jsonTestResponse(backendInstitutionalAuthBody());
     });
     final result = await gateway.verify(
       microsoftAccessToken: 'microsoft-test-token',
     );
-    expect(result.profile.affiliation, const NonStudentAffiliation());
-    expect(result.profile.name, 'Pessoa Exemplo');
+
     expect(
-      result.profile.microsoftObjectId,
+      result.verification!.profile.affiliation,
+      const NonStudentAffiliation(),
+    );
+    expect(result.verification!.profile.name, 'Pessoa Exemplo');
+    expect(
+      result.verification!.profile.microsoftObjectId,
       const UuidValue.raw('00000000-0000-0000-0000-000000000001'),
     );
     expect(
-      result.institution,
+      result.verification!.institution,
       const InstitutionSummary(
         id: UuidValue.raw('00000000-0000-0000-0000-000000000002'),
         name: 'Instituição Exemplo',
         acronym: 'IEX',
       ),
     );
-    expect(result.expiresAt, DateTime.utc(2026, 1, 1, 13));
+    expect(result.verification!.expiresAt, DateTime.utc(2026, 1, 1, 13));
   });
 
   test('preserva instituição sem sigla no perfil estudantil', () async {
     final gateway = _gateway(
       (_) => jsonTestResponse(
-        backendVerificationBody(student: true, institutionAcronym: null),
+        backendInstitutionalAuthBody(student: true, institutionAcronym: null),
       ),
     );
     final result = await gateway.verify(
       microsoftAccessToken: 'microsoft-test-token',
     );
+
     expect(
-      result.profile.affiliation,
+      result.verification!.profile.affiliation,
       const StudentAffiliation(courseName: null),
     );
-    expect(result.institution.name, 'Instituição Exemplo');
-    expect(result.institution.acronym, isNull);
+    expect(result.verification!.institution.name, 'Instituição Exemplo');
+    expect(result.verification!.institution.acronym, isNull);
   });
 
   for (final field in [
@@ -79,9 +149,13 @@ void main() {
     test(
       'UUID inválido em ${field.$1}.${field.$2} é resposta inválida',
       () async {
-        final body = backendVerificationBody();
-        (body[field.$1] as Map)[field.$2] = 'not-a-uuid';
+        final body = backendInstitutionalAuthBody();
+
+        ((body['verification'] as Map)[field.$1] as Map)[field.$2] =
+            'not-a-uuid';
+
         final gateway = _gateway((_) => jsonTestResponse(body));
+
         await expectLater(
           gateway.verify(microsoftAccessToken: 'microsoft-test-token'),
           throwsA(
@@ -103,6 +177,9 @@ void main() {
   }
 
   for (final scenario in [
+    (403, 'app_check_required', IdentityFailureKind.appVerificationFailed),
+    (403, 'app_check_invalid', IdentityFailureKind.appVerificationFailed),
+    (503, 'app_check_unavailable', IdentityFailureKind.serviceUnavailable),
     (401, 'expired_token', IdentityFailureKind.credentialsRejected),
     (403, 'unknown_institution', IdentityFailureKind.institutionNotSupported),
     (
@@ -120,6 +197,7 @@ void main() {
           status: scenario.$1,
         ),
       );
+
       await expectLater(
         gateway.verify(microsoftAccessToken: 'microsoft-test-token'),
         throwsA(
@@ -143,6 +221,7 @@ void main() {
 
   test('sucesso com corpo incompatível gera falha explícita', () async {
     final gateway = _gateway((_) => jsonTestResponse(<Object?>[]));
+
     await expectLater(
       gateway.verify(microsoftAccessToken: 'microsoft-test-token'),
       throwsA(
@@ -163,6 +242,7 @@ void main() {
         'error': {'code': 42},
       }, status: 503),
     );
+
     await expectLater(
       gateway.verify(microsoftAccessToken: 'microsoft-test-token'),
       throwsA(
@@ -190,6 +270,7 @@ void main() {
   test('erro de programação encapsulado não vira indisponibilidade', () async {
     final cause = StateError('erro interno simulado');
     final gateway = _gateway((_) => throw cause);
+
     await expectLater(
       gateway.verify(microsoftAccessToken: 'microsoft-test-token'),
       throwsA(same(cause)),
@@ -203,6 +284,7 @@ void main() {
         reason: 'cancelamento simulado',
       ),
     );
+
     await expectLater(
       gateway.verify(microsoftAccessToken: 'microsoft-test-token'),
       throwsA(

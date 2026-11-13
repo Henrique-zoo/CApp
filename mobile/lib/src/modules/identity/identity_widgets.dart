@@ -9,7 +9,7 @@
 /// A composição entrega um SessionController iniciado e o estado atual à
 /// InstitutionalLoginPage. A tela apresenta o estado e solicita a operação de
 /// entrada; o controlador continua responsável por autenticação, backend e cache.
-/// HomePage recebe os dados de sessão e um callback de saída da composição.
+/// AccountPage recebe os dados de sessão e um callback de saída da composição.
 /// sessionFailureMessage converte diagnósticos em texto público para os avisos.
 ///
 /// O destino global é selecionado pelo gate da camada app. Esta fachada não
@@ -20,5 +20,8 @@
 library;
 
 export 'presentation/institutional_login_page.dart' show InstitutionalLoginPage;
-export 'presentation/home_page.dart' show HomePage;
+export 'presentation/account_page.dart' show AccountPage;
 export 'presentation/session_failure_message.dart' show sessionFailureMessage;
+
+export 'presentation/account_login_page.dart' show AccountLoginPage;
+export 'presentation/profile_completion_page.dart' show ProfileCompletionPage;

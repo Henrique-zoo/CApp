@@ -24,31 +24,35 @@ void main() {
     'envia a credencial no JSON e solicita autenticação ao interceptor',
     () async {
       final adapter = FakeHttpAdapter(
-        (_) => jsonTestResponse(backendVerificationBody()),
+        (_) => jsonTestResponse(backendInstitutionalAuthBody()),
       );
       final api = IdentityApi(createTestDio(adapter));
       final response = await api.verifyInstitutionalIdentity(
         request: _request(),
       );
       final request = adapter.requests.single;
+
       expect(request.method, 'POST');
       expect(request.path, '/auth/institutional/verify');
       expect(request.extra['firebaseAuth'], isTrue);
       expect(request.contentType, Headers.jsonContentType);
       expect(request.data, {'microsoftAccessToken': 'microsoft-test-token'});
-      expect(response.profile.affiliation, isA<NonStudentAffiliation>());
-      expect(response.profile.email, isNull);
       expect(
-        response.profile.microsoftObjectId,
+        response.verification.profile.affiliation,
+        isA<NonStudentAffiliation>(),
+      );
+      expect(response.verification.profile.email, isNull);
+      expect(
+        response.verification.profile.microsoftObjectId,
         const UuidValue.raw('00000000-0000-0000-0000-000000000001'),
       );
       expect(
-        response.institution.id,
+        response.verification.institution.id,
         const UuidValue.raw('00000000-0000-0000-0000-000000000002'),
       );
-      expect(response.institution.name, 'Instituição Exemplo');
-      expect(response.institution.acronym, 'IEX');
-      expect(response.toJson(), {
+      expect(response.verification.institution.name, 'Instituição Exemplo');
+      expect(response.verification.institution.acronym, 'IEX');
+      expect(response.verification.toJson(), {
         ...backendVerificationBody(),
         'expiresAt': '2026-01-01T13:00:00.000Z',
       });
@@ -57,9 +61,10 @@ void main() {
 
   test('status diferente de 200 não é aceito como sucesso', () async {
     final adapter = FakeHttpAdapter(
-      (_) => jsonTestResponse(backendVerificationBody(), status: 201),
+      (_) => jsonTestResponse(backendInstitutionalAuthBody(), status: 201),
     );
     final api = IdentityApi(createTestDio(adapter));
+
     await expectLater(
       api.verifyInstitutionalIdentity(request: _request()),
       throwsA(
@@ -75,6 +80,7 @@ void main() {
   test('sucesso com raiz incompatível preserva uma falha explícita', () async {
     final adapter = FakeHttpAdapter((_) => jsonTestResponse(<Object?>[]));
     final api = IdentityApi(createTestDio(adapter));
+
     await expectLater(
       api.verifyInstitutionalIdentity(request: _request()),
       throwsFormatException,
@@ -84,10 +90,14 @@ void main() {
   test(
     'campo obrigatório ausente falha pela desserialização checked',
     () async {
-      final body = backendVerificationBody()..remove('profile');
+      final body = backendInstitutionalAuthBody();
+
+      (body['verification'] as Map).remove('profile');
+
       final api = IdentityApi(
         createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
       );
+
       await expectLater(
         api.verifyInstitutionalIdentity(request: _request()),
         throwsA(isA<CheckedFromJsonException>()),
@@ -102,6 +112,7 @@ void main() {
         FakeHttpAdapter((_) => jsonTestResponse(body, status: 403)),
       ),
     );
+
     await expectLater(
       api.verifyInstitutionalIdentity(request: _request()),
       throwsA(
@@ -113,14 +124,15 @@ void main() {
   });
 
   test('instituição sem sigla preserva a propriedade nula no JSON', () async {
-    final body = backendVerificationBody(institutionAcronym: null);
+    final body = backendInstitutionalAuthBody(institutionAcronym: null);
     final api = IdentityApi(
       createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
     );
     final response = await api.verifyInstitutionalIdentity(request: _request());
-    expect(response.institution.acronym, isNull);
-    expect(response.toJson(), {
-      ...body,
+
+    expect(response.verification.institution.acronym, isNull);
+    expect(response.verification.toJson(), {
+      ...(body['verification'] as Map),
       'expiresAt': '2026-01-01T13:00:00.000Z',
     });
   });
@@ -133,11 +145,14 @@ void main() {
       test(
         '${field.$1}.${field.$2} incompatível falha na leitura checked: $value',
         () async {
-          final body = backendVerificationBody();
-          (body[field.$1] as Map)[field.$2] = value;
+          final body = backendInstitutionalAuthBody();
+
+          ((body['verification'] as Map)[field.$1] as Map)[field.$2] = value;
+
           final api = IdentityApi(
             createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
           );
+
           await expectLater(
             api.verifyInstitutionalIdentity(request: _request()),
             throwsA(isA<CheckedFromJsonException>()),
@@ -148,10 +163,14 @@ void main() {
   }
 
   test('instituição é obrigatória na resposta institucional', () async {
-    final body = backendVerificationBody()..remove('institution');
+    final body = backendInstitutionalAuthBody();
+
+    (body['verification'] as Map).remove('institution');
+
     final api = IdentityApi(
       createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
     );
+
     await expectLater(
       api.verifyInstitutionalIdentity(request: _request()),
       throwsA(isA<CheckedFromJsonException>()),
@@ -159,14 +178,34 @@ void main() {
   });
 
   test('sigla ausente difere de sigla explicitamente nula', () async {
-    final body = backendVerificationBody();
-    (body['institution'] as Map).remove('acronym');
+    final body = backendInstitutionalAuthBody();
+
+    ((body['verification'] as Map)['institution'] as Map).remove('acronym');
+
     final api = IdentityApi(
       createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
     );
+
     await expectLater(
       api.verifyInstitutionalIdentity(request: _request()),
       throwsA(isA<CheckedFromJsonException>()),
     );
   });
+
+  for (final field in ['user', 'verification']) {
+    test('verificação concluída exige $field na resposta', () async {
+      final body = backendInstitutionalAuthBody();
+
+      body[field] = null;
+
+      final api = IdentityApi(
+        createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
+      );
+
+      await expectLater(
+        api.verifyInstitutionalIdentity(request: _request()),
+        throwsFormatException,
+      );
+    });
+  }
 }

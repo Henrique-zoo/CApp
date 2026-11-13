@@ -1,15 +1,23 @@
-/// Porta para a interação Microsoft necessária à verificação institucional.
+/// Porta de entrada e obtenção de credenciais para a verificação institucional.
 ///
-/// A aplicação precisa obter uma credencial delegada e distinguir login de
-/// reautenticação, sem escolher popup, navegação nativa ou classes de um SDK.
-/// Esta biblioteca estabelece esse contrato externo do caso de uso.
+/// Uma sessão Firebase persistida não garante que exista um access token
+/// Microsoft disponível. A aplicação precisa distinguir a criação dessa sessão
+/// da obtenção de credenciais para uma conta já autenticada, sem escolher SDKs,
+/// popup ou navegação nativa. Esta biblioteca define essas duas operações.
 ///
 /// ## Uso no fluxo
 ///
 /// Sem conta autenticada, InstitutionalAuthService solicita login.
-/// Com uma conta conhecida, solicita reautenticação e confere que a identidade
-/// permanece a mesma. O access token retornado é encaminhado ao gateway para
-/// a verificação institucional.
+/// Somente quando a evidência precisa de renovação, solicita
+/// getAccessTokenForCurrentUser e confere que
+/// a identidade permanece a mesma. O access token retornado segue para o gateway
+/// institucional; somente uma resposta válida do backend renova a evidência.
+/// A obtenção de credenciais não exige um novo login ou autenticação recente
+/// no Firebase.
+///
+/// A renovação automática usa allowInteraction: false. Uma ação explícita do
+/// usuário pode permitir autorização Microsoft quando a tentativa silenciosa
+/// indicar essa necessidade. Falhas de rede não devem abrir o provedor.
 ///
 /// O adaptador pode estabelecer a identidade Firebase antes de concluir seu
 /// Future. Essa emissão não representa, por si só, sucesso da verificação
@@ -17,7 +25,7 @@
 ///
 /// ## Credenciais e falhas
 ///
-/// O resultado deve ser um access token Microsoft utilizável. O ID token Firebase
+/// A obtenção de credenciais deve retornar um access token Microsoft utilizável. O ID token Firebase
 /// é uma credencial diferente, obtida separadamente pelo transporte HTTP.
 /// Tokens não pertencem ao modelo do perfil nem ao cache institucional.
 ///
@@ -26,29 +34,37 @@
 /// do provedor para as categorias consumidas pela aplicação.
 library;
 
-/// Porta de autenticação Microsoft consumida pelo caso de uso de identidade.
+import '../errors/microsoft_interaction_required_exception.dart';
+
+/// Operações de autenticação e credenciais consumidas pelo caso de uso.
 ///
 /// O adaptador deve operar sobre a mesma autenticação observada por `AuthSession`.
 /// Esta interface não consulta o backend nem decide se a conta é estudantil.
 abstract interface class MicrosoftSignIn {
-  /// Autentica o usuário e devolve o access token Microsoft delegado.
+  /// Autentica pela Microsoft e estabelece a sessão Firebase.
   ///
-  /// A implementação deve estabelecer a sessão Firebase usada pelo backend.
-  /// O resultado deve ser um token Microsoft não vazio, distinto do Firebase
-  /// ID Token. Falhas de autenticação são propagadas ao chamador.
-  ///
-  /// Pode provocar eventos de mudança de UID antes de o Future concluir.
-  /// O retorno contém uma credencial sensível: não deve ser exibida ou registrada.
-  /// Cancelamento, recusa e configuração inválida não devem retornar string vazia.
-  Future<String> signInAndGetAccessToken();
+  /// A aplicação consulta a conta no backend antes de solicitar autorização
+  /// Graph. Esta operação não obtém tokens MSAL nem limpa seu cache.
+  /// Pode emitir mudança de UID antes de concluir. Cancelamento e recusa
+  /// propagam com as categorias da aplicação.
+  Future<void> signIn();
 
-  /// Reautentica o usuário atual e retorna um novo access token Microsoft.
+  /// Obtém o token Microsoft para a conta Firebase atual.
   ///
-  /// Exige uma sessão autenticada. A credencial deve corresponder
-  /// ao usuário atual; a operação não deve trocar sua identidade.
+  /// Primeiro tenta obter a credencial silenciosamente.
+  /// Com [allowInteraction] falso, propaga
+  /// [MicrosoftInteractionRequiredException] sem abrir interface.
   ///
-  /// Falhas e cancelamentos são propagados ao chamador.
-  /// O vínculo institucional anterior não é prorrogado apenas por obter essa
-  /// credencial: é necessário concluir novamente a operação no backend.
-  Future<String> reauthenticateAndGetAccessToken();
+  /// Não exige autenticação recente no Firebase. A validade
+  /// institucional só é renovada após a consulta ao backend.
+  ///
+  /// Exige uma conta autenticada e preserva sua identidade durante a operação.
+  /// Ausência ou mudança da conta sinaliza SessionIdentityChangedException.
+  /// O backend deve validar a correspondência entre a identidade Microsoft
+  /// da credencial e aquela vinculada ao Firebase; estabilidade do UID e
+  /// sugestões de conta na interface não comprovam essa correspondência.
+  ///
+  /// Retorna um token não vazio, que pode vir do cache de credenciais do provedor.
+  /// Falhas de autorização ou comunicação propagam sem produzir token vazio.
+  Future<String> getAccessTokenForCurrentUser({bool allowInteraction = true});
 }

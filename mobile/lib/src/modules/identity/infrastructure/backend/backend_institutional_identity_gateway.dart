@@ -8,8 +8,8 @@
 ///
 /// 1. Recebe o access token Microsoft do caso de uso e constrói a requisição.
 /// 2. Chama IdentityApi; o transporte acrescenta o ID token Firebase.
-/// 3. Converte o DTO de sucesso pelo mapper institucional.
-/// 4. Devolve um modelo próprio, sem publicar sessão ou gravar cache.
+/// 3. Converte a conta e a evidência do DTO para modelos da aplicação.
+/// 4. Devolve ambos na mesma resposta, sem publicar estado ou gravar cache.
 ///
 /// O vínculo não estudantil continua sendo resposta bem-sucedida. Um HTTP 403
 /// isolado não é reinterpretado como ausência de participação estudantil.
@@ -32,29 +32,32 @@
 /// concorrência e efeito da falha sobre o destino apresentado.
 library;
 
+import '../../../../infrastructure/backend/auth/firebase_app_check_interceptor.dart';
+
 import 'package:dio/dio.dart';
 import 'package:json_annotation/json_annotation.dart';
 
 import 'package:capp/src/infrastructure/backend/auth/firebase_bearer_interceptor.dart';
 import 'package:capp/src/infrastructure/backend/error/api_error.dart';
 import 'package:capp/src/infrastructure/backend/identity/dto/institutional_auth_request.dart';
-import 'package:capp/src/infrastructure/backend/identity/dto/institutional_verification_response.dart';
 import 'package:capp/src/infrastructure/backend/identity/identity_api.dart';
 
 import 'institutional_verification_mapper.dart';
+import '../../application/ports/account_gateway.dart';
+import '../../application/models/internal_user.dart';
+import '../../../../infrastructure/backend/identity/dto/account_session_response.dart';
 
 import 'package:capp/src/modules/identity/application/errors/identity_exception.dart';
-import 'package:capp/src/modules/identity/application/models/institutional_verification.dart';
 import 'package:capp/src/modules/identity/application/ports/institutional_identity_gateway.dart';
 
-/// Implementa a verificação institucional usando o backend CApp.
+/// Implementa verificação, restauração e conclusão de perfil sobre a API CApp.
 ///
 /// Recebe um cliente com transporte e autenticação já configurados.
 /// Não assume seu encerramento, não mantém cache e não observa a sessão.
 ///
 /// O resultado de vínculo não estudantil é convertido normalmente.
 final class BackendInstitutionalIdentityGateway
-    implements InstitutionalIdentityGateway {
+    implements InstitutionalIdentityGateway, AccountGateway {
   /// Usa o cliente HTTP fornecido pela composição.
   ///
   /// A construção não executa requisições ou consulta credenciais.
@@ -62,7 +65,7 @@ final class BackendInstitutionalIdentityGateway
 
   final IdentityApi _api;
 
-  /// Consulta o backend e devolve uma verificação própria da aplicação.
+  /// Consulta o backend e devolve a conta com sua verificação institucional.
   ///
   /// [microsoftAccessToken] deve ser não vazio e pertencer à identidade
   /// utilizada na autenticação da requisição.
@@ -77,45 +80,82 @@ final class BackendInstitutionalIdentityGateway
   /// A conversão do modelo ocorre depois da leitura do DTO. Não avalia
   /// expiração, persiste dados ou decide navegação.
   @override
-  Future<InstitutionalVerification> verify({
-    required String microsoftAccessToken,
-  }) async {
+  Future<AccountSession> verify({required String microsoftAccessToken}) {
     if (microsoftAccessToken.isEmpty) {
       throw ArgumentError('O access token Microsoft não pode ser vazio');
     }
 
-    final InstitutionalVerificationResponse response;
-
-    try {
-      response = await _api.verifyInstitutionalIdentity(
+    return _request(() async {
+      final response = await _api.verifyInstitutionalIdentity(
         request: InstitutionalAuthRequest(
           microsoftAccessToken: microsoftAccessToken,
         ),
       );
+
+      return AccountSession(
+        user: _mapUser(response.user),
+        verification: mapInstitutionalVerification(response.verification),
+      );
+    });
+  }
+
+  @override
+  Future<AccountSession> restoreSession() => _request(() async {
+    final response = await _api.restoreSession();
+
+    return AccountSession(
+      user: _mapUser(response.user),
+      verification: response.verification == null
+          ? null
+          : mapInstitutionalVerification(response.verification!),
+    );
+  });
+
+  @override
+  Future<InternalUser> completeProfile(ProfileCompletion profile) => _request(
+    () async => _mapUser(
+      await _api.completeProfile(
+        nickname: profile.nickname,
+        currentSemester: profile.currentSemester,
+        institutionEntrySemester: profile.institutionEntrySemester,
+        name: profile.name,
+        institutionalEmail: profile.institutionalEmail,
+        courseName: profile.courseName,
+      ),
+    ),
+  );
+
+  InternalUser _mapUser(InternalUserResponse dto) => InternalUser(
+    id: dto.id,
+    status: InternalUserStatus.values.byName(dto.status),
+    nickname: dto.nickname,
+    email: dto.email,
+    currentSemester: dto.currentSemester,
+    institutionEntrySemester: dto.institutionEntrySemester,
+    name: dto.name,
+    institutionalEmail: dto.institutionalEmail,
+    courseName: dto.courseName,
+  );
+
+  Future<T> _request<T>(Future<T> Function() operation) async {
+    try {
+      return await operation();
     } on DioException catch (error) {
       final failure = _translateTransportFailure(error);
 
       Error.throwWithStackTrace(failure, failure.stackTrace);
-    } on CheckedFromJsonException catch (error, stackTrace) {
+    } on FormatException catch (error, stack) {
+      Error.throwWithStackTrace(_invalidResponse(error, stack), stack);
+    } on CheckedFromJsonException catch (error, stack) {
       if (!_isPayloadFailure(error)) {
         Error.throwWithStackTrace(
           error.innerError ?? error,
-          error.innerStack ?? stackTrace,
+          error.innerStack ?? stack,
         );
       }
 
-      Error.throwWithStackTrace(
-        _invalidResponse(error, stackTrace),
-        stackTrace,
-      );
-    } on FormatException catch (error, stackTrace) {
-      Error.throwWithStackTrace(
-        _invalidResponse(error, stackTrace),
-        stackTrace,
-      );
+      Error.throwWithStackTrace(_invalidResponse(error, stack), stack);
     }
-
-    return mapInstitutionalVerification(response);
   }
 
   /// Traduz a categoria informada pelo transporte.
@@ -154,11 +194,17 @@ final class BackendInstitutionalIdentityGateway
     final backendError = _readBackendError(error).error;
 
     final kind = switch (backendError.code) {
+      'app_check_required' ||
+      'app_check_invalid' => IdentityFailureKind.appVerificationFailed,
+      'app_check_unavailable' => IdentityFailureKind.serviceUnavailable,
       'unauthorized' ||
+      'account_not_provisioned' => IdentityFailureKind.accountNotProvisioned,
       'invalid_token' ||
       'expired_token' ||
       'invalid_microsoft_id' ||
-      'identity_mismatch' => IdentityFailureKind.credentialsRejected,
+      'identity_mismatch' ||
+      'account_inactive' ||
+      'password_required' => IdentityFailureKind.credentialsRejected,
       'unknown_institution' => IdentityFailureKind.institutionNotSupported,
       'institutional_verification_required' =>
         IdentityFailureKind.verificationConflict,
@@ -166,7 +212,7 @@ final class BackendInstitutionalIdentityGateway
       'service_unavailable' => IdentityFailureKind.serviceUnavailable,
       _ => switch (error.response?.statusCode) {
         401 => IdentityFailureKind.credentialsRejected,
-        502 || 503 || 504 => IdentityFailureKind.serviceUnavailable,
+        500 || 502 || 503 || 504 => IdentityFailureKind.serviceUnavailable,
         _ => IdentityFailureKind.unexpectedExternalFailure,
       },
     };
@@ -230,6 +276,13 @@ final class BackendInstitutionalIdentityGateway
     final inner = error.error;
 
     if (inner is IdentityException) return inner;
+
+    if (inner is FirebaseAppCheckTokenException) {
+      return _transportFailure(
+        IdentityFailureKind.appVerificationFailed,
+        error,
+      );
+    }
 
     if (inner is MissingFirebaseIdTokenException) {
       return _transportFailure(IdentityFailureKind.credentialsRejected, error);

@@ -17,8 +17,11 @@ import 'package:flutter_test/flutter_test.dart';
 /// O cliente usa um domínio reservado e não instala autenticação implicitamente.
 Dio createTestDio(FakeHttpAdapter adapter) {
   final dio = Dio(BaseOptions(baseUrl: 'https://backend.example.invalid'));
+
   dio.httpClientAdapter = adapter;
+
   addTearDown(() => dio.close(force: true));
+
   return dio;
 }
 
@@ -47,6 +50,25 @@ Map<String, Object?> backendVerificationBody({
 };
 
 /// Envelope público de erro com código controlado e sem diagnósticos internos.
+/// Conta e evidência do contrato de verificação institucional.
+Map<String, Object?> backendInstitutionalAuthBody({
+  bool student = false,
+  String? institutionAcronym = 'IEX',
+}) => {
+  'user': {
+    'id': '00000000-0000-0000-0000-000000000010',
+    'status': 'incomplete',
+    'nickname': null,
+    'email': null,
+    'currentSemester': null,
+    'institutionEntrySemester': null,
+  },
+  'verification': backendVerificationBody(
+    student: student,
+    institutionAcronym: institutionAcronym,
+  ),
+};
+
 Map<String, Object?> backendErrorBody(String code) => {
   'error': {
     'code': code,
@@ -89,6 +111,7 @@ final class FakeHttpAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     requests.add(options);
+
     return respond(options);
   }
 
