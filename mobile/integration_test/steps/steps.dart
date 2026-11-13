@@ -1,5 +1,6 @@
 import '../support/step_registry.dart';
 import 'academic_identity/academic_data_steps.dart';
+import 'authentication/account_session_steps.dart';
 import 'authentication/authentication_steps.dart';
 import 'demands/demand_creation_steps.dart';
 import 'demands/demand_tracking_steps.dart';
@@ -29,6 +30,7 @@ import 'shared/session_steps.dart';
 import 'shared/shared_steps.dart';
 
 final stepDefinitions = <StepDefinition>[
+  ...accountSessionSteps,
   ...academicDataSteps,
   ...accessControlSteps,
   ...authenticationSteps,
