@@ -10,9 +10,10 @@ use uuid::Uuid;
 use crate::modules::identity::{
     application::error::{
         AuthenticationError, InstitutionRepositoryError, InstitutionalVerificationRepositoryError,
+        UserRepositoryError,
     },
     domain::entities::{
-        institution::Institution, institutional_verification::InstitutionalVerification,
+        institution::Institution, institutional_verification::InstitutionalVerification, user::User,
     },
 };
 
@@ -25,10 +26,13 @@ use crate::modules::identity::{
 pub struct InstitutionalProfile {
     /// Identificador do usuário no diretório Microsoft.
     pub id: String,
+
     /// Nome informado pela instituição.
     pub name: Option<String>,
+
     /// Endereço de e-mail informado pelo diretório.
     pub mail: Option<String>,
+
     /// Vínculo estudantil e, quando aplicável, curso informado pelo diretório.
     pub affiliation: InstitutionalAffiliation,
 }
@@ -115,11 +119,18 @@ pub trait InstitutionalDirectory: Send + Sync {
 pub struct VerifiedIdentity {
     /// UID do usuário no projeto Firebase configurado.
     pub firebase_uid: String,
+
     /// Identificador da conta Microsoft vinculada, quando presente no token.
     ///
     /// É diferente do UID Firebase e deve ser confrontado com a identidade
     /// retornada pelo Microsoft Graph.
     pub microsoft_object_id: Option<String>,
+
+    /// E-mail e método de entrada extraídos do JWT verificado, nunca do JSON cliente.
+    pub email: Option<String>,
+
+    /// Provedor que autenticou a sessão que originou o JWT.
+    pub sign_in_provider: Option<String>,
 }
 
 /// Validação técnica de uma credencial de identidade.
@@ -165,6 +176,23 @@ pub trait InstitutionRepository {
         &self,
         tenant_id: Uuid,
     ) -> Result<Option<Institution>, InstitutionRepositoryError>;
+}
+
+/// Persistência da conta interna, com provisionamento idempotente por UID.
+#[async_trait::async_trait]
+pub trait UserRepository: Send + Sync {
+    /// Provisiona idempotentemente; chamadas concorrentes retornam o mesmo ID.
+    /// Só deve ser chamado após a confirmação das identidades Microsoft/Firebase.
+    async fn provision(&self, firebase_uid: &str) -> Result<User, UserRepositoryError>;
+
+    /// Persiste apenas o perfil validado; recusa conta desativada concorrentemente.
+    async fn update_profile(&self, user: &User) -> Result<bool, UserRepositoryError>;
+
+    /// Ausência é esperada antes do primeiro acesso institucional.
+    async fn get_by_firebase_uid(
+        &self,
+        firebase_uid: &str,
+    ) -> Result<Option<User>, UserRepositoryError>;
 }
 
 /// Persistência das evidências de elegibilidade institucional.

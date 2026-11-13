@@ -6,7 +6,7 @@
 //! pool SQLx ou DTOs da API; os adaptadores implementam as traits recebidas.
 //!
 //! O TTL da evidência é independente do prazo do Firebase ID token e do cache de
-//! chaves de assinatura. Nenhuma função provisiona usuário ou emite credenciais.
+//! chaves de assinatura. A verificação provisiona uma conta incompleta de forma idempotente; nenhuma função emite credenciais.
 
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
@@ -16,19 +16,20 @@ use crate::modules::identity::{
     application::{
         error::AuthenticationError,
         ports::{
-            IdentityTokenVerifier, InstitutionRepository, InstitutionalProfile,
-            InstitutionalVerificationRepository, VerifiedIdentity,
+            IdentityTokenVerifier, InstitutionRepository, InstitutionalAffiliation,
+            InstitutionalProfile, InstitutionalVerificationRepository, UserRepository,
+            VerifiedIdentity,
         },
     },
     domain::entities::{
-        institution::Institution, institutional_verification::InstitutionalVerification,
+        institution::Institution, institutional_verification::InstitutionalVerification, user::User,
     },
 };
 
 /// Prazo de reutilização da confirmação institucional.
 ///
 /// Valor inicial de política; alterações passam a valer nas novas verificações.
-const VERIFICATION_TTL_HOURS: i64 = 24;
+pub const VERIFICATION_TTL_DAYS: i64 = 120;
 
 /// Identidade autorizada por uma confirmação institucional ainda válida.
 ///
@@ -37,6 +38,7 @@ const VERIFICATION_TTL_HOURS: i64 = 24;
 pub struct AuthenticatedIdentity {
     /// UID autenticado no Firebase.
     pub firebase_uid: String,
+
     /// Instituição cuja elegibilidade foi confirmada.
     pub institution_id: Uuid,
 }
@@ -45,13 +47,16 @@ pub struct AuthenticatedIdentity {
 ///
 /// O perfil vem do Graph e a validade é a mesma atribuída à evidência enviada ao
 /// repositório. A camada HTTP converte este tipo para seu próprio DTO. Não contém
-/// tokens, UID duplicado ou um usuário interno provisionado.
+/// tokens, senha ou UID Firebase duplicado. Integra as respostas de autenticação
+/// e de restauração.
 #[derive(Debug, Clone)]
 pub struct InstitutionalVerificationResult {
     /// Perfil externo obtido e associado à identidade autenticada nesta operação.
     pub profile: InstitutionalProfile,
+
     /// Instituição associada ao usuário.
     pub institution: Institution,
+
     /// Fim da validade da confirmação institucional, em UTC.
     ///
     /// Não é a expiração da sessão Firebase. O cliente pode usá-lo para antecipar a
@@ -59,7 +64,18 @@ pub struct InstitutionalVerificationResult {
     pub expires_at: DateTime<Utc>,
 }
 
-/// Verifica identidade e elegibilidade, persiste o resultado e devolve perfil e validade.
+/// Conta provisionada e evidência produzidas pela mesma verificação institucional.
+/// Evita uma consulta HTTP posterior apenas para obter o perfil interno.
+#[derive(Debug, Clone)]
+pub struct InstitutionalAuthResult {
+    /// Conta nova ou existente, com seu estado preservado pelo provisionamento.
+    pub user: User,
+
+    /// Evidência persistida nesta operação, sempre presente em caso de sucesso.
+    pub verification: InstitutionalVerificationResult,
+}
+
+/// Verifica identidade e elegibilidade, persiste a evidência e devolve a conta com sua verificação.
 ///
 /// # Parâmetros
 ///
@@ -77,16 +93,18 @@ pub struct InstitutionalVerificationResult {
 /// Nome, e-mail e curso ausentes não impedem a verificação;
 /// `institution.status` não é usado como regra de acesso.
 ///
-/// O prazo de 24 horas começa antes das consultas ao diretório. Somente respostas
+/// O prazo de 120 dias começa antes das consultas ao diretório. Somente respostas
 /// conclusivas do grupo são persistidas. Uma negativa substitui a evidência anterior
 /// se for mais recente e retorna um perfil não estudante; falhas de comunicação preservam
 /// o registro existente sem estender sua validade. A ordem de atualização usa
 /// `checked_at`; resultados concorrentes mais antigos não sobrescrevem os recentes.
-/// Não há transação distribuída entre o Graph e o PostgreSQL.
+/// Não há transação distribuída entre o Graph e o PostgreSQL. O usuário incompleto é
+/// provisionado depois do confronto das identidades; uma falha na evidência pode
+/// deixar a conta incompleta criada, sem conceder acesso. A repetição reutiliza seu ID.
 ///
 /// # Retorno
 ///
-/// Perfil externo e `expires_at` da evidência registrada. Não cria usuário interno,
+/// Conta provisionada, perfil externo e validade da evidência registrada. Não
 /// associa curso, emite token ou administra sessão. O relógio deve estar sincronizado
 /// com os provedores e com as demais instâncias da aplicação.
 ///
@@ -110,7 +128,7 @@ pub struct InstitutionalVerificationResult {
 /// use backend::modules::identity::application::{
 ///     error::AuthenticationError,
 ///     ports::{IdentityTokenVerifier, InstitutionalDirectory, InstitutionRepository,
-///         InstitutionalVerificationRepository},
+///         InstitutionalVerificationRepository, UserRepository},
 ///     services::authentication::verify_institutional_identity,
 /// };
 ///
@@ -119,22 +137,22 @@ pub struct InstitutionalVerificationResult {
 /// where
 ///     D: InstitutionalDirectory,
 ///     V: IdentityTokenVerifier,
-///     R: InstitutionRepository + InstitutionalVerificationRepository,
+///     R: InstitutionRepository + InstitutionalVerificationRepository + UserRepository,
 /// {
 ///     let result = verify_institutional_identity(
 ///         directory, verifier, repositories, firebase_token, microsoft_token,
 ///     ).await?;
-///     assert!(result.expires_at > chrono::Utc::now());
+///     assert!(result.verification.expires_at > chrono::Utc::now());
 ///     Ok(())
 /// }
 /// ```
 pub async fn verify_institutional_identity(
     directory: &impl InstitutionalDirectory,
     verifier: &impl IdentityTokenVerifier,
-    repositories: &(impl InstitutionRepository + InstitutionalVerificationRepository),
+    repositories: &(impl InstitutionRepository + InstitutionalVerificationRepository + UserRepository),
     firebase_token: &str,
     microsoft_token: &str,
-) -> Result<InstitutionalVerificationResult, AuthenticationError> {
+) -> Result<InstitutionalAuthResult, AuthenticationError> {
     let identity = verifier.verify(firebase_token).await?;
     let expected_id = microsoft_object_id(&identity)?;
 
@@ -161,15 +179,27 @@ pub async fn verify_institutional_identity(
         return Err(AuthenticationError::IdentityMismatch);
     }
 
+    let user = repositories.provision(&identity.firebase_uid).await?;
+
+    if user.status() == crate::modules::identity::domain::UserStatus::Inactive {
+        return Err(AuthenticationError::AccountInactive);
+    }
+
     let verification = InstitutionalVerification {
-        firebase_uid: identity.firebase_uid,
+        user_id: user.id(),
+        profile_name: profile.name.clone(),
+        profile_email: profile.mail.clone(),
+        course_name: match &profile.affiliation {
+            InstitutionalAffiliation::Student { course_name } => course_name.clone(),
+            InstitutionalAffiliation::NonStudent => None,
+        },
         microsoft_object_id: actual_id,
         institution_id: institution.id,
         microsoft_tenant_id: tenant_id,
         microsoft_student_group_id: institution.microsoft_student_group_id,
         student_membership_confirmed: is_student,
         checked_at,
-        expires_at: checked_at + Duration::hours(VERIFICATION_TTL_HOURS),
+        expires_at: checked_at + Duration::days(VERIFICATION_TTL_DAYS),
     };
 
     // Uma resposta negativa conclusiva também precisa substituir uma
@@ -180,10 +210,13 @@ pub async fn verify_institutional_identity(
         return Err(AuthenticationError::InstitutionalVerificationRequired);
     }
 
-    Ok(InstitutionalVerificationResult {
-        profile,
-        institution,
-        expires_at: verification.expires_at,
+    Ok(InstitutionalAuthResult {
+        user,
+        verification: InstitutionalVerificationResult {
+            profile,
+            institution,
+            expires_at: verification.expires_at,
+        },
     })
 }
 
@@ -214,7 +247,7 @@ pub async fn verify_institutional_identity(
 /// ```no_run
 /// use backend::modules::identity::application::{
 ///     error::AuthenticationError,
-///     ports::{IdentityTokenVerifier, InstitutionalVerificationRepository},
+///     ports::{IdentityTokenVerifier, InstitutionalVerificationRepository, UserRepository},
 ///     services::authentication::authenticate_institutional_request,
 /// };
 ///
@@ -240,6 +273,7 @@ pub async fn authenticate_institutional_request(
 
     // Não reutiliza evidência de uma identidade Microsoft diferente.
     // Confere também a expiração após a conclusão da consulta.
+
     if verification.microsoft_object_id != object_id || verification.expires_at <= Utc::now() {
         return Err(AuthenticationError::InstitutionalVerificationRequired);
     }

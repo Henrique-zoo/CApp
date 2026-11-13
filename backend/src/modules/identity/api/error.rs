@@ -19,6 +19,18 @@ impl From<AuthenticationError> for ApiError {
     /// classificar a sessão Firebase como expirada.
     fn from(error: AuthenticationError) -> Self {
         let (status, code, details) = match &error {
+            AuthenticationError::AccountNotProvisioned => {
+                (StatusCode::NOT_FOUND, "account_not_provisioned", None)
+            }
+            AuthenticationError::InvalidProfile => {
+                (StatusCode::BAD_REQUEST, "invalid_profile", None)
+            }
+            AuthenticationError::PasswordRequired => {
+                (StatusCode::FORBIDDEN, "password_required", None)
+            }
+            AuthenticationError::AccountInactive => {
+                (StatusCode::FORBIDDEN, "account_inactive", None)
+            }
             AuthenticationError::InvalidToken => (StatusCode::UNAUTHORIZED, "invalid_token", None),
             AuthenticationError::ExpiredToken => (StatusCode::UNAUTHORIZED, "expired_token", None),
             AuthenticationError::IdentityMismatch => {

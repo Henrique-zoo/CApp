@@ -1,31 +1,43 @@
 //! Dados-padrão reaproveitados pelos testes da aplicação.
+
 use crate::modules::identity::domain::CatalogStatus;
 
 use super::*;
 
 pub const FIREBASE_TOKEN: &str = "firebase-token-de-teste";
+
 pub const MICROSOFT_TOKEN: &str = "microsoft-token-de-teste";
+
 pub const FIREBASE_UID: &str = "firebase-user-123";
+
 pub const MICROSOFT_OBJECT_ID: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
 const TENANT_ID: &str = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
+
 const STUDENT_GROUP_ID: &str = "cccccccc-dddd-eeee-ffff-000000000000";
+
 const INSTITUTION_ID: &str = "dddddddd-eeee-ffff-0000-111111111111";
 
 pub fn microsoft_object_id() -> Uuid {
     Uuid::parse_str(MICROSOFT_OBJECT_ID).unwrap()
 }
+
 pub fn tenant_id() -> Uuid {
     Uuid::parse_str(TENANT_ID).unwrap()
 }
+
 pub fn student_group_id() -> Uuid {
     Uuid::parse_str(STUDENT_GROUP_ID).unwrap()
 }
+
 pub fn institution_id() -> Uuid {
     Uuid::parse_str(INSTITUTION_ID).unwrap()
 }
 
 pub fn valid_identity() -> VerifiedIdentity {
     VerifiedIdentity {
+        email: None,
+        sign_in_provider: None,
         firebase_uid: FIREBASE_UID.into(),
         microsoft_object_id: Some(MICROSOFT_OBJECT_ID.into()),
     }
@@ -33,8 +45,12 @@ pub fn valid_identity() -> VerifiedIdentity {
 
 pub fn evidence(confirmed: bool, validity: Duration) -> InstitutionalVerification {
     let checked_at = Utc::now();
+
     InstitutionalVerification {
-        firebase_uid: FIREBASE_UID.into(),
+        user_id: Uuid::nil(),
+        profile_name: None,
+        profile_email: None,
+        course_name: None,
         microsoft_object_id: microsoft_object_id(),
         institution_id: institution_id(),
         microsoft_tenant_id: tenant_id(),
@@ -73,4 +89,16 @@ pub fn profile_with_id(id: &str, is_student: bool) -> InstitutionalProfile {
             InstitutionalAffiliation::NonStudent
         },
     }
+}
+
+pub fn repositories() -> MockRepositories {
+    let mut repositories = MockRepositories::new();
+
+    repositories.expect_provision().returning(|uid| {
+        use crate::modules::identity::domain::entities::user::User;
+
+        Ok(User::provisioned(Uuid::nil(), uid.into(), Utc::now()))
+    });
+
+    repositories
 }
