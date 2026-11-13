@@ -1,0 +1,14 @@
+{
+  "account_mode": "MULTIPLE",
+  "authorization_user_agent": "BROWSER",
+  "broker_redirect_uri_registered": false,
+  "authorities": [
+    {
+      "type": "AAD",
+      "default": true,
+      "audience": {
+        "type": "AzureADMultipleOrgs"
+      }
+    }
+  ]
+}

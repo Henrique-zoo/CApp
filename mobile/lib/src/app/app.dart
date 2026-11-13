@@ -9,6 +9,7 @@
 /// AppDependencies constrói os contratos e adaptadores e possui seus recursos.
 /// AppRoot associa o encerramento dessa composição ao ciclo de vida da árvore.
 /// CApp organiza tema, navegação e apresentação dos destinos da aplicação.
+/// MainPage conecta Início e Conta pelo rodapé da área autenticada.
 /// BackendReadinessController publica o diagnóstico global de prontidão em
 /// paralelo à sessão; sua consulta não decide acesso às áreas do aplicativo.
 ///
@@ -22,6 +23,7 @@
 library;
 
 export 'capp.dart' show CApp;
+export 'main_page.dart' show MainPage;
 export 'app_dependencies.dart' show AppDependencies;
 export 'app_root.dart' show AppRoot;
 export 'backend_readiness_controller.dart' show BackendReadinessController;

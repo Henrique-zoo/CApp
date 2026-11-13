@@ -19,8 +19,9 @@
 ///
 /// FirebaseMicrosoftAuth implementa a porta na composição atual. O consumidor
 /// possui suas inscrições, enquanto o SDK possui sua autenticação.
-/// signOut encerra a autenticação local; não é uma operação coordenada de limpeza
-/// do cache ou de revogação no backend.
+/// signOut desativa a seleção atual. O adaptador pode conservar a sessão SDK para
+/// entrada rápida posterior. AccountAuthentication distingue exigir senha e
+/// esquecer; nenhuma operação revoga automaticamente sessões de outros dispositivos.
 ///
 /// O UID identifica a conta autenticada pelo provedor. Não comprova vínculo
 /// institucional, perfil interno ou capacidade para uma operação protegida.
@@ -48,15 +49,14 @@ abstract interface class AuthSession {
   /// A implementação Firebase atual não usa este stream para renovar evidência.
   Stream<String?> watchUserId();
 
-  /// Encerra a autenticação no dispositivo atual.
+  /// Desativa a sessão selecionada no aplicativo.
   ///
   /// Após o sucesso, [watchUserId] deve emitir null.
   ///
-  /// A limpeza do cache institucional pertence à operação de saída coordenada
-  /// pelo SessionController, depois do sucesso desta chamada ao provedor.
+  /// O modo de saída e a limpeza do cache pertencem à coordenação do controlador.
   /// Falhas de encerramento são propagadas ao chamador.
   ///
-  /// Concluir o Future representa o encerramento local informado pelo provedor.
+  /// Concluir o Future representa a desativação local informada pelo adaptador.
   /// Não implica revogar tokens já emitidos em todos os dispositivos, remover
   /// evidências no backend ou apagar o cache institucional do aplicativo.
   Future<void> signOut();

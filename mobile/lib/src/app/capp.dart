@@ -22,13 +22,18 @@
 ///
 /// ## Área principal atual
 ///
-/// A tela inicial apresenta o perfil confirmado. NonStudentAffiliation acrescenta
-/// um aviso informativo, sem transformar a resposta bem-sucedida em recusa.
+/// A área pronta começa em Início, com rodapé para alternar entre Início e Conta.
+/// A página Conta apresenta o perfil e o aviso informativo de vínculo não estudantil.
 /// Falha exclusiva de persistência acrescenta um aviso e preserva a entrada na
 /// execução atual.
-/// A ação de saída é injetada na Home. Falhas esperadas são apresentadas pelo
+/// A ação de saída é injetada na página Conta. Falhas esperadas são apresentadas pelo
 /// estado; a composição acompanha o Future sem depender do contexto da tela
 /// depois que o logout troca o ramo da navegação.
+/// Quando o Firebase informa ausência de usuário, uma interface de espera
+/// apresenta Saindo... até terminar a limpeza de credenciais, índice e caches.
+/// Somente então o seletor é montado. Se a tentativa falhar depois do logout,
+/// a entrada apresenta o diagnóstico e, quando aplicável, a ação de repetir a
+/// remoção; uma falha não simula sucesso nem restaura a autenticação encerrada.
 ///
 /// A biblioteca não calcula validade, chama backend ou infere permissões gerais
 /// a partir do vínculo estudantil. As funcionalidades principais do produto
@@ -44,6 +49,7 @@ import 'backend_readiness_notice.dart';
 import 'backend_readiness_controller.dart';
 import 'session_gate.dart';
 import 'theme.dart';
+import 'main_page.dart';
 
 /// Apresenta a interface correspondente à situação atual da sessão.
 ///
@@ -74,11 +80,15 @@ class CApp extends StatelessWidget {
   /// O controlador publica os diagnósticos das falhas esperadas. Contextos
   /// obsoletos e limpeza parcialmente concluída não geram Futures sem tratamento
   /// no callback do botão. Exceções sem diagnóstico publicado e Errors propagam.
-  Future<void> _signOut() async {
+  Future<void> _signOut({
+    AccountSignOutMode mode = AccountSignOutMode.keepSession,
+  }) async {
     final current = sessionController.state;
+
     if (current is! SessionSignedIn || current.isBusy) return;
+
     try {
-      await sessionController.signOut();
+      await sessionController.signOut(mode: mode);
     } on SessionIdentityChangedException {
       // A operação deixou de pertencer à conta que originou o clique.
     } on SessionCacheRemovalException {
@@ -101,13 +111,34 @@ class CApp extends StatelessWidget {
       restoringBuilder: (_) => _buildApplication(
         const Scaffold(body: Center(child: CircularProgressIndicator())),
       ),
+      signingOutBuilder: (_, _) => _buildApplication(
+        const PopScope(
+          canPop: false,
+          child: Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(semanticsLabel: 'Saindo da conta'),
+                  SizedBox(height: 16),
+                  AnimatedEllipsisText('Saindo'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
       entryBuilder: (_, state) => _buildApplication(
-        InstitutionalLoginPage(controller: sessionController, state: state),
+        AccountLoginPage(controller: sessionController, state: state),
+      ),
+      profileBuilder: (_, state) => _buildApplication(
+        ProfileCompletionPage(controller: sessionController, state: state),
       ),
       signedInBuilder: (_, state) {
         final cause = state.failureDetails?.cause;
         final warning =
             cause is SessionCacheWriteException ||
+                state.failure == SessionFailure.cacheWriteFailed ||
                 state.failure == SessionFailure.signOutFailed
             ? cause
             : null;
@@ -116,7 +147,10 @@ class CApp extends StatelessWidget {
           TemporaryWarning(
             warningId: warning,
             message: warning == null ? null : sessionFailureMessage(state),
-            child: HomePage(state: state, onSignOut: _signOut),
+            child: MainPage(
+              state: state,
+              onSignOut: (mode) => _signOut(mode: mode),
+            ),
           ),
         );
       },

@@ -10,9 +10,9 @@
 /// O gateway do módulo consome esse cliente, monta o DTO de requisição e converte
 /// a resposta para modelos próprios antes de entregá-la ao caso de uso.
 ///
-/// Os tipos exportados representam o protocolo: perfil, instituição, vínculo e validade
-/// recebidos pela rede. Eles não são catálogo de capacidades, estado de sessão
-/// ou entidades de um usuário interno provisionado.
+/// Os tipos exportados representam os dados recebidos pela rede, incluindo conta
+/// interna, perfil institucional, instituição, vínculo e validade da evidência.
+/// O gateway os converte para os modelos usados pela coordenação da sessão.
 ///
 /// ## Superfície exportada
 ///
@@ -25,6 +25,9 @@ library;
 
 export 'identity_api.dart' show IdentityApi;
 export 'dto/institutional_auth_request.dart' show InstitutionalAuthRequest;
+export 'dto/institutional_auth_response.dart' show InstitutionalAuthResponse;
+export 'dto/account_session_response.dart'
+    show AccountSessionResponse, InternalUserResponse;
 export 'dto/institutional_verification_response.dart'
     show InstitutionalVerificationResponse;
 export 'dto/institutional_identity_response.dart'

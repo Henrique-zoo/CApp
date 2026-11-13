@@ -1,48 +1,29 @@
-/// Preparação dos serviços externos antes da composição da aplicação.
+/// Prepara o Firebase e o App Check antes de montar os casos de uso.
 ///
-/// Esta biblioteca separa a configuração dos SDKs da construção dos casos de uso
-/// e da interface. Assim, o ponto de entrada e os testes de integração podem
-/// preparar o mesmo aplicativo Firebase sem montar widgets ou abrir login.
+/// initializeServices garante a existência do FirebaseApp padrão e ativa seu
+/// provedor de App Check antes de usar autenticação ou transporte. A composição
+/// reutiliza a mesma ativação para aplicativos nomeados do seletor de contas.
 ///
-/// ## Participação na inicialização
-///
-/// O chamador prepara o binding Flutter e aguarda initializeServices.
-/// Quando nenhum aplicativo Firebase está registrado, a função inicializa o padrão
-/// com as opções da plataforma em firebase_options.dart. Somente depois dessa
-/// etapa a composição pode obter FirebaseAuth.instance e conectar os adaptadores.
-///
-/// ## Alcance da guarda
-///
-/// A presença de qualquer aplicativo Firebase faz a função retornar. Essa guarda
-/// evita a inicialização comum repetida, mas não verifica se o aplicativo padrão
-/// existe ou corresponde à configuração esperada e não serializa chamadas
-/// concorrentes.
-///
-/// Falhas do SDK e plataformas sem configuração propagam. A conclusão comprova
-/// apenas a inicialização solicitada; autenticação, conectividade com o backend
-/// e configuração operacional do provedor Microsoft são etapas posteriores.
+/// A guarda procura explicitamente o aplicativo padrão: uma instância nomeada
+/// já existente não substitui essa inicialização. Ativações bem-sucedidas do
+/// App Check são reaproveitadas; falhas podem ser repetidas e propagam ao chamador.
+/// O binding Flutter deve estar preparado. O sucesso não significa login nem
+/// comprova que provedores e tokens de depuração foram cadastrados no Console.
 library;
 
 import 'package:firebase_core/firebase_core.dart';
 
 import 'firebase_options.dart';
+import 'src/infrastructure/firebase/firebase_app_check_setup.dart';
 
-/// Inicializa o aplicativo Firebase padrão quando não há aplicativos registrados.
-///
-/// O chamador deve inicializar o binding Flutter antes de usar os plugins.
-/// Utiliza as opções da plataforma atual e propaga falhas de inicialização.
-///
-/// ## Comportamento e erros
-///
-/// Só chama `Firebase.initializeApp` se `Firebase.apps` estiver vazio. Se houver
-/// qualquer aplicativo registrado, retorna sem conferir se o aplicativo padrão
-/// ou suas opções correspondem ao ambiente esperado. A guarda não serializa
-/// chamadas concorrentes. Falhas de configuração/plataforma ou do SDK propagam.
-/// O sucesso não confirma conectividade com o backend ou login Microsoft.
+/// Inicializa o aplicativo padrão e aguarda a ativação do App Check.
+/// Falhas do SDK, de configuração ou de plataforma propagam antes da interface.
 Future<void> initializeServices() async {
-  if (Firebase.apps.isEmpty) {
+  if (!Firebase.apps.any((app) => app.name == '[DEFAULT]')) {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
   }
+
+  await initializeFirebaseAppCheck(Firebase.app());
 }
