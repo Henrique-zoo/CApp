@@ -165,21 +165,45 @@ src/
 
 ## identity
 
-Responsável pela identidade dos usuários.
+Responsável pela identidade dos usuários e pela comprovação dos aplicativos clientes.
 
 Inclui:
 
 - autenticação institucional;
 - integração com Firebase Authentication;
+- comprovação do aplicativo por Firebase App Check;
 - integração com Microsoft;
 - provisionamento de usuários;
 - dados acadêmicos.
 
 O módulo de identidade representa a identidade institucional do usuário e suas informações acadêmicas.
+O pertencimento a Centros Acadêmicos pertence ao módulo `ca`.
 
-Ele não representa uma relação de pertencimento a um Centro Acadêmico.
+Os adaptadores Firebase Auth e App Check ficam em
+`src/modules/identity/infrastructure/firebase/`. O módulo privado `jwks.rs`
+concentra obtenção de chaves RSA, cache HTTP, rotação e controle de concorrência.
+Cada adaptador fixa seu endpoint e mantém uma instância de cache independente;
+clones do mesmo adaptador compartilham somente essa instância. O adaptador
+Firebase Auth só reutiliza chaves com prazo HTTP explícito; App Check usa fallback
+e teto de seis horas. Ambos rejeitam `kid` duplicado e adotam o menor max-age
+quando há diretivas repetidas. Claims e erros específicos continuam separados.
+O middleware que exige App Check pertence à API global, pois protege as rotas
+de todos os módulos. A comprovação do aplicativo não concede permissões de
+usuário nem cria uma entidade institucional adicional.
 
-A implementação atual cobre verificação institucional, registro da evidência e um extractor reutilizável para acesso protegido. Provisionamento e associação acadêmica permanecem fora desse recorte. Consulte os [Rustdocs do módulo](src/modules/identity/mod.rs) para fluxo, decisões e testes específicos, e o [OpenAPI](../packages/api-contracts/openapi.yaml) para o contrato HTTP.
+A implementação cobre verificação institucional com validade de 120 dias,
+provisionamento idempotente de contas incompletas, restauração com Firebase e
+conclusão do perfil com apelido, período atual do curso e semestre de ingresso.
+A verificação devolve usuário e evidência na mesma resposta; a restauração
+recupera a conta sem consultar o Graph ou renovar o prazo. O cliente consulta
+`GET /auth/session` antes de sincronizar, inclusive após autenticação Microsoft.
+Conta ausente retorna `404 account_not_provisioned`; conta existente sem evidência
+vigente retorna `200` com `verification: null`. Ambos exigem verificação, enquanto
+recusas e falhas de comunicação mantêm seus diagnósticos próprios.
+O e-mail interno é escolhido pelo usuário; senhas e sessões permanecem no Firebase.
+Complementos opcionais de nome, contato institucional e curso ficam no perfil
+interno somente para ausências do Graph, sem substituir a evidência institucional.
+A associação ao catálogo de cursos permanece fora desse recorte. Consulte os [Rustdocs do módulo](src/modules/identity/mod.rs) para fluxo, decisões e testes específicos, e o [OpenAPI](../packages/api-contracts/openapi.yaml) para o contrato HTTP.
 
 ---
 
@@ -401,19 +425,6 @@ O módulo `src/infrastructure/database/` contém `MIGRATOR` e `PgDatabase`. Este
 
 ---
 
-## firebase
-
-O adaptador executável está em `src/modules/identity/infrastructure/firebase/`. O diretório global `src/infrastructure/firebase/` permanece reservado.
-
-Responsabilidades:
-
-- validação de tokens;
-- identificação de usuários autenticados.
-
-Não contém regras de autorização da aplicação.
-
----
-
 ## microsoft
 
 O adaptador executável está em `src/modules/identity/infrastructure/microsoft/`; o diretório global permanece reservado. Consulta perfil, tenant e participação no grupo de estudantes. Recebe o access token por operação e o grupo a partir do cadastro institucional; não armazena credenciais de usuários.
@@ -478,11 +489,33 @@ Exemplos:
 
 ---
 
+# Firebase App Check
+
+As rotas de negócio exigem `X-Firebase-AppCheck`, além de `Authorization: Bearer`.
+O adaptador está em `src/modules/identity/infrastructure/firebase/app_check.rs`,
+consumido pelo middleware global de `src/api/app_check.rs`.
+GET/HEAD `/health` e `/ready` são públicos. O middleware valida assinatura RS256,
+`typ=JWT`, emissor e audiência do número do projeto, expiração, emissão e App ID
+permitido. A lista de apps é obrigatória; não há modo de aceitação sem atestado.
+Tokens ausentes/recusados retornam 403 (`app_check_required`/`app_check_invalid`);
+indisponibilidade das chaves retorna 503 (`app_check_unavailable`). O cache de
+chaves é compartilhado, respeita o provedor e dura no máximo seis horas.
+
+A verificação Rust usa chaves públicas e não precisa de conta de serviço. Ela
+não autentica usuários, não concede permissões e não consome tokens de uso único.
+O Console é usado para cadastrar provedores e tokens de depuração. A fiscalização
+em Firebase Authentication e outros produtos Firebase é configurada separadamente:
+ela não substitui este middleware do backend personalizado. Veja a
+[configuração do app](../mobile/README.md#firebase-app-check) e a
+[validação oficial para backends personalizados](https://firebase.google.com/docs/app-check/custom-resource-backend).
+
 # Configuração
 
-Atualmente o executável lê `DATABASE_URL`, `FIREBASE_PROJECT_ID` e `RUST_LOG` diretamente do ambiente.
+O executável lê `DATABASE_URL`, `FIREBASE_PROJECT_ID`, `FIREBASE_PROJECT_NUMBER`,
+`FIREBASE_APP_CHECK_APP_IDS` e `RUST_LOG` do ambiente.
 O módulo `src/config/` está reservado para centralizar essa configuração no futuro.
-O backend não carrega arquivos `.env` automaticamente.
+O backend também procura um `.env` no diretório de execução e seus ancestrais
+por dotenvy, preservando variáveis já exportadas.
 
 O [Compose](../compose.yaml) utiliza os valores abaixo e permite personalizá-los
 no arquivo `.env` da raiz do monorepo. As variáveis já definidas no terminal têm
@@ -496,6 +529,8 @@ precedência sobre esse arquivo.
 | `POSTGRES_PORT` | `5432` | Porta do PostgreSQL publicada no host. |
 | `BACKEND_PORT` | `3000` | Porta da API publicada no host pelo Compose. |
 | `RUST_LOG` | `info` | Filtro dos eventos de diagnóstico do backend. |
+| `FIREBASE_PROJECT_NUMBER` | Obrigatória no servidor | Número público do projeto, usado no emissor e audiência do App Check; não é o project ID. |
+| `FIREBASE_APP_CHECK_APP_IDS` | Obrigatória no servidor | App IDs Firebase permitidos, separados por vírgula e pertencentes ao número do projeto. O exemplo contém o app Android deste checkout. |
 | `FIREBASE_PROJECT_ID` | Sem padrão válido | Obrigatória para o backend e os runners BDD; define audiência e emissor esperados nos ID tokens. O valor de `.env.example` é um placeholder. |
 
 Os valores de usuário e senha acima destinam-se ao ambiente local de desenvolvimento.
@@ -676,12 +711,14 @@ Depois, usando os valores locais padrão:
 cd backend
 DATABASE_URL='postgres://capp:capp@localhost:5432/capp' \
 FIREBASE_PROJECT_ID='seu-project-id' \
+FIREBASE_PROJECT_NUMBER='13241645392' \
+FIREBASE_APP_CHECK_APP_IDS='1:13241645392:android:f9927433685734e2a45455' \
 RUST_LOG=info cargo run --locked
 ```
 
 Substitua `seu-project-id` pelo projeto Firebase usado pelo aplicativo. Se personalizou usuário, senha, banco ou porta, ajuste a URL desse comando.
-O `.env` da raiz é lido pelo Compose; ele não exporta variáveis para o processo
-Cargo. Mantenha esse terminal aberto enquanto usar a API e utilize `Ctrl+C` para
+O binário procura o `.env` da raiz por dotenvy; valores explicitamente exportados
+continuam tendo precedência. Ajuste número do projeto e App IDs se usar outro projeto. Mantenha esse terminal aberto enquanto usar a API e utilize `Ctrl+C` para
 encerrar o backend.
 
 ## Verificar a comunicação

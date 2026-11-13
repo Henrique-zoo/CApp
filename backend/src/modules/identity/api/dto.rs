@@ -1,9 +1,10 @@
 //! Contratos JSON da verificação institucional.
 //!
 //! A entrada usa `microsoftAccessToken`; o ID token Firebase pertence ao cabeçalho
-//! `Authorization`. A saída contém `profile`, `institution` e `expiresAt` em camelCase,
-//! com instante UTC serializado pelo Chrono em RFC 3339. Campos opcionais ausentes do perfil são
-//! serializados como `null`; não há UID, senha ou credencial na resposta.
+//! `Authorization`. A saída reúne `user` e `verification`; a evidência contém
+//! `profile`, `institution` e `expiresAt` em camelCase, com instante UTC serializado
+//! pelo Chrono em RFC 3339. Campos opcionais ausentes do perfil são serializados
+//! como `null`; não há UID Firebase, senha ou credencial na resposta.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -12,7 +13,7 @@ use uuid::Uuid;
 use crate::modules::identity::{
     application::{
         ports::{InstitutionalAffiliation, InstitutionalProfile},
-        services::authentication::InstitutionalVerificationResult,
+        services::authentication::{InstitutionalAuthResult, InstitutionalVerificationResult},
     },
     domain::entities::institution::Institution,
 };
@@ -30,7 +31,27 @@ pub(super) struct InstitutionalAuthRequest {
     pub microsoft_access_token: Option<String>,
 }
 
-/// Resposta HTTP 200 da verificação institucional concluída e persistida.
+/// Resposta da verificação: conta provisionada e evidência não nula.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct InstitutionalAuthResponse {
+    /// Perfil interno do mesmo usuário cuja identidade institucional foi confirmada.
+    pub user: UserResponse,
+
+    /// Evidência recém-confirmada, sem expor credenciais ou UID Firebase.
+    pub verification: InstitutionalVerificationResponse,
+}
+
+impl From<InstitutionalAuthResult> for InstitutionalAuthResponse {
+    fn from(result: InstitutionalAuthResult) -> Self {
+        Self {
+            user: result.user.into(),
+            verification: result.verification.into(),
+        }
+    }
+}
+
+/// Evidência institucional presente nas respostas de autenticação e restauração.
 ///
 /// # Formato JSON
 ///
@@ -56,10 +77,11 @@ pub(super) struct InstitutionalAuthRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct InstitutionalVerificationResponse {
-    /// Perfil Microsoft retornado pela verificação, sem provisionamento interno.
+    /// Perfil Microsoft retornado pela verificação, obtido durante o provisionamento ou sincronização.
     pub profile: InstitutionalIdentityResponse,
 
     pub institution: InstitutionSummaryResponse,
+
     /// Prazo UTC atribuído à evidência persistida; serializado como `expiresAt`.
     pub expires_at: DateTime<Utc>,
 }
@@ -70,10 +92,13 @@ pub(super) struct InstitutionalVerificationResponse {
 pub(super) struct InstitutionalIdentityResponse {
     /// Identificador correspondente no diretório Microsoft.
     pub microsoft_object_id: String,
+
     /// Nome informado pela instituição.
     pub name: Option<String>,
+
     /// E-mail informado pelo diretório.
     pub email: Option<String>,
+
     /// Filiação à instituição e dados associados.
     pub affiliation: InstitutionalAffiliationResponse,
 }
@@ -170,5 +195,65 @@ where
     D: Deserializer<'de>,
 {
     let value = Option::<String>::deserialize(deserializer)?;
+
     Ok(value.filter(|text| !text.is_empty()))
+}
+
+/// Conta interna sem credenciais ou identificadores dos provedores.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct UserResponse {
+    /// Complementos declarados para ausências do Graph, sem valor de evidência.
+    name: Option<String>,
+    institutional_email: Option<String>,
+    course_name: Option<String>,
+    id: Uuid,
+    nickname: Option<String>,
+    email: Option<String>,
+    current_semester: Option<i32>,
+    institution_entry_semester: Option<String>,
+    status: &'static str,
+}
+
+impl From<crate::modules::identity::domain::entities::user::User> for UserResponse {
+    fn from(user: crate::modules::identity::domain::entities::user::User) -> Self {
+        use crate::modules::identity::domain::UserStatus;
+
+        Self {
+            id: user.id(),
+            name: user.name().map(str::to_owned),
+            institutional_email: user.institutional_email().map(str::to_owned),
+            course_name: user.course_name().map(str::to_owned),
+            nickname: user.nickname().map(str::to_owned),
+            email: user.email().map(str::to_owned),
+            current_semester: user.current_semester(),
+            institution_entry_semester: user.institution_entry_semester().map(str::to_owned),
+            status: match user.status() {
+                UserStatus::Incomplete => "incomplete",
+                UserStatus::Active => "active",
+                UserStatus::Inactive => "inactive",
+            },
+        }
+    }
+}
+
+/// Sessão reutilizável sem access token Microsoft; evidência nula exige sincronização.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct AccountSessionResponse {
+    pub user: UserResponse,
+    pub verification: Option<InstitutionalVerificationResponse>,
+}
+
+/// Dados e complementos do perfil; não aceita status, UID, privilégios ou e-mail de login.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct CompleteProfileRequest {
+    /// Aceitos apenas se o atributo correspondente estiver ausente na evidência.
+    pub name: Option<String>,
+    pub institutional_email: Option<String>,
+    pub course_name: Option<String>,
+    pub nickname: String,
+    pub current_semester: i32,
+    pub institution_entry_semester: String,
 }

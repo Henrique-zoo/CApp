@@ -2,16 +2,22 @@ openapi: 3.1.0
 
 info:
   title: CApp API
-  version: 1.0.0
+  version: 3.0.0
   description: |
     Contrato das rotas atualmente implementadas no backend CApp.
     Os caminhos são servidos sem prefixo /v1.
+    Desde 2.0.0, rotas de negócio exigem X-Firebase-AppCheck além do Firebase
+    ID token. O servidor verifica assinatura, emissor, audiência, validade e
+    App ID permitido. app_check_required e app_check_invalid retornam 403;
+    app_check_unavailable retorna 503. /health e /ready dispensam ambos os tokens.
+    Desde 3.0.0, POST /auth/institutional/verify retorna user e verification
+    no mesmo envelope.
 
     A verificação institucional valida um Firebase ID token e um Microsoft access
     token da mesma pessoa, consulta a instituição pelo tenant Microsoft, verifica
-    a participação no grupo estudantil e persiste a evidência por 24 horas.
-    Estudantes e não estudantes podem concluir a verificação. Ela não provisiona
-    uma conta interna, não cria uma sessão Firebase e não concede permissões
+    a participação no grupo estudantil e persiste a evidência por 120 dias.
+    Estudantes e não estudantes podem concluir a verificação. Ela provisiona
+    uma conta interna incompleta por UID Firebase, sem criar credenciais ou conceder permissões
     específicas de curso. A expiração informada é da evidência institucional,
     independente da expiração do ID token Firebase.
 
@@ -76,16 +82,20 @@ paths:
         quando a participação estudantil foi confirmada. Nome, e-mail e curso
         podem estar ausentes e são serializados como null.
 
-        A resposta inclui institution com o identificador interno, o nome e a
+        A resposta inclui user com a conta provisionada e verification com a evidência,
+        dispensando GET /auth/session após esta operação. verification inclui institution com o identificador interno, o nome e a
         sigla do cadastro institucional do CApp. A sigla pode ser null. Esse resumo
         não expõe tenant ou grupo Microsoft e não concede permissões nem comprova,
         por si só, vínculo estudantil; o vínculo está em profile.affiliation.
 
         Não exige uma verificação institucional anterior. O serviço tem timeout
         total de 15 segundos; o cancelamento não garante desfazer uma gravação
-        já concluída. Esta operação não cria o usuário interno do CApp.
+        já concluída. Após confrontar as identidades, provisiona uma conta incompleta
+        de forma idempotente, preservando o ID, o perfil e o status de contas existentes.
+        Não reativa contas inativas. Perfil e credencial interna são concluídos separadamente.
       security:
         - FirebaseIdToken: []
+          FirebaseAppCheck: []
       requestBody:
         required: true
         description: Credencial Microsoft da mesma identidade vinculada ao Firebase.
@@ -101,52 +111,76 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/InstitutionalVerificationResponse"
+                $ref: "#/components/schemas/InstitutionalAuthResponse"
               examples:
                 student:
                   summary: Estudante com curso informado pelo diretório
                   value:
-                    profile:
-                      microsoftObjectId: "00000000-0000-0000-0000-000000000001"
-                      name: Pessoa Exemplo
-                      email: pessoa@instituicao.example
-                      affiliation:
-                        type: student
-                        courseName: Engenharia de Software
-                    institution:
-                      id: "10000000-0000-4000-8000-000000000001"
-                      name: Instituição Exemplo
-                      acronym: IE
-                    expiresAt: "2026-10-22T12:00:00Z"
+                    user:
+                      id: "20000000-0000-4000-8000-000000000001"
+                      status: incomplete
+                      nickname: null
+                      email: null
+                      currentSemester: null
+                      institutionEntrySemester: null
+                    verification:
+                      profile:
+                        microsoftObjectId: "00000000-0000-0000-0000-000000000001"
+                        name: Pessoa Exemplo
+                        email: pessoa@instituicao.example
+                        affiliation:
+                          type: student
+                          courseName: Engenharia de Software
+                      institution:
+                        id: "10000000-0000-4000-8000-000000000001"
+                        name: Instituição Exemplo
+                        acronym: IE
+                      expiresAt: "2026-10-22T12:00:00Z"
                 studentWithoutOptionalData:
                   summary: Estudante sem nome, e-mail ou curso informado e instituição sem sigla
                   value:
-                    profile:
-                      microsoftObjectId: "00000000-0000-0000-0000-000000000002"
-                      name: null
+                    user:
+                      id: "20000000-0000-4000-8000-000000000001"
+                      status: incomplete
+                      nickname: null
                       email: null
-                      affiliation:
-                        type: student
-                        courseName: null
-                    institution:
-                      id: "10000000-0000-4000-8000-000000000002"
-                      name: Outra Instituição Exemplo
-                      acronym: null
-                    expiresAt: "2026-10-22T12:00:00Z"
+                      currentSemester: null
+                      institutionEntrySemester: null
+                    verification:
+                      profile:
+                        microsoftObjectId: "00000000-0000-0000-0000-000000000002"
+                        name: null
+                        email: null
+                        affiliation:
+                          type: student
+                          courseName: null
+                      institution:
+                        id: "10000000-0000-4000-8000-000000000002"
+                        name: Outra Instituição Exemplo
+                        acronym: null
+                      expiresAt: "2026-10-22T12:00:00Z"
                 nonStudent:
                   summary: Pessoa sem participação no grupo estudantil
                   value:
-                    profile:
-                      microsoftObjectId: "00000000-0000-0000-0000-000000000003"
-                      name: Pessoa Exemplo
+                    user:
+                      id: "20000000-0000-4000-8000-000000000001"
+                      status: incomplete
+                      nickname: null
                       email: null
-                      affiliation:
-                        type: nonStudent
-                    institution:
-                      id: "10000000-0000-4000-8000-000000000001"
-                      name: Instituição Exemplo
-                      acronym: IE
-                    expiresAt: "2026-10-22T12:00:00Z"
+                      currentSemester: null
+                      institutionEntrySemester: null
+                    verification:
+                      profile:
+                        microsoftObjectId: "00000000-0000-0000-0000-000000000003"
+                        name: Pessoa Exemplo
+                        email: null
+                        affiliation:
+                          type: nonStudent
+                      institution:
+                        id: "10000000-0000-4000-8000-000000000001"
+                        name: Instituição Exemplo
+                        acronym: IE
+                      expiresAt: "2026-10-22T12:00:00Z"
         "400":
           description: |
             bad_request — JSON ausente, malformado, de tipo incompatível ou
@@ -213,8 +247,10 @@ paths:
                       details: null
         "403":
           description: |
+            app_check_required ou app_check_invalid — comprovação do aplicativo ausente ou recusada.
             unknown_institution — o tenant Microsoft não corresponde a uma
             instituição cadastrada.
+            account_inactive — a conta interna foi desativada e não é reativada pelo login.
             institutional_verification_required — uma verificação concorrente com
             início igual ou posterior já foi persistida para o mesmo UID e esta
             tentativa não a substituiu; repita a verificação institucional.
@@ -250,6 +286,7 @@ paths:
                   details: null
         "503":
           description: |
+            app_check_unavailable — não foi possível obter chaves válidas do App Check.
             authentication_provider_unavailable — falha de comunicação, resposta
             inesperada ou indisponibilidade de Firebase/JWKS ou Microsoft Graph.
             service_unavailable — timeout total de 15 segundos do serviço.
@@ -271,8 +308,161 @@ paths:
                       message: Serviço temporariamente indisponível
                       details: null
 
+
+  /auth/session:
+    get:
+      operationId: restoreAccountSession
+      tags: [Identidade]
+      summary: Restaurar a conta interna e a confirmação institucional vigente
+      description: |
+        Valida o ID token Firebase e consulta a conta provisionada. Não consulta o
+        Graph nem exige access token Microsoft. verification é null quando a evidência
+        expirou ou sua configuração institucional mudou; o perfil interno é preservado.
+        Uma conta incompleta também pode restaurar sua sessão para concluir o cadastro.
+        Conta ausente retorna 404 account_not_provisioned; inativa, 403 account_inactive.
+        Após autenticar, o cliente consulta esta rota antes de obter credencial Microsoft:
+        somente ausência de conta ou de evidência vigente exige verificação institucional.
+        Falhas de comunicação e recusas não devem ser interpretadas como conta ausente.
+        O timeout total é de 15 segundos.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      responses:
+        "200":
+          description: Conta restaurada; evidência nula exige sincronização Microsoft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountSessionResponse"
+              example:
+                user:
+                  id: "00000000-0000-0000-0000-000000000010"
+                  status: active
+                  nickname: Pessoa
+                  email: escolhido@example.test
+                  currentSemester: 4
+                  institutionEntrySemester: "2023.2"
+                verification: null
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          $ref: "#/components/responses/AccountAccessDenied"
+        "404":
+          description: Identidade autenticada ainda sem conta CApp; requer primeira verificação institucional.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: account_not_provisioned
+                  message: Esta identidade ainda não possui uma conta no CApp
+                  details: null
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
+  /users/me/profile:
+    put:
+      operationId: completeUserProfile
+      tags: [Identidade]
+      summary: Concluir ou atualizar o perfil da conta autenticada
+      description: |
+        Exige ID token Firebase originado de autenticação password, com a credencial
+        vinculada ao mesmo UID da Microsoft, e confirmação institucional vigente.
+        Não recebe senha, UID, status ou e-mail de login no corpo. O e-mail interno vem do JWT
+        validado, podendo ser diferente do institucional. Apelido, período atual e
+        semestre de ingresso são obrigatórios. O apelido é aparado.
+        name, institutionalEmail e courseName são complementos opcionais declarados
+        pelo usuário, aceitos somente quando o Graph retornou null para o atributo.
+        courseName só é aceito para estudantes confirmados. Não substituem a evidência
+        institucional nem comprovam titularidade do e-mail ou vínculo com o curso.
+        Concluir o perfil muda Incomplete para Active, sem reativar contas inativas.
+        Repetir a atualização preserva ID e a data da primeira conclusão.
+        Apelido não é tratado como identificador único. Timeout total de 15 segundos.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteProfileRequest"
+            example:
+              nickname: Pessoa
+              currentSemester: 4
+              institutionEntrySemester: "2023.2"
+      responses:
+        "200":
+          description: Perfil completo e conta ativa.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalUserResponse"
+              example:
+                id: "00000000-0000-0000-0000-000000000010"
+                status: active
+                nickname: Pessoa
+                email: escolhido@example.test
+                currentSemester: 4
+                institutionEntrySemester: "2023.2"
+        "400":
+          description: JSON inválido, campos extras ou dados inválidos (invalid_profile).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: app_check_required, app_check_invalid, password_required, institutional_verification_required ou account_inactive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
 components:
+  responses:
+    InvalidAccountCredential:
+      description: Credencial Firebase ausente, inválida, expirada ou identidade divergente.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    AccountAccessDenied:
+      description: app_check_required, app_check_invalid, institutional_verification_required ou account_inactive.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    AccountInternalError:
+      description: Falha interna; nenhum diagnóstico ou credencial é exposto.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    AccountServiceUnavailable:
+      description: app_check_unavailable, serviço indisponível ou timeout.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
   securitySchemes:
+    FirebaseAppCheck:
+      type: apiKey
+      in: header
+      name: X-Firebase-AppCheck
+      description: |
+        JWT Firebase App Check emitido para um App ID permitido do mesmo projeto.
+        Comprova o aplicativo, independentemente do usuário. Não enviar o token de
+        depuração do Console neste cabeçalho; o SDK o troca por um JWT App Check.
+        Obrigatório em todas as rotas de negócio; /health e /ready são públicos.
     FirebaseIdToken:
       type: http
       scheme: bearer
@@ -282,6 +472,107 @@ components:
         microsoft.com vinculada. Enviar um único Authorization: Bearer <ID_TOKEN>.
         O access token Microsoft é enviado separadamente no corpo da verificação.
   schemas:
+    InternalUserResponse:
+      type: object
+      required: [id, status, nickname, email, currentSemester, institutionEntrySemester]
+      properties:
+        name:
+          type: [string, "null"]
+          description: Nome declarado para uma ausência do Graph; não é evidência institucional.
+        institutionalEmail:
+          type: [string, "null"]
+          format: email
+          description: Contato declarado quando ausente no Graph, distinto do e-mail de login e sem comprovação automática.
+        courseName:
+          type: [string, "null"]
+          description: Curso declarado por estudante quando ausente no Graph; não concede permissões.
+        id:
+          type: string
+          format: uuid
+          description: ID interno estável, compartilhado entre os provedores vinculados no Firebase.
+        status:
+          type: string
+          enum: [incomplete, active, inactive]
+        nickname:
+          type: [string, "null"]
+        email:
+          type: [string, "null"]
+          format: email
+          description: E-mail escolhido para a credencial interna; não é necessariamente institucional.
+        currentSemester:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 2147483647
+          description: Período atual do curso, independente do tempo desde o ingresso.
+        institutionEntrySemester:
+          type: [string, "null"]
+          pattern: '^[0-9]{4}\.[12]$'
+          description: Semestre de ingresso na instituição, como 2023.2.
+      allOf:
+        - if:
+            properties:
+              status:
+                const: active
+          then:
+            properties:
+              id: {}
+              status: {}
+              nickname:
+                type: string
+                pattern: '\S'
+              email:
+                type: string
+                minLength: 1
+              currentSemester:
+                type: integer
+              institutionEntrySemester:
+                type: string
+    InstitutionalAuthResponse:
+      type: object
+      required: [user, verification]
+      properties:
+        user:
+          $ref: "#/components/schemas/InternalUserResponse"
+        verification:
+          $ref: "#/components/schemas/InstitutionalVerificationResponse"
+
+    AccountSessionResponse:
+      type: object
+      required: [user, verification]
+      properties:
+        user:
+          $ref: "#/components/schemas/InternalUserResponse"
+        verification:
+          oneOf:
+            - $ref: "#/components/schemas/InstitutionalVerificationResponse"
+            - type: "null"
+    CompleteProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [nickname, currentSemester, institutionEntrySemester]
+      properties:
+        name:
+          type: [string, "null"]
+          description: Complemento opcional, aceito somente se o nome do Graph for null.
+        institutionalEmail:
+          type: [string, "null"]
+          format: email
+          description: Contato opcional, aceito somente se o e-mail do Graph for null; não altera o login.
+        courseName:
+          type: [string, "null"]
+          description: Complemento opcional, aceito somente para estudante confirmado cujo curso no Graph for null.
+        nickname:
+          type: string
+          minLength: 1
+          pattern: '\S'
+          description: Apelido obrigatório, aparado antes de persistir.
+        currentSemester:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        institutionEntrySemester:
+          type: string
+          pattern: '^[0-9]{4}\.[12]$'
     InstitutionalAuthRequest:
       type: object
       required: [microsoftAccessToken]
@@ -306,7 +597,7 @@ components:
           type: string
           format: date-time
           description: |
-            Instante UTC (RFC 3339) de expiração da evidência institucional: 24 horas
+            Instante UTC (RFC 3339) de expiração da evidência institucional: 120 dias
             após o início das consultas institucionais. Não é a expiração do token
             Firebase e não substitui a validação no servidor. A resposta não inclui
             um campo ttl separado.

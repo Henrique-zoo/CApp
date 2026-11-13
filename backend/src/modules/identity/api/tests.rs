@@ -1,4 +1,5 @@
 //! Contratos JSON, erros e rejeições HTTP sem serviços externos reais.
+
 use super::*;
 use crate::{
     api::{
@@ -36,16 +37,25 @@ async fn state() -> AppState {
     let pool = sqlx::postgres::PgPoolOptions::new()
         .connect_lazy("postgres://test:test@127.0.0.1:1/test")
         .unwrap();
+
     pool.close().await;
+
     let http = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
+
     AppState::new(
         PgDatabase::new(pool),
         Clients::new(
             FirebaseTokenVerifier::new("test-project".into(), http.clone()).unwrap(),
-            MicrosoftGraphClient::new(http),
+            MicrosoftGraphClient::new(http.clone()),
+            crate::modules::identity::infrastructure::firebase::AppCheckVerifier::new(
+                "1234567890".into(),
+                vec!["1:1234567890:android:capp".into()],
+                http,
+            )
+            .unwrap(),
         ),
     )
 }
@@ -55,10 +65,12 @@ async fn state() -> AppState {
 fn bearer_scheme_is_case_insensitive() {
     for scheme in ["Bearer", "bearer", "BEARER"] {
         let mut headers = HeaderMap::new();
+
         headers.insert(
             "authorization",
             format!("{scheme} abc.def.ghi").parse().unwrap(),
         );
+
         assert_eq!(
             extractors::firebase_bearer_token(&headers).unwrap(),
             "abc.def.ghi"
@@ -70,6 +82,7 @@ fn bearer_scheme_is_case_insensitive() {
 #[test]
 fn invalid_bearer_headers_are_rejected() {
     assert!(extractors::firebase_bearer_token(&HeaderMap::new()).is_err());
+
     for raw in [
         "",
         "Basic token",
@@ -82,21 +95,28 @@ fn invalid_bearer_headers_are_rejected() {
         "Bearer\ttoken",
     ] {
         let mut headers = HeaderMap::new();
+
         headers.insert("authorization", raw.parse().unwrap());
+
         assert!(
             extractors::firebase_bearer_token(&headers).is_err(),
             "{raw}"
         );
     }
+
     let mut headers = HeaderMap::new();
+
     headers.append("authorization", HeaderValue::from_static("Bearer first"));
     headers.append("authorization", HeaderValue::from_static("Bearer second"));
+
     assert!(extractors::firebase_bearer_token(&headers).is_err());
+
     headers.clear();
     headers.insert(
         "authorization",
         HeaderValue::from_bytes(b"Bearer \xff").unwrap(),
     );
+
     assert!(extractors::firebase_bearer_token(&headers).is_err());
 }
 
@@ -115,6 +135,7 @@ fn microsoft_token_input_contract() {
                 .is_none()
         );
     }
+
     for token in ["token", " "] {
         assert_eq!(
             serde_json::from_value::<dto::InstitutionalAuthRequest>(
@@ -126,6 +147,7 @@ fn microsoft_token_input_contract() {
             Some(token)
         );
     }
+
     for token in [json!(1), json!(false), json!([]), json!({})] {
         assert!(
             serde_json::from_value::<dto::InstitutionalAuthRequest>(
@@ -142,6 +164,7 @@ fn verification_json_preserves_affiliation_and_expiry() {
     let expires_at = chrono::DateTime::parse_from_rfc3339("2026-10-21T12:00:00Z")
         .unwrap()
         .with_timezone(&chrono::Utc);
+
     for (affiliation, expected) in [
         (
             InstitutionalAffiliation::Student {
@@ -176,6 +199,7 @@ fn verification_json_preserves_affiliation_and_expiry() {
                 },
                 expires_at,
             });
+
         assert_eq!(
             serde_json::to_value(response).unwrap(),
             json!(
@@ -202,6 +226,11 @@ fn verification_json_preserves_affiliation_and_expiry() {
 #[tokio::test]
 async fn authentication_errors_have_stable_public_codes() {
     for (error, status, code) in [
+        (
+            AuthenticationError::AccountNotProvisioned,
+            404,
+            "account_not_provisioned",
+        ),
         (AuthenticationError::InvalidToken, 401, "invalid_token"),
         (AuthenticationError::ExpiredToken, 401, "expired_token"),
         (
@@ -232,15 +261,19 @@ async fn authentication_errors_have_stable_public_codes() {
         (AuthenticationError::Internal, 500, "internal_server_error"),
     ] {
         let response = ApiError::from(error).into_response();
+
         assert_eq!(response.status().as_u16(), status);
         assert_eq!(
             response.headers().contains_key("www-authenticate"),
             status == 401
         );
+
         if status == 401 {
             assert_eq!(response.headers()["www-authenticate"], "Bearer");
         }
+
         let body = response_json(response).await;
+
         assert_eq!(body["error"]["code"], code);
         assert!(!body["error"]["message"].as_str().unwrap().is_empty());
         assert!(body["error"]["details"].is_null());
@@ -254,8 +287,11 @@ async fn membership_error_exposes_only_public_institution_context() {
         institution_name: "Instituição A".into(),
     })
     .into_response();
+
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
     let body = response_json(response).await;
+
     assert_eq!(body["error"]["code"], "student_membership_required");
     assert_eq!(
         body["error"]["details"],
@@ -284,6 +320,7 @@ async fn generic_api_errors_have_expected_statuses() {
         ),
     ] {
         let response = error.into_response();
+
         assert_eq!(response.status().as_u16(), status);
         assert_eq!(response_json(response).await["error"]["code"], code);
     }
@@ -302,6 +339,7 @@ async fn route_rejects_missing_bearer_before_json_errors() {
         )
         .await
         .unwrap();
+
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(response.headers()["www-authenticate"], "Bearer");
 }
@@ -310,6 +348,7 @@ async fn route_rejects_missing_bearer_before_json_errors() {
 #[tokio::test]
 async fn route_rejects_invalid_microsoft_token_bodies() {
     let app = router().with_state(state().await);
+
     for (content_type, body) in [
         ("application/json", "{}"),
         ("application/json", "{\"microsoftAccessToken\":null}"),
@@ -330,6 +369,7 @@ async fn route_rejects_invalid_microsoft_token_bodies() {
             )
             .await
             .unwrap();
+
         assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{body}");
         assert_eq!(
             response_json(response).await["error"]["code"],
@@ -352,6 +392,7 @@ async fn route_rejects_invalid_firebase_token() {
         )
         .await
         .unwrap();
+
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(
         response_json(response).await["error"]["code"],
@@ -363,16 +404,20 @@ async fn route_rejects_invalid_firebase_token() {
 #[tokio::test]
 async fn protected_extractor_rejects_invalid_credentials() {
     let state = state().await;
+
     for authorization in [None, Some("Basic token"), Some("Bearer invalid")] {
         let mut request = Request::builder();
+
         if let Some(value) = authorization {
             request = request.header("authorization", value);
         }
+
         let (mut parts, _) = request.body(()).unwrap().into_parts();
         let error =
             extractors::AuthenticatedInstitutionalIdentity::from_request_parts(&mut parts, &state)
                 .await
                 .unwrap_err();
+
         assert_eq!(error.into_response().status(), StatusCode::UNAUTHORIZED);
     }
 }
