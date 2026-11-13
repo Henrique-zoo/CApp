@@ -20,7 +20,8 @@ use sqlx::{PgPool, migrate::Migrator};
 /// propagados ao chamador. O banco deve existir antes da chamada.
 ///
 /// As migrations atuais criam `catalog_status`, `institution` e
-/// `institutional_verification`, sem inserir uma instituição real ou usuário.
+/// `institutional_verification` e `app_user`, sem inserir instituições reais. A migration
+/// de provisionamento associa as evidências antigas a contas incompletas.
 /// Novos arquivos exigem recompilar o binário; `build.rs` observa o diretório
 /// para que o Cargo detecte essas adições. A fixture BDD é aplicada separadamente.
 ///

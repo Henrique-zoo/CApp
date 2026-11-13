@@ -11,6 +11,19 @@
 /// de vínculo, e ausência de evidência reutilizável não significa token inválido.
 #[derive(Debug, thiserror::Error)]
 pub enum AuthenticationError {
+    /// A identidade Firebase ainda precisa concluir a primeira verificação institucional.
+    #[error("Esta identidade ainda não possui uma conta no CApp")]
+    AccountNotProvisioned,
+
+    /// Campos acadêmicos ou apelido não satisfazem as invariantes do perfil.
+    #[error("Dados de perfil inválidos")]
+    InvalidProfile,
+    /// Conclusão do perfil exige JWT emitido após autenticação pela senha interna.
+    #[error("Entre com a senha interna antes de concluir o perfil")]
+    PasswordRequired,
+    /// A conta interna foi desativada e não pode ser reativada por login.
+    #[error("Esta conta está desativada")]
+    AccountInactive,
     /// A credencial não passou pela validação.
     #[error("Token de autenticação inválido")]
     InvalidToken,
@@ -80,6 +93,19 @@ pub struct InstitutionalVerificationRepositoryError;
 impl From<InstitutionalVerificationRepositoryError> for AuthenticationError {
     /// Converte falha no armazenamento de evidência em falha interna do caso de uso.
     fn from(_: InstitutionalVerificationRepositoryError) -> Self {
+        Self::Internal
+    }
+}
+
+/// Falha técnica ao provisionar, consultar ou atualizar a conta interna.
+#[derive(Debug)]
+pub enum UserRepositoryError {
+    /// Falha SQL/de conexão; diagnóstico permanece no adaptador.
+    InternalServer,
+}
+
+impl From<UserRepositoryError> for AuthenticationError {
+    fn from(_: UserRepositoryError) -> Self {
         Self::Internal
     }
 }
