@@ -226,6 +226,12 @@ O workflow executa as seguintes verificações:
 5. Compara a especificação proposta com a versão exata do commit-base da
    pull request usando OASDiff, para identificar alterações incompatíveis.
 
+As configurações do OASDiff ficam neste pacote: `.oasdiff.yaml` define a política,
+`.oasdiff-levels.txt` define os níveis dos diagnósticos e `.oasdiff-err-ignore.txt`
+registra exceções aprovadas. O workflow seleciona a configuração por
+`OASDIFF_CONFIG=packages/api-contracts/.oasdiff.yaml`. Os caminhos dos arquivos
+auxiliares são relativos ao diretório da própria configuração.
+
 Para executar localmente a validação dos exemplos, instale as dependências
 em um ambiente virtual Python e execute:
 

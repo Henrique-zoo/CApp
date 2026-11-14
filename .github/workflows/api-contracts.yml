@@ -9,9 +9,6 @@ on:
       - "mobile/lib/src/infrastructure/backend/**"
       - "mobile/test/src/infrastructure/backend/**"
       - "mobile/test/src/modules/identity/infrastructure/backend/**"
-      - ".oasdiff-err-ignore.txt"
-      - ".oasdiff.yaml"
-      - ".oasdiff-levels.txt"
       - ".redocly.lint-ignore.yaml"
       - ".github/workflows/api-contracts.yml"
   pull_request:
@@ -22,9 +19,6 @@ on:
       - "mobile/lib/src/infrastructure/backend/**"
       - "mobile/test/src/infrastructure/backend/**"
       - "mobile/test/src/modules/identity/infrastructure/backend/**"
-      - ".oasdiff-err-ignore.txt"
-      - ".oasdiff.yaml"
-      - ".oasdiff-levels.txt"
       - ".redocly.lint-ignore.yaml"
       - ".github/workflows/api-contracts.yml"
   workflow_dispatch:
@@ -109,6 +103,8 @@ jobs:
 
       - name: Detect breaking changes
         if: github.event_name == 'pull_request'
+        env:
+          OASDIFF_CONFIG: packages/api-contracts/.oasdiff.yaml
         uses: oasdiff/oasdiff-action/breaking@v0
         with:
           base: "${{ github.event.pull_request.base.sha }}:packages/api-contracts/openapi.yaml"
