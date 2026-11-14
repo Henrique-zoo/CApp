@@ -7,6 +7,7 @@
 //! # Organização
 //!
 //! - [`api`]: estado, contrato de erros e composição HTTP.
+//! - [`domain`]: reexportação dos tipos de domínio de Centro Acadêmico.
 //! - [`modules::identity`]: verificação institucional e evidência de elegibilidade.
 //! - [`infrastructure::database`]: adaptador PostgreSQL e migrations compartilhadas.
 //! - [`config`] e [`shared`]: espaços reservados para configuração e tipos comuns.
@@ -27,6 +28,7 @@
 
 pub mod api;
 pub mod config;
+pub mod domain;
 pub mod infrastructure;
 pub mod modules;
 pub mod shared;
