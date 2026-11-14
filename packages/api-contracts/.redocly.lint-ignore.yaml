@@ -1,7 +1,7 @@
 # Exceções intencionais da validação Redocly.
 # As regras continuam ativas para os demais pontos do contrato.
 
-packages/api-contracts/openapi.yaml:
+openapi.yaml:
   no-empty-servers:
     # O projeto ainda não definiu uma URL canônica de implantação.
     # Não usamos localhost nem um endereço fictício como servidor da API.

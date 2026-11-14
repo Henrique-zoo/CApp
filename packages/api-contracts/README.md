@@ -293,7 +293,8 @@ removida assim que deixar de ser necessária.
 
 ## Exceções da validação Redocly
 
-O arquivo `.redocly.lint-ignore.yaml` registra exceções pontuais para regras
+O arquivo `.redocly.lint-ignore.yaml`, neste pacote, registra exceções pontuais
+para regras
 que não podem ser atendidas corretamente com as informações e os
 comportamentos atualmente definidos pelo projeto:
 
@@ -310,3 +311,12 @@ As exceções são limitadas aos respectivos nós da especificação. As regras
 Redocly continuam sendo aplicadas às demais operações. Quando o projeto
 definir uma licença ou uma URL oficial de implantação, as exceções
 correspondentes deverão ser removidas.
+
+`redocly.yaml` mantém o conjunto de regras `recommended`, usado pelo lint. O
+workflow fornece `--config packages/api-contracts/redocly.yaml` para carregar
+essa configuração e as exceções no mesmo diretório. Para executar da raiz:
+
+```bash
+npx @redocly/cli@2.73.0 lint packages/api-contracts/openapi.yaml \
+  --config packages/api-contracts/redocly.yaml
+```
