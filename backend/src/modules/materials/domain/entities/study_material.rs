@@ -476,7 +476,7 @@ impl StudyMaterial {
 
     /// Retorna o instante de criação do material.
     pub fn created_at(&self) -> DateTime<Utc> {
-        self.created_at.clone()
+        self.created_at
     }
 }
 
