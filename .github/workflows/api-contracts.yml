@@ -9,7 +9,6 @@ on:
       - "mobile/lib/src/infrastructure/backend/**"
       - "mobile/test/src/infrastructure/backend/**"
       - "mobile/test/src/modules/identity/infrastructure/backend/**"
-      - ".redocly.lint-ignore.yaml"
       - ".github/workflows/api-contracts.yml"
   pull_request:
     paths:
@@ -19,7 +18,6 @@ on:
       - "mobile/lib/src/infrastructure/backend/**"
       - "mobile/test/src/infrastructure/backend/**"
       - "mobile/test/src/modules/identity/infrastructure/backend/**"
-      - ".redocly.lint-ignore.yaml"
       - ".github/workflows/api-contracts.yml"
   workflow_dispatch:
 
@@ -68,7 +66,9 @@ jobs:
             -v "$GITHUB_WORKSPACE:/spec" \
             -w /spec \
             redocly/cli:2.73.0 \
-            lint packages/api-contracts/openapi.yaml --format=github-actions
+            lint packages/api-contracts/openapi.yaml \
+            --config packages/api-contracts/redocly.yaml \
+            --format=github-actions
 
       - name: Fetch exact pull request base commit
         if: github.event_name == 'pull_request'
