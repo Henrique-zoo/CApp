@@ -11,6 +11,14 @@ import '../../support/step_registry.dart';
 /// Expressões do fluxo de contas consumidas pelo registro global do mobile.
 final accountSessionSteps = <StepDefinition>[
   pendingStep(
+    r'^a instituição passou a informar outro e-mail para essa identidade$',
+  ),
+  pendingStep(r'^uma nova sincronização institucional é concluída$'),
+  pendingStep(r'^o e-mail de entrada escolhido pelo usuário é preservado$'),
+  pendingStep(
+    r'^o perfil da conta contém somente o e-mail de entrada escolhido$',
+  ),
+  pendingStep(
     r'^que seu perfil interno está completo e possui uma credencial de e-mail e senha vinculada$',
   ),
   pendingStep(
@@ -52,8 +60,10 @@ final accountSessionSteps = <StepDefinition>[
   pendingStep(
     r'^a primeira etapa pede apelido, período atual do curso e semestre de ingresso na instituição$',
   ),
-  pendingStep(r'^apresenta os dados do Graph em campos de texto$'),
-  pendingStep(r'^só permite completar os campos cujo valor no Graph é nulo$'),
+  pendingStep(
+    r'^apresenta nome e curso confirmados pelo Graph em campos de texto$',
+  ),
+  pendingStep(r'^só permite completar o nome quando o Graph não o informou$'),
   pendingStep(r'^não pede as credenciais internas$'),
   pendingStep(r'^ele informa dados acadêmicos válidos e avança$'),
   pendingStep(
@@ -91,9 +101,9 @@ final accountSessionSteps = <StepDefinition>[
   pendingStep(r'^os campos de senha e confirmação estão vazios$'),
   pendingStep(r'^a conclusão usará os dados acadêmicos revisados$'),
   pendingStep(
-    r'^que o Graph retornou nome, e-mail e curso nulos para um estudante confirmado$',
+    r'^que o Graph retornou nome nulo e curso válido para um estudante confirmado$',
   ),
-  pendingStep(r'^ele completa esses dados e conclui seu cadastro$'),
+  pendingStep(r'^ele informa seu nome e conclui seu cadastro$'),
   pendingStep(r'^os complementos são guardados em seu perfil CApp$'),
   pendingStep(
     r'^a evidência institucional preserva os valores nulos do Graph$',
@@ -101,7 +111,7 @@ final accountSessionSteps = <StepDefinition>[
   pendingStep(
     r'^os complementos são apresentados como informados pelo usuário$',
   ),
-  pendingStep(r'^que o Graph retornou nome, e-mail e curso não nulos$'),
+  pendingStep(r'^que o Graph retornou nome e curso não nulos$'),
   pendingStep(
     r'^uma requisição tenta substituir esses dados por complementos$',
   ),

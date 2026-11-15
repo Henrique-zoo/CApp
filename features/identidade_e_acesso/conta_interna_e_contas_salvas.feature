@@ -37,8 +37,8 @@ Funcionalidade: Conta interna e seleção de contas salvas
       Dado que a conta foi provisionada como Incomplete após a confirmação institucional
       Quando o usuário abre o formulário de conclusão do cadastro
       Então a primeira etapa pede apelido, período atual do curso e semestre de ingresso na instituição
-      E apresenta os dados do Graph em campos de texto
-      E só permite completar os campos cujo valor no Graph é nulo
+      E apresenta nome e curso confirmados pelo Graph em campos de texto
+      E só permite completar o nome quando o Graph não o informou
       E não pede as credenciais internas
       Quando ele informa dados acadêmicos válidos e avança
       Então o mesmo formulário muda para a segunda etapa sem abrir outra tela
@@ -48,6 +48,7 @@ Funcionalidade: Conta interna e seleção de contas salvas
       Quando ele escolhe outro e-mail e define sua senha interna
       E confirma a conclusão do cadastro
       Então a credencial interna é vinculada ao mesmo usuário Firebase
+      E o perfil da conta contém somente o e-mail de entrada escolhido
       E o backend ativa a conta após validar os dados obrigatórios
       E o usuário pode entrar na área principal
 
@@ -72,15 +73,15 @@ Funcionalidade: Conta interna e seleção de contas salvas
 
     @happy @backend @mobile
     Cenário: Completar ausências do Graph sem alterar a evidência institucional
-      Dado que o Graph retornou nome, e-mail e curso nulos para um estudante confirmado
-      Quando ele completa esses dados e conclui seu cadastro
+      Dado que o Graph retornou nome nulo e curso válido para um estudante confirmado
+      Quando ele informa seu nome e conclui seu cadastro
       Então os complementos são guardados em seu perfil CApp
       E a evidência institucional preserva os valores nulos do Graph
       E os complementos são apresentados como informados pelo usuário
 
     @sad @backend @mobile
     Cenário: Recusar a substituição de dados preenchidos pelo Graph
-      Dado que o Graph retornou nome, e-mail e curso não nulos
+      Dado que o Graph retornou nome e curso não nulos
       Quando uma requisição tenta substituir esses dados por complementos
       Então a atualização é recusada
       E os dados institucionais são preservados
@@ -226,3 +227,13 @@ Funcionalidade: Conta interna e seleção de contas salvas
       Então novas tentativas respeitam a espera progressiva da sessão
       E não são executadas tentativas simultâneas
       E uma falha de rede não abre o login Microsoft
+
+  Regra: O endereço do Graph apenas sugere o e-mail na criação da conta
+
+    @happy @backend @mobile
+    Cenário: Sincronização preserva o e-mail escolhido para uma conta ativa
+      Dado que o usuário concluiu a entrada com perfil ativo e confirmação institucional vigente
+      E a instituição passou a informar outro e-mail para essa identidade
+      Quando uma nova sincronização institucional é concluída
+      Então o e-mail de entrada escolhido pelo usuário é preservado
+      E o perfil da conta contém somente o e-mail de entrada escolhido
