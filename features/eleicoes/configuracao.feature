@@ -12,10 +12,23 @@ Funcionalidade: Gerenciamento de eleições de Centros Acadêmicos
     Dado que a comissão eleitoral foi indicada pela gestão do CA
     E estou autenticado como integrante autorizado dessa comissão
 
-  Regra: Chapa única é permitida e cada participante guarda seu segredo
+  Regra: A comissão escolhe a confidencialidade dos votos ao criar a eleição
+
+    Esquema do Cenário: Escolher a modalidade de votação na criação da eleição
+      Dado que estou preenchendo os dados de uma nova eleição do CA
+      Quando seleciono votação "<modalidade>" e concluo a criação da eleição
+      Então a eleição é criada com votação "<modalidade>"
+
+      Exemplos:
+        | modalidade   |
+        | secreta      |
+        | identificada |
+
+  Regra: A votação secreta permite chapa única com autoridades independentes
 
     Cenário: Preparar eleição com uma única chapa
       Dado que existe uma única chapa aprovada pela comissão
+      E que a eleição está configurada para votação secreta
       Quando a configuração eleitoral é concluída
       Então o manifesto contém a chapa e a opção Nulo
       E as autoridades são o servidor, a comissão e a chapa
