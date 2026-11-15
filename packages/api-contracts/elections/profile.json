@@ -43,7 +43,7 @@
     "clientBallotValidityAssumed": true,
     "firebaseAuthRequired": true,
     "firebaseAppCheckRequired": true,
-    "httpsRequiredInThisDelivery": false,
+    "httpsRequiredInThisDelivery": true,
     "individualBallotValidityProofs": false,
     "allAuthoritiesRequired": true
   },
@@ -67,7 +67,7 @@
     "counting": "Usar o mesmo quadro congelado para headHash, voterCount e agregado. Recuperar totais em [0,voterCount] e exigir soma(counts)=voterCount, incluindo Nulo.",
     "outcomes": "Autoridade ausente ou contribuição inválida: incomplete. Total fora do intervalo ou soma divergente: annulled. Cancelamento manual: cancelled. Demais casos: apuração valid, sem definir vencedor.",
     "privacy": "Não publicar tokens, Firebase UID, e-mail, escolha em claro, chave privada ou aleatoriedade da cifragem.",
-    "transport": "Um envelope assinado por mensagem JSON. Exportação pública pode usar JSON Lines. Rejeitar chaves duplicadas, campos desconhecidos e strings escalares não canônicas.",
+    "transport": "HTTPS obrigatório entre app e backend, com validação de confiança, validade e nome do servidor no cliente. Terminação TLS no Caddy; HTTP somente na rede privada do Compose, no mesmo host, sem exposição externa da porta do backend. Iniciar chamadas com credenciais diretamente em HTTPS. Um envelope assinado por mensagem JSON; exportação pública pode usar JSON Lines. Rejeitar chaves duplicadas, campos desconhecidos e strings escalares não canônicas.",
     "binary": "Decodificar Base64url e exigir que a recodificação sem padding seja igual à entrada. Chaves RSA usam DER SPKI canônico com OID rsaEncryption.",
     "serverKey": "A configuração confiável do backend fornece a chave do servidor. A autoassinatura do manifesto, isoladamente, não comprova sua origem.",
     "eligibility": "Firebase identifica a conta; backend confere vínculo institucional vigente no instante do novo voto. Identificador eleitoral é opaco por conta/eleição; curso nunca é declaração do cliente.",
