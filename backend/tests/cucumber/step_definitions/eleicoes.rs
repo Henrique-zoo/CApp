@@ -1,10 +1,13 @@
 //! Configuração, calendário e cancelamento do processo eleitoral.
 //!
-//! O contrato #377 permite chapa única e adiamento, preservando a distinção entre
-//! encerramento válido e cancelamento. Estes registros mantêm a especificação
-//! ligada ao runner até as funcionalidades existirem; cada corpo chama pending_step,
-//! sem simular autorização, persistência ou apuração. Expressões reutilizadas pela
-//! votação são registradas em shared_steps para conservar resolução única.
+//! A comissão escolhe votação secreta ou identificada ao criar a eleição. Na
+//! modalidade secreta, o contrato #377 permite chapa única com autoridades
+//! independentes. O calendário distingue encerramento válido de cancelamento.
+//!
+//! Estes registros mantêm a especificação ligada ao runner até as funcionalidades
+//! existirem. Cada corpo chama pending_step, sem simular autorização, persistência
+//! ou apuração. Expressões reutilizadas pela votação são registradas em shared_steps
+//! para conservar resolução única.
 
 use cucumber::{given, then, when};
 
@@ -21,6 +24,24 @@ fn given_que_a_comissao_eleitoral_foi_indicada_pela_gestao_do_ca(_world: &mut Ap
 #[given(regex = r#"^estou autenticado como integrante autorizado dessa comissão$"#)]
 fn given_estou_autenticado_como_integrante_autorizado_dessa_comissao(_world: &mut AppWorld) {
     pending_step("estou autenticado como integrante autorizado dessa comissão");
+}
+
+/// Pendente: que estou preenchendo os dados de uma nova eleição do CA.
+#[given(regex = r#"^que estou preenchendo os dados de uma nova eleição do CA$"#)]
+fn given_estou_preenchendo_nova_eleicao(_world: &mut AppWorld) {
+    pending_step("que estou preenchendo os dados de uma nova eleição do CA");
+}
+
+/// Pendente: seleciono votação {string} e concluo a criação da eleição.
+#[when(regex = r#"^seleciono votação "(secreta|identificada)" e concluo a criação da eleição$"#)]
+fn when_seleciono_modalidade_e_crio_eleicao(_world: &mut AppWorld, _modalidade: String) {
+    pending_step("seleciono votação {string} e concluo a criação da eleição");
+}
+
+/// Pendente: a eleição é criada com votação {string}.
+#[then(regex = r#"^a eleição é criada com votação "(secreta|identificada)"$"#)]
+fn then_eleicao_criada_com_modalidade(_world: &mut AppWorld, _modalidade: String) {
+    pending_step("a eleição é criada com votação {string}");
 }
 
 /// Pendente: que existe uma única chapa aprovada pela comissão.
