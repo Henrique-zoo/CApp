@@ -1,4 +1,11 @@
-//! Espaço reservado para eventos de domínio do módulo de notícias.
+//! Eventos de domínio do módulo de notícias.
 //!
-//! Ainda não define eventos ou mecanismos de publicação. Os tipos futuros
-//! representarão fatos relevantes ocorridos no negócio.
+//! Reúne os fatos relevantes e imutáveis ocorridos no ciclo de vida
+//! editorial das notícias.
+
+pub mod news_events;
+
+pub use news_events::{
+    NewsArchived, NewsContentUpdated, NewsCreated, NewsDomainEvent, NewsPublished, NewsRejected,
+    NewsSubmittedForReview,
+};
