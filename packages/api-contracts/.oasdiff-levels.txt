@@ -1,3 +1,0 @@
-api-version-not-bumped err
-api-version-decreased err
-api-major-version-not-bumped err
