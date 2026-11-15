@@ -58,6 +58,34 @@ impl InstitutionalAffiliation {
     /// Um cargo só é interpretado como curso quando o grupo estudantil foi confirmado.
     /// O texto externo válido é preservado; valores ausentes, vazios ou compostos
     /// apenas por espaços produzem o mesmo acesso limitado de um não estudante.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `is_student_member`: resultado conclusivo da consulta ao grupo estudantil
+    ///   ou confirmação persistida dessa consulta; não é declaração do cliente.
+    /// - `course_name`: texto obtido no diretório ou reconstituído da evidência.
+    ///   `None` representa ausência; o teste de conteúdo usa `trim`, mas um curso
+    ///   aceito conserva seu texto original, inclusive espaços nas extremidades.
+    ///
+    /// # Retorno e limites
+    ///
+    /// Retorna [`Self::Student`] somente quando as duas informações confirmam o
+    /// contexto estudantil; nos demais casos, [`Self::NonStudent`]. Isso permite
+    /// autenticação limitada, sem atestar pertencimento a um CA ou papel de gestão.
+    /// Não consulta provedores, valida prazo ou associa texto ao catálogo de cursos.
+    /// Falhas técnicas do diretório devem ser propagadas pela porta antes desta
+    /// conversão, em vez de representadas como uma consulta negativa.
+    ///
+    /// # Exemplos
+    ///
+    /// ```
+    /// use backend::modules::identity::application::ports::InstitutionalAffiliation;
+    ///
+    /// let recognized = InstitutionalAffiliation::from_directory(true, Some("Curso".into()));
+    /// assert!(matches!(recognized, InstitutionalAffiliation::Student { .. }));
+    /// let incomplete = InstitutionalAffiliation::from_directory(true, Some(" \t".into()));
+    /// assert!(matches!(incomplete, InstitutionalAffiliation::NonStudent));
+    /// ```
     pub fn from_directory(is_student_member: bool, course_name: Option<String>) -> Self {
         match course_name {
             Some(course_name) if is_student_member && !course_name.trim().is_empty() => {
@@ -201,13 +229,31 @@ pub trait InstitutionRepository {
 #[async_trait::async_trait]
 pub trait UserRepository: Send + Sync {
     /// Provisiona idempotentemente; chamadas concorrentes retornam o mesmo ID.
-    /// Só deve ser chamado após a confirmação das identidades Microsoft/Firebase.
+    ///
+    /// `firebase_uid` deve vir da identidade autenticada, após o confronto entre
+    /// Microsoft e Firebase. A implementação precisa garantir unicidade também
+    /// em chamadas concorrentes, sem sobrescrever perfil ou reativar conta inativa.
+    /// Retorna a conta criada como incompleta ou a conta existente com seu estado.
+    /// Falhas de consulta/escrita são [`UserRepositoryError`], não conta ausente.
     async fn provision(&self, firebase_uid: &str) -> Result<User, UserRepositoryError>;
 
     /// Persiste apenas o perfil validado; recusa conta desativada concorrentemente.
+    ///
+    /// `user` deve ter passado pelas verificações de origem da aplicação e pelas
+    /// invariantes de [`User::complete_profile`]. Retorna `true` quando a escrita
+    /// é aceita e `false` quando a atualização condicional não encontra uma conta
+    /// elegível. A primeira data de conclusão e a identidade devem ser preservadas.
+    /// Falhas de infraestrutura retornam [`UserRepositoryError`]; não podem ser
+    /// confundidas com uma recusa de estado nem com atualização bem-sucedida.
     async fn update_profile(&self, user: &User) -> Result<bool, UserRepositoryError>;
 
-    /// Ausência é esperada antes do primeiro acesso institucional.
+    /// Recupera a conta pelo UID confiável, sem provisionar ou autenticar.
+    ///
+    /// Retorna `Ok(None)` antes do primeiro provisionamento. Uma conta inativa
+    /// pode ser retornada: cabe à aplicação decidir seu acesso. Não consulta o
+    /// Graph nem interpreta validade institucional. Falhas de consulta ou de
+    /// reconstituição retornam [`UserRepositoryError`], preservando a distinção
+    /// entre ausência esperada e dependência indisponível.
     async fn get_by_firebase_uid(
         &self,
         firebase_uid: &str,

@@ -5,6 +5,10 @@
 //! `profile`, `institution` e `expiresAt` em camelCase, com instante UTC serializado
 //! pelo Chrono em RFC 3339. Campos opcionais ausentes do perfil são serializados
 //! como `null`; não há UID Firebase, senha ou credencial na resposta.
+//! A resposta de verificação pode acompanhar `suggestedEmail` somente durante o
+//! cadastro. Esse dado não integra o perfil institucional ou a resposta de
+//! restauração. A conclusão recebe dados internos, e seu e-mail vem do JWT
+//! autenticado; a serialização não transforma o endereço Graph em contato salvo.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -50,6 +54,12 @@ pub(super) struct InstitutionalAuthResponse {
 }
 
 impl From<InstitutionalAuthResult> for InstitutionalAuthResponse {
+    /// Converte a verificação concluída sem misturar sugestão e evidência.
+    ///
+    /// Consome o resultado e delega conta/evidência aos respectivos mapeamentos.
+    /// `suggested_email: None` é omitido pelo Serde; a decisão de fornecê-lo para
+    /// uma conta incompleta já foi tomada pelo caso de uso. Não consulta provedores
+    /// nem revalida a autenticação durante a conversão.
     fn from(result: InstitutionalAuthResult) -> Self {
         Self {
             user: result.user.into(),
@@ -203,6 +213,10 @@ where
 }
 
 /// Conta interna sem credenciais ou identificadores dos provedores.
+///
+/// Os campos acadêmicos e de entrada podem ser nulos enquanto a conta está
+/// incompleta. O e-mail é o endereço da credencial interna confirmado pelo backend;
+/// não há curso declarado nem segundo contato institucional neste contrato.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct UserResponse {
@@ -217,6 +231,11 @@ pub(super) struct UserResponse {
 }
 
 impl From<User> for UserResponse {
+    /// Copia a fotografia do domínio e traduz seu estado para o discriminador JSON.
+    ///
+    /// Preserva ausências sem inventar dados para uma conta incompleta. Não publica
+    /// UID Firebase, datas internas ou endereço de sugestão, e não realiza mudança
+    /// de estado; a origem dos valores já foi verificada no fluxo de aplicação.
     fn from(user: User) -> Self {
         Self {
             id: user.id(),
@@ -243,6 +262,10 @@ pub(super) struct AccountSessionResponse {
 }
 
 /// Dados e complementos do perfil; não aceita status, UID, privilégios ou e-mail de login.
+///
+/// A desserialização recusa propriedades desconhecidas. Os tipos delimitam o
+/// formulário; a aplicação confere a origem do nome e o domínio valida conteúdo,
+/// período e ingresso. Construir este DTO não ativa a conta nem valida credenciais.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct CompleteProfileRequest {

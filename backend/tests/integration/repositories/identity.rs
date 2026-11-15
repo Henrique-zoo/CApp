@@ -57,7 +57,14 @@ async fn uid(pool: &PgPool, id: Uuid) -> String {
         .unwrap()
 }
 
-/// Executa as migrations antigas e a nova no mesmo schema isolado, preservando UIDs e prazos.
+/// Reproduz a evolução das evidências em um schema isolado do banco de testes.
+///
+/// Usa uma transação de `pool` e `search_path` próprio para reproduzir um banco
+/// anterior ao provisionamento, seguido das migrations de complementos, curso e
+/// e-mail transitório. Confere a migração das identidades, o rebaixamento de
+/// evidências sem curso e a remoção das colunas declaradas, preservando o e-mail
+/// escolhido. O rollback descarta o schema e seus dados, reutilizando o PostgreSQL
+/// da suíte sem alterar as fixtures dos casos seguintes.
 async fn legacy_evidence_migration(pool: &PgPool) {
     let mut tx = pool.begin().await.unwrap();
     let schema = format!("legacy_{}", Uuid::new_v4().simple());

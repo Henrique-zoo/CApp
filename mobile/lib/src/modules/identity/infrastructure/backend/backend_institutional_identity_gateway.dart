@@ -100,6 +100,16 @@ final class BackendInstitutionalIdentityGateway
     });
   }
 
+  /// Converte a restauração HTTP em conta e evidência de aplicação.
+  ///
+  /// Conserva evidência nula como necessidade de sincronização e não fornece
+  /// sugestão de e-mail. A conta passa por [_mapUser], de modo que um perfil ativo
+  /// inconsistente não entra no controlador como fotografia válida.
+  ///
+  /// Recusas HTTP, indisponibilidade e conteúdo incompatível seguem a tradução
+  /// de [_request] para `IdentityException`. Em particular, conta não provisionada
+  /// continua distinta de falha técnica. Não consulta o Graph, renova evidência,
+  /// associa UID ou grava cache; a coordenação é responsável por essas decisões.
   @override
   Future<AccountSession> restoreSession() => _request(() async {
     final response = await _api.restoreSession();
@@ -112,6 +122,16 @@ final class BackendInstitutionalIdentityGateway
     );
   });
 
+  /// Envia [profile] ao endpoint de conclusão e valida a fotografia devolvida.
+  ///
+  /// A autenticação por senha já deve ter sido realizada no mesmo UID. O gateway
+  /// envia somente os dados acadêmicos e o nome opcional; o e-mail escolhido é
+  /// obtido pelo backend no token Firebase, e a senha permanece no SDK.
+  ///
+  /// Retorna [InternalUser] reconstituído por [_mapUser]. Falhas reconhecidas são
+  /// traduzidas por [_request], com diagnóstico e pilha preservados. Não ativa a
+  /// sessão por conta própria ou persiste o retorno: o controlador confere que a
+  /// resposta ainda pertence à operação atual antes de publicá-la e gravá-la.
   @override
   Future<InternalUser> completeProfile(ProfileCompletion profile) => _request(
     () async => _mapUser(
@@ -124,6 +144,13 @@ final class BackendInstitutionalIdentityGateway
     ),
   );
 
+  /// Traduz [dto] para as invariantes compartilhadas pela aplicação e pelo cache.
+  ///
+  /// O DTO já deve ter validado UUID e discriminador; esta conversão preserva os
+  /// valores e delega à fábrica [InternalUser] a faixa do período, o ingresso e a
+  /// completude de uma conta ativa. Violações de conteúdo lançam [FormatException],
+  /// que [_request] classifica como resposta inválida. Não infere dados ausentes,
+  /// normaliza texto ou toma o perfil como comprovação de vínculo estudantil.
   InternalUser _mapUser(InternalUserResponse dto) => InternalUser(
     id: dto.id,
     status: InternalUserStatus.values.byName(dto.status),
@@ -134,6 +161,12 @@ final class BackendInstitutionalIdentityGateway
     name: dto.name,
   );
 
+  /// Executa [operation] e mantém exceções de transporte fora do contrato do módulo.
+  ///
+  /// Converte falhas Dio, de formato e de serialização checked reconhecidas em
+  /// `IdentityException`. A causa e a pilha são preservadas; erros de programação
+  /// não são mascarados como falha de autenticação, inclusive quando encapsulados
+  /// pelo serializador. Não repete a operação nem altera o estado da sessão.
   Future<T> _request<T>(Future<T> Function() operation) async {
     try {
       return await operation();

@@ -32,6 +32,13 @@ enum _ProfileStep { academic, credentials }
 
 /// Apresenta o perfil institucional e configura o acesso sem mudar de rota.
 class ProfileCompletionPage extends StatefulWidget {
+  /// Apresenta o cadastro da conta descrita por [state] e coordenada por [controller].
+  ///
+  /// A composição deve fornecer o ramo de perfil pendente, com confirmação
+  /// institucional disponível, e substituir a página ao trocar de identidade.
+  /// O usuário interno ainda pode estar em recuperação; nesse caso, o formulário
+  /// aguarda a fotografia e oferece nova tentativa. [now] só orienta a sugestão
+  /// de ingresso, permitindo testes determinísticos sem alterar a validade da sessão.
   const ProfileCompletionPage({
     super.key,
     required this.controller,
@@ -39,12 +46,16 @@ class ProfileCompletionPage extends StatefulWidget {
     this.now = DateTime.now,
   });
 
+  /// Coordenação existente; a página não cria nem descarta esse recurso.
   final SessionController controller;
+
+  /// Fotografia atual da mesma conta do controlador, usada para renderizar o fluxo.
   final SessionSignedIn state;
 
   /// Relógio apenas da sugestão acadêmica, sem participar da validade da sessão.
   final DateTime Function() now;
 
+  /// Cria o rascunho local e os controladores que pertencem somente a esta página.
   @override
   State<ProfileCompletionPage> createState() => _ProfileCompletionPageState();
 }
@@ -65,6 +76,7 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
   bool _credentialsOpened = false;
   String? _message;
 
+  /// Inicializa o rascunho com a conta e a evidência recebidas, sem ler preferências.
   @override
   void initState() {
     super.initState();
@@ -72,6 +84,11 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
     _loadGraphData();
   }
 
+  /// Recupera os campos internos para retomada do cadastro da mesma conta.
+  ///
+  /// Um ingresso já informado é tratado como escolha do usuário e não é
+  /// sobrescrito por sugestões. Na ausência dele, tenta sugerir o semestre a
+  /// partir do período atual. Apenas controladores locais são modificados.
   void _loadAcademicData() {
     final user = widget.state.user;
 
@@ -83,12 +100,22 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
     _suggestEntry();
   }
 
+  /// Preenche o nome com prioridade para o Graph e, depois, para o complemento salvo.
+  ///
+  /// Ausência nas duas fontes deixa o campo vazio para preenchimento opcional.
+  /// Não recupera e-mail institucional ou curso declarado do perfil interno; o
+  /// curso é somente leitura na evidência e a sugestão de e-mail fica no estado.
   void _loadGraphData() {
     final profile = widget.state.verification?.profile;
 
     _name.text = profile?.name ?? widget.state.user?.name ?? '';
   }
 
+  /// Incorpora a chegada do perfil e mudanças da evidência sem refazer toda a etapa.
+  ///
+  /// Recupera os dados acadêmicos quando a conta antes ausente chega. O nome é
+  /// recarregado somente se o perfil institucional mudou; mudanças meramente
+  /// operacionais, como início/fim de uma tentativa, preservam o rascunho local.
   @override
   void didUpdateWidget(covariant ProfileCompletionPage oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -104,6 +131,8 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
     if (before != after) _loadGraphData();
   }
 
+  /// Descarta os recursos locais, inclusive os controladores com senhas digitadas.
+  /// O controlador de sessão continua pertencendo à composição.
   @override
   void dispose() {
     _scroll.dispose();
@@ -123,6 +152,11 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
     super.dispose();
   }
 
+  /// Atualiza a sugestão civil de ingresso enquanto ainda não houve escolha manual.
+  ///
+  /// Usa o período corrente inclusive, pelo relógio injetado no widget. Período
+  /// inválido ou sugestão não representável deixa o campo vazio. Um valor editado
+  /// ou recuperado da conta é preservado; a sugestão não valida matrícula real.
   void _suggestEntry() {
     if (_entryWasEdited) return;
 
@@ -137,6 +171,11 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
               '';
   }
 
+  /// Autoriza ações locais apenas para o cadastro atual, ocioso e do mesmo UID.
+  ///
+  /// Consulta o estado mais recente do controlador para impedir que uma tela
+  /// antiga envie dados depois de troca de conta, saída ou mudança de destino.
+  /// A decisão de acesso foi calculada pela coordenação; não é autorização HTTP.
   bool get _canInteract {
     final state = widget.controller.state;
 
@@ -146,6 +185,12 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
         state.access == SessionAccess.profileRequired;
   }
 
+  /// Valida a etapa acadêmica e apresenta as credenciais sem concluir a conta.
+  ///
+  /// Com senha já vinculada, usa o e-mail interno atual. No primeiro avanço sem
+  /// senha, prefere o endereço da conta ou a sugestão transitória recebida; depois,
+  /// preserva a edição do usuário ao voltar/avançar. Dados inválidos ou estado
+  /// incompatível impedem a mudança. Não chama Firebase ou backend.
   void _continue() {
     if (!_canInteract || !_academicForm.currentState!.validate()) return;
 
@@ -161,6 +206,8 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
     _changeStep(_ProfileStep.credentials);
   }
 
+  /// Retorna à etapa acadêmica, conservando dados e e-mail e apagando as senhas.
+  /// A operação só é admitida enquanto esta página ainda pode interagir.
   void _back() {
     if (!_canInteract) return;
 
@@ -169,6 +216,10 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
     _changeStep(_ProfileStep.academic);
   }
 
+  /// Troca para [step] no mesmo formulário e limpa somente o diagnóstico local.
+  ///
+  /// Remove o foco e retorna a rolagem ao início quando ela está anexada. Não
+  /// abre outra rota, salva rascunho ou modifica o estado da conta no backend.
   void _changeStep(_ProfileStep step) {
     FocusScope.of(context).unfocus();
     setState(() {
@@ -179,8 +230,21 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
     if (_scroll.hasClients) _scroll.jumpTo(0);
   }
 
+  /// Converte [value] em complemento aparado ou nulo para omissão no transporte.
+  /// A admissibilidade de preencher o nome continua sendo conferida pelo backend.
   String? _optional(String value) => value.trim().isEmpty ? null : value.trim();
 
+  /// Encaminha um formulário de credenciais válido à conclusão coordenada da conta.
+  ///
+  /// Exige a segunda etapa montada e a mesma identidade ainda em cadastro. O
+  /// controlador trata a credencial Firebase e, depois, envia os dados acadêmicos;
+  /// o nome só acompanha o perfil quando a evidência não o informou. Curso e
+  /// contato institucional não são enviados como complementos.
+  ///
+  /// Falhas esperadas viram mensagem pública nesta página; o estado continua na
+  /// coordenação para repetição. Depois de uma tentativa validada, os campos de
+  /// senha são sempre limpos no `finally`, inclusive em erro. A página não anuncia
+  /// sucesso antes do backend nem tenta usar seu contexto após ser descartada.
   Future<void> _submit() async {
     if (!_canInteract || !_credentialsForm.currentState!.validate()) return;
 
@@ -217,6 +281,16 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
     }
   }
 
+  /// Solicita a saída preservando a distinção entre continuar depois e escolher modo.
+  ///
+  /// [chooseMode] abre a confirmação de saída, oferecendo exigência de senha apenas
+  /// se ela já existe. Sem seleção de modo, usa entrada rápida para retomar a conta
+  /// incompleta. Cancelamento, descarte do widget ou outra operação não inicia saída.
+  /// O rascunho não enviado é local e não é persistido por esta ação.
+  ///
+  /// Aguarda o controlador encerrar o fluxo. Se uma falha ocorrer com a página
+  /// ainda montada, apresenta uma mensagem, conservando no controlador o resultado
+  /// efetivo da tentativa de autenticação/limpeza.
   Future<void> _leave({bool chooseMode = false}) async {
     if (widget.controller.state.isBusy) return;
 
@@ -241,6 +315,12 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
     }
   }
 
+  /// Compõe a etapa atual, o aviso de acesso limitado e os diagnósticos da sessão.
+  ///
+  /// [context] fornece tema e navegação locais. A construção só apresenta a
+  /// fotografia recebida: operações externas são iniciadas pelos callbacks.
+  /// A ausência do usuário interno apresenta recuperação em vez de um formulário
+  /// pronto. A mudança de etapa preserva a rota e os controladores desta página.
   @override
   Widget build(BuildContext context) {
     final busy = widget.state.isBusy;
@@ -344,6 +424,11 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
   }
 
   /// Mantém a diferença entre dados da instituição e complementos declarados.
+  ///
+  /// [busy] desativa entradas e avanço. Nome externo é somente leitura e sua
+  /// ausência pode ser completada; curso confirmado é sempre inalterável. Os
+  /// validadores locais exigem apelido, período e ingresso antes da segunda etapa,
+  /// sem substituir a confirmação de vínculo ou as regras autoritativas do backend.
   Widget _buildAcademicForm(bool busy) {
     final verification = widget.state.verification!;
     final profile = verification.profile;
@@ -442,6 +527,12 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
     );
   }
 
+  /// Monta um campo de dado externo com distinção entre leitura e edição permitida.
+  ///
+  /// [controller] pertence ao rascunho da página; [readOnly] preserva o valor Graph
+  /// e indica bloqueio, enquanto [busy] desativa a interação durante uma operação.
+  /// O campo não decide sua origem nem valida o vínculo; o consumidor fornece
+  /// [label] e escolhe a política com base na evidência recebida.
   Widget _graphField({
     required String label,
     required TextEditingController controller,
@@ -458,6 +549,13 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
     ),
   );
 
+  /// Apresenta a credencial interna sem acrescentar outro contato institucional.
+  ///
+  /// [busy] bloqueia alterações/envio. Se a senha já existe, o e-mail é somente
+  /// leitura e a página pede sua confirmação por senha. Na criação, o endereço
+  /// sugerido permanece editável. Os validadores verificam e-mail, senha não vazia
+  /// e confirmação correspondente; requisitos do provedor são tratados no Firebase.
+  /// O botão apenas encaminha [_submit], que aguarda a conclusão da operação.
   Widget _buildCredentialsForm(bool busy) {
     final hasPassword = widget.controller.hasInternalPassword;
 

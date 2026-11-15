@@ -95,6 +95,17 @@ async fn graph_mocks(graph: &MockServer, tenant: Uuid, group: Uuid, object: Uuid
 }
 
 /// Permite distinguir curso ausente de nulo e de texto vazio no Graph real simulado.
+///
+/// Registra no servidor `graph` uma resposta para organização, grupo e perfil,
+/// cada qual esperada uma vez. `tenant`, `group` e `object` permitem confrontar os
+/// identificadores com a instituição/token preparados pelo teste. `student` altera
+/// somente a confirmação do grupo; não força a classificação de vínculo no backend.
+///
+/// `course: None` omite `jobTitle`; `Some(Value::Null)` devolve nulo explicitamente;
+/// outros valores são enviados sem normalização para exercitar o cliente real.
+/// `mail` é o endereço desta consulta, permitindo verificar que uma sincronização
+/// posterior não substitui o e-mail interno. O helper monta expectativas HTTP,
+/// sem gravar evidência ou simular a decisão de acesso que está sob teste.
 async fn graph_mocks_with_course(
     graph: &MockServer,
     tenant: Uuid,
