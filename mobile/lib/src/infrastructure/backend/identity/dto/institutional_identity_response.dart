@@ -11,8 +11,8 @@
 /// aplicação e converte a união de vínculo para suas variantes internas.
 ///
 /// microsoftObjectId identifica o objeto Microsoft, não o UID Firebase.
-/// name e email são propriedades obrigatórias que admitem nulo; ausência
-/// de informação externa não é preenchida por inferência no cliente.
+/// name é obrigatório e admite nulo; ausências não são preenchidas por inferência.
+/// O e-mail de sugestão fica fora deste perfil e da evidência institucional.
 ///
 /// ## Responsabilidade do contrato
 ///
@@ -52,12 +52,11 @@ part 'institutional_identity_response.g.dart';
   explicitToJson: true,
 )
 class InstitutionalIdentityResponse {
-  /// Cria o perfil; [name] e [email] são obrigatórios, mas admitem `null`.
+  /// Cria o perfil; [name] é obrigatório, mas admite `null`.
   /// Não normaliza os textos nem infere vínculo pelo domínio do e-mail ou curso.
   InstitutionalIdentityResponse({
     required this.microsoftObjectId,
     required this.name,
-    required this.email,
     required this.affiliation,
   });
 
@@ -71,12 +70,6 @@ class InstitutionalIdentityResponse {
   /// `displayName` fornecido pela instituição, ou `null` se ausente.
   @JsonKey(name: r'name', required: true, includeIfNull: true)
   final String? name;
-
-  /// `mail` fornecido pelo diretório Microsoft, ou `null` se ausente.
-  ///
-  /// O backend não substitui um e-mail ausente por `userPrincipalName`.
-  @JsonKey(name: r'email', required: true, includeIfNull: true)
-  final String? email;
 
   /// Resultado da consulta ao vínculo estudantil no diretório institucional.
   /// Deve ser apresentado como fato conhecido, sem ser convertido automaticamente
@@ -92,7 +85,6 @@ class InstitutionalIdentityResponse {
       other is InstitutionalIdentityResponse &&
           other.microsoftObjectId == microsoftObjectId &&
           other.name == name &&
-          other.email == email &&
           other.affiliation == affiliation;
 
   /// Hash dos mesmos atributos usados pela igualdade, com zero para campos nulos.
@@ -100,21 +92,20 @@ class InstitutionalIdentityResponse {
   int get hashCode =>
       microsoftObjectId.hashCode +
       (name == null ? 0 : name.hashCode) +
-      (email == null ? 0 : email.hashCode) +
       affiliation.hashCode;
 
   /// Desserializa o perfil, exigindo todas as propriedades do contrato.
   ///
-  /// `name` e `email` admitem `null`. O vínculo é convertido de acordo com seu
+  /// `name` admite `null`. O vínculo é convertido de acordo com seu
   /// discriminador `type`; propriedades desconhecidas do perfil são aceitas.
   /// Campos, formatos ou variantes inválidos propagam pela conversão checked.
   factory InstitutionalIdentityResponse.fromJson(Map<String, dynamic> json) =>
       _$InstitutionalIdentityResponseFromJson(json);
 
-  /// Serializa o perfil e o vínculo, preservando nome e e-mail nulos.
+  /// Serializa o perfil e o vínculo, preservando nome nulo.
   Map<String, dynamic> toJson() => _$InstitutionalIdentityResponseToJson(this);
 
-  /// Retorna o JSON como texto, incluindo nome e e-mail sem ocultação.
+  /// Retorna o JSON como texto, incluindo nome sem ocultação.
   @override
   String toString() {
     return toJson().toString();

@@ -6,18 +6,15 @@
     "email": null,
     "currentSemester": null,
     "institutionEntrySemester": null,
-    "name": null,
-    "institutionalEmail": null,
-    "courseName": null
+    "name": null
   },
   "verification": {
     "profile": {
       "microsoftObjectId": "00000000-0000-0000-0000-000000000002",
       "name": null,
-      "email": null,
       "affiliation": {
         "type": "student",
-        "courseName": null
+        "courseName": "Engenharia de Software"
       }
     },
     "expiresAt": "2026-10-22T12:00:00Z",

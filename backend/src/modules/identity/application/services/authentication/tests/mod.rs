@@ -147,7 +147,7 @@ async fn first_verification_persists_positive_evidence_with_all_identifiers() {
     assert_eq!(result.verification.profile.id, MICROSOFT_OBJECT_ID);
     assert!(matches!(
         result.verification.profile.affiliation,
-        InstitutionalAffiliation::Student { course_name: Some(ref name) }
+        InstitutionalAffiliation::Student { course_name: ref name }
             if name == "Curso de Teste"
     ));
     assert!(result.verification.expires_at >= before + Duration::days(120));
@@ -764,12 +764,12 @@ async fn request_authentication_propagates_repository_failure() {
     assert!(matches!(result, Err(AuthenticationError::Internal)));
 }
 
-/// Verifica que um estudante sem nome, e-mail ou curso pode concluir a verificação.
+/// Grupo confirmado sem curso permite entrada limitada, sem evidência estudantil.
 ///
-/// O grupo confirma o vínculo, que é repassado a `get_profile`. Exige a gravação
-/// positiva e preserva a variante `Student` mesmo com `course_name: None`.
+/// A consulta concluída persiste a negativa e mantém o perfil sem nome/e-mail.
+/// A ausência de curso nunca é preenchida por dados declarados do perfil interno.
 #[tokio::test]
-async fn valid_profile_without_optional_fields_is_accepted() {
+async fn missing_course_persists_limited_access_even_with_student_group() {
     let verifier = verifier_ok();
     let mut directory = MockDirectory::new();
     let mut repo = repositories_institution();
@@ -783,7 +783,7 @@ async fn valid_profile_without_optional_fields_is_accepted() {
                 id: MICROSOFT_OBJECT_ID.to_owned(),
                 name: None,
                 mail: None,
-                affiliation: InstitutionalAffiliation::Student { course_name: None },
+                affiliation: InstitutionalAffiliation::NonStudent,
             })
         });
 
@@ -800,7 +800,9 @@ async fn valid_profile_without_optional_fields_is_accepted() {
         .returning(|_, _| Ok(true));
 
     repo.expect_save()
-        .withf(|verification| verification.student_membership_confirmed)
+        .withf(|verification| {
+            !verification.student_membership_confirmed && verification.course_name.is_none()
+        })
         .times(1)
         .returning(|_| Ok(true));
 
@@ -819,7 +821,7 @@ async fn valid_profile_without_optional_fields_is_accepted() {
     assert!(result.verification.profile.mail.is_none());
     assert!(matches!(
         result.verification.profile.affiliation,
-        InstitutionalAffiliation::Student { course_name: None }
+        InstitutionalAffiliation::NonStudent
     ));
 }
 
@@ -897,4 +899,105 @@ async fn request_authentication_rejects_malformed_linked_microsoft_id() {
         result,
         Err(AuthenticationError::InvalidMicrosoftId)
     ));
+}
+
+/// Evidências legadas com grupo positivo e curso ausente não restauram direitos.
+/// O mesmo cuidado vale sem migrations, por exemplo em outra implementação da porta.
+#[tokio::test]
+async fn restore_downgrades_legacy_student_evidence_without_course() {
+    use crate::modules::identity::{
+        application::services::accounts::restore, domain::entities::user::User,
+    };
+
+    for course in [None, Some(String::new()), Some(" \t\n".into())] {
+        let verifier = verifier_ok();
+        let mut repo = repositories_institution();
+        let mut legacy = evidence(true, Duration::days(120));
+
+        legacy.course_name = course;
+
+        repo.expect_get_by_firebase_uid()
+            .with(eq(FIREBASE_UID))
+            .times(1)
+            .returning(|uid| Ok(Some(User::provisioned(Uuid::nil(), uid.into(), Utc::now()))));
+        repo.expect_find_valid_by_firebase_uid()
+            .with(eq(FIREBASE_UID))
+            .times(1)
+            .returning(move |_| Ok(Some(legacy.clone())));
+
+        let result = restore(&verifier, &repo, FIREBASE_TOKEN).await.unwrap();
+
+        assert!(matches!(
+            result.verification.unwrap().profile.affiliation,
+            InstitutionalAffiliation::NonStudent
+        ));
+    }
+}
+
+/// O endereço do Graph só é sugerido no cadastro, sem alterar o e-mail já escolhido.
+#[tokio::test]
+async fn graph_email_is_transient_and_only_suggested_for_incomplete_accounts() {
+    use crate::modules::identity::domain::entities::user::{ProfileCompletion, User};
+
+    for (complete, mail) in [
+        (false, Some("graph@example.test")),
+        (false, None),
+        (false, Some(" \t")),
+        (true, Some("graph@example.test")),
+    ] {
+        let verifier = verifier_ok();
+        let mut directory = directory_membership(true);
+        let mut repo = MockRepositories::new();
+        let mut profile = profile_with_id(MICROSOFT_OBJECT_ID, true);
+
+        profile.mail = mail.map(str::to_owned);
+
+        directory
+            .expect_get_profile()
+            .with(eq(MICROSOFT_TOKEN), eq(true))
+            .times(1)
+            .return_once(move |_, _| Ok(profile));
+        repo.expect_find_by_microsoft_tenant_id()
+            .with(eq(tenant_id()))
+            .times(1)
+            .returning(|_| Ok(Some(institution())));
+        repo.expect_provision().times(1).returning(move |uid| {
+            let mut user = User::provisioned(Uuid::nil(), uid.into(), Utc::now());
+
+            if complete {
+                user.complete_profile(
+                    ProfileCompletion {
+                        nickname: "Pessoa".into(),
+                        current_semester: 4,
+                        institution_entry_semester: "2024.1".into(),
+                        name: None,
+                    },
+                    "escolhido@example.test",
+                    Utc::now(),
+                )
+                .unwrap();
+            }
+
+            Ok(user)
+        });
+        repo.expect_save().times(1).returning(|_| Ok(true));
+
+        let result = verify_institutional_identity(
+            &directory,
+            &verifier,
+            &repo,
+            FIREBASE_TOKEN,
+            MICROSOFT_TOKEN,
+        )
+        .await
+        .unwrap();
+
+        let expected = mail.filter(|email| !complete && !email.trim().is_empty());
+
+        assert_eq!(result.suggested_email.as_deref(), expected);
+
+        if complete {
+            assert_eq!(result.user.email(), Some("escolhido@example.test"));
+        }
+    }
 }

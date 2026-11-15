@@ -182,7 +182,7 @@ fn verification_json_matches_shared_contract_examples() {
                 name: Some("Pessoa Exemplo".into()),
                 mail: Some("pessoa@instituicao.example".into()),
                 affiliation: InstitutionalAffiliation::Student {
-                    course_name: Some("Engenharia de Software".into()),
+                    course_name: "Engenharia de Software".into(),
                 },
             },
             include_str!(
@@ -194,7 +194,9 @@ fn verification_json_matches_shared_contract_examples() {
                 id: "00000000-0000-0000-0000-000000000002".into(),
                 name: None,
                 mail: None,
-                affiliation: InstitutionalAffiliation::Student { course_name: None },
+                affiliation: InstitutionalAffiliation::Student {
+                    course_name: "Engenharia de Software".into(),
+                },
             },
             include_str!(
                 "../../../../../packages/api-contracts/examples/institutional-verification-student-null-fields.json"

@@ -42,7 +42,8 @@ final class InstitutionalProfile {
   /// [microsoftObjectId] identifica a pessoa no diretório Microsoft.
   /// É diferente do UID Firebase.
   ///
-  /// [name] e [email] preservam a ausência de dados com valores nulos.
+  /// [name] preserva a ausência de dado com valor nulo.
+  /// E-mail de pré-preenchimento pertence ao resultado transitório do cadastro.
   /// [affiliation] representa o resultado da consulta ao vínculo estudantil.
   ///
   /// A construção não realiza validação de UUID, normalização de textos,
@@ -50,7 +51,6 @@ final class InstitutionalProfile {
   const InstitutionalProfile({
     required this.microsoftObjectId,
     required this.name,
-    required this.email,
     required this.affiliation,
   });
 
@@ -59,9 +59,6 @@ final class InstitutionalProfile {
 
   /// Nome fornecido pela instituição, ou nulo quando ausente.
   final String? name;
-
-  /// E-mail fornecido pela instituição, ou nulo quando ausente.
-  final String? email;
 
   /// Resultado institucional do vínculo estudantil.
   final InstitutionalAffiliation affiliation;
@@ -73,11 +70,10 @@ final class InstitutionalProfile {
         other is InstitutionalProfile &&
             other.microsoftObjectId == microsoftObjectId &&
             other.name == name &&
-            other.email == email &&
             other.affiliation == affiliation;
   }
 
   /// Hash dos atributos utilizados pela igualdade.
   @override
-  int get hashCode => Object.hash(microsoftObjectId, name, email, affiliation);
+  int get hashCode => Object.hash(microsoftObjectId, name, affiliation);
 }

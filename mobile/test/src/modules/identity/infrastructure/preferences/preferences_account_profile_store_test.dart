@@ -31,16 +31,12 @@ void main() {
           currentSemester: base.currentSemester,
           institutionEntrySemester: base.institutionEntrySemester,
           name: 'Nome declarado',
-          institutionalEmail: 'declarado@example.test',
-          courseName: 'Curso declarado',
         ),
       );
 
       final restored = (await store.loadUser('a'))!;
 
       expect(restored.name, 'Nome declarado');
-      expect(restored.institutionalEmail, 'declarado@example.test');
-      expect(restored.courseName, 'Curso declarado');
     },
   );
 
@@ -88,4 +84,31 @@ void main() {
     expect(a, isNot(contains('password')));
     expect(a, isNot(contains('token')));
   });
+  test(
+    'descarta curso declarado de caches antigos ao persistir novamente',
+    () async {
+      final preferences = FakePreferences();
+      addTearDown(preferences.dispose);
+      final store = PreferencesAccountProfileStore(preferences);
+
+      await store.saveUser('a', testInternalUser());
+      final old = jsonDecode(
+        preferences.values['capp.identity.user.a'] as String,
+      ) as Map<String, dynamic>;
+      old['courseName'] = 'Curso declarado';
+      old['institutionalEmail'] = 'graph@example.test';
+      preferences.values['capp.identity.user.a'] = jsonEncode(old);
+
+      final user = (await store.loadUser('a'))!;
+      await store.saveUser('a', user);
+
+      expect(
+        jsonDecode(preferences.values['capp.identity.user.a'] as String),
+        allOf(
+          isNot(contains('courseName')),
+          isNot(contains('institutionalEmail')),
+        ),
+      );
+    },
+  );
 }

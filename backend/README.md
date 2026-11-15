@@ -201,8 +201,14 @@ Conta ausente retorna `404 account_not_provisioned`; conta existente sem evidên
 vigente retorna `200` com `verification: null`. Ambos exigem verificação, enquanto
 recusas e falhas de comunicação mantêm seus diagnósticos próprios.
 O e-mail interno é escolhido pelo usuário; senhas e sessões permanecem no Firebase.
-Complementos opcionais de nome, contato institucional e curso ficam no perfil
-interno somente para ausências do Graph, sem substituir a evidência institucional.
+Um nome declarado pode completar uma ausência do Graph no perfil interno, sem
+substituir a evidência institucional. O e-mail do Graph é somente uma sugestão
+transitória no cadastro (`suggestedEmail`), sem persistência no backend. Restauração
+e sincronização de contas ativas não retornam essa sugestão nem alteram o e-mail
+escolhido para a credencial Firebase. O curso
+é exclusivamente institucional: grupo estudantil e curso não vazio são necessários
+para confirmar o vínculo. Curso ausente, nulo ou em branco permite entrada limitada,
+sem direitos estudantis em nenhum CA; não há preenchimento manual de curso.
 A associação ao catálogo de cursos permanece fora desse recorte. Consulte os [Rustdocs do módulo](src/modules/identity/mod.rs) para fluxo, decisões e testes específicos, e o [OpenAPI](../packages/api-contracts/openapi.yaml) para o contrato HTTP.
 
 ---

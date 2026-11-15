@@ -20,10 +20,7 @@ pub struct InstitutionalVerification {
     /// Fotografia externa obtida na mesma consulta que confirmou o vínculo.
     pub profile_name: Option<String>,
 
-    /// E-mail institucional do Graph; independente do e-mail de entrada interno.
-    pub profile_email: Option<String>,
-
-    /// Curso externo presente somente para vínculo estudantil.
+    /// Curso externo não vazio, necessário para confirmar o vínculo estudantil.
     pub course_name: Option<String>,
 
     /// Instituição à qual a consulta se refere.
@@ -38,7 +35,7 @@ pub struct InstitutionalVerification {
     /// Grupo de estudantes consultado durante a verificação.
     pub microsoft_student_group_id: Uuid,
 
-    /// Indica se o Graph confirmou participação no grupo.
+    /// Indica se o Graph confirmou grupo estudantil e curso não vazio.
     pub student_membership_confirmed: bool,
 
     /// Início da consulta institucional, usado para ordenar atualizações.

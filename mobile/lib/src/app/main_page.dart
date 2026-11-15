@@ -7,6 +7,8 @@
 /// Cada entrada na área pronta começa em Início. Trocar de aba não autentica,
 /// renova ou encerra a sessão; atualizações da mesma conta preservam a seleção.
 /// O SessionGate descarta toda a navegação quando o destino ou a identidade muda.
+/// A ausência de grupo ou curso confirmado mantém o aviso de acesso limitado
+/// visível tanto no início quanto na conta, sem bloquear a entrada.
 /// O espaço inicial está disponível para as funcionalidades principais, sem
 /// apresentar automaticamente os dados pessoais da conta.
 /// O rodapé mostra somente ícones; os rótulos identificam os destinos para
@@ -38,9 +40,24 @@ class _MainPageState extends State<MainPage> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: Text(_selectedIndex == 0 ? 'CApp' : 'Conta')),
-    body: _selectedIndex == 0
-        ? const SizedBox.expand()
-        : AccountPage(state: widget.state, onSignOut: widget.onSignOut),
+    body: Column(
+      children: [
+        if (widget.state.verification!.profile.affiliation
+            is NonStudentAffiliation)
+          const SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: LimitedStudentAccessNotice(),
+            ),
+          ),
+        Expanded(
+          child: _selectedIndex == 0
+              ? const SizedBox.expand()
+              : AccountPage(state: widget.state, onSignOut: widget.onSignOut),
+        ),
+      ],
+    ),
     bottomNavigationBar: NavigationBar(
       labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
       selectedIndex: _selectedIndex,

@@ -575,4 +575,46 @@ void main() {
       expect(h.store.results.containsKey('a'), isFalse);
     },
   );
+  test(
+    'sugestão de e-mail vive só no cadastro atual e não retorna do cache',
+    () async {
+      final h = AccountIdentityHarness(suggestedEmail: 'graph@example.test');
+      addTearDown(h.dispose);
+      h.gateway.user = testInternalUser(complete: false);
+      h.accounts.hasPassword = false;
+
+      await h.start();
+
+      // Restauração normal nunca fornece novamente o endereço do Graph.
+      expect((h.controller.state as SessionSignedIn).suggestedEmail, isNull);
+
+      await h.controller.renewVerification();
+
+      expect(
+        (h.controller.state as SessionSignedIn).suggestedEmail,
+        'graph@example.test',
+      );
+
+      await h.controller.signOut();
+      await h.controller.selectAccount('a');
+
+      expect((h.controller.state as SessionSignedIn).suggestedEmail, isNull);
+    },
+  );
+
+  test(
+    'sincronizar conta ativa não oferece nem altera o e-mail de entrada',
+    () async {
+      final h = AccountIdentityHarness(suggestedEmail: 'graph@example.test');
+      addTearDown(h.dispose);
+      await h.start();
+
+      final original = h.gateway.user.email;
+      final result = await h.controller.renewVerification();
+
+      expect(result.suggestedEmail, isNull);
+      expect((h.controller.state as SessionSignedIn).suggestedEmail, isNull);
+      expect((h.controller.state as SessionSignedIn).user!.email, original);
+    },
+  );
 }

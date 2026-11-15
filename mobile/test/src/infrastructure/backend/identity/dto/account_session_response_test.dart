@@ -25,19 +25,12 @@ void main() {
   });
 
   test('complementos opcionais são preservados sem exigir mudança de contrato antigo', () {
-    final json = complete()
-      ..addAll({
-        'name': 'Nome declarado',
-        'institutionalEmail': 'declarado@example.test',
-        'courseName': 'Curso declarado',
-      });
+    final json = complete()..addAll({'name': 'Nome declarado'});
     final parsed = InternalUserResponse.fromJson(json);
 
     expect(parsed.name, 'Nome declarado');
-    expect(parsed.institutionalEmail, 'declarado@example.test');
-    expect(parsed.courseName, 'Curso declarado');
 
-    json['courseName'] = 42;
+    json['name'] = 42;
 
     expect(() => InternalUserResponse.fromJson(json), throwsFormatException);
   });

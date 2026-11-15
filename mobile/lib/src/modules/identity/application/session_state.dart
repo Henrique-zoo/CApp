@@ -244,6 +244,7 @@ final class SessionSignedIn extends SessionState {
   const SessionSignedIn({
     required this.firebaseUid,
     this.user,
+    this.suggestedEmail,
     this.verification,
     this.cacheLoadResult,
     super.access,
@@ -257,6 +258,11 @@ final class SessionSignedIn extends SessionState {
 
   /// Perfil interno conhecido; nulo enquanto não foi possível restaurá-lo.
   final InternalUser? user;
+
+  /// Sugestão de e-mail do Graph somente para o cadastro em curso.
+  /// Vive em memória e é descartada na conclusão, saída ou troca de conta.
+  /// Não integra o perfil interno nem a evidência institucional.
+  final String? suggestedEmail;
 
   /// Última verificação institucional conhecida para esta conta.
   ///

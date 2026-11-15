@@ -40,6 +40,10 @@ pub(super) struct InstitutionalAuthResponse {
 
     /// Evidência recém-confirmada, sem expor credenciais ou UID Firebase.
     pub verification: InstitutionalVerificationResponse,
+
+    /// Pré-preenchimento do cadastro; omitido quando ausente ou a conta já está ativa.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_email: Option<String>,
 }
 
 impl From<InstitutionalAuthResult> for InstitutionalAuthResponse {
@@ -47,6 +51,7 @@ impl From<InstitutionalAuthResult> for InstitutionalAuthResponse {
         Self {
             user: result.user.into(),
             verification: result.verification.into(),
+            suggested_email: result.suggested_email,
         }
     }
 }
@@ -60,8 +65,7 @@ impl From<InstitutionalAuthResult> for InstitutionalAuthResponse {
 ///   "profile": {
 ///     "microsoftObjectId": "00000000-0000-0000-0000-000000000001",
 ///     "name": "Estudante",
-///     "email": null,
-///     "affiliation": { "type": "student", "courseName": null }
+///     "affiliation": { "type": "nonStudent" }
 ///   },
 ///   "institution": {
 ///     "id": "00000000-0000-0000-0000-000000000001",
@@ -96,9 +100,6 @@ pub(super) struct InstitutionalIdentityResponse {
     /// Nome informado pela instituição.
     pub name: Option<String>,
 
-    /// E-mail informado pelo diretório.
-    pub email: Option<String>,
-
     /// Filiação à instituição e dados associados.
     pub affiliation: InstitutionalAffiliationResponse,
 }
@@ -107,13 +108,13 @@ pub(super) struct InstitutionalIdentityResponse {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub(super) enum InstitutionalAffiliationResponse {
-    /// Estudante reconhecido pelo grupo institucional.
+    /// Estudante com grupo e curso confirmados pelo diretório institucional.
     Student {
-        /// Curso externo opcional, ainda sem associação ao catálogo.
+        /// Curso externo não vazio, ainda sem associação ao catálogo.
         #[serde(rename = "courseName")]
-        course_name: Option<String>,
+        course_name: String,
     },
-    /// Usuário cuja participação no grupo estudantil não foi confirmada.
+    /// Usuário cujo grupo estudantil ou curso não foi confirmado; acesso limitado.
     NonStudent,
 }
 
@@ -133,7 +134,6 @@ impl From<InstitutionalProfile> for InstitutionalIdentityResponse {
         Self {
             microsoft_object_id: profile.id,
             name: profile.name,
-            email: profile.mail,
             affiliation: profile.affiliation.into(),
         }
     }
@@ -205,8 +205,6 @@ where
 pub(super) struct UserResponse {
     /// Complementos declarados para ausências do Graph, sem valor de evidência.
     name: Option<String>,
-    institutional_email: Option<String>,
-    course_name: Option<String>,
     id: Uuid,
     nickname: Option<String>,
     email: Option<String>,
@@ -222,8 +220,6 @@ impl From<crate::modules::identity::domain::entities::user::User> for UserRespon
         Self {
             id: user.id(),
             name: user.name().map(str::to_owned),
-            institutional_email: user.institutional_email().map(str::to_owned),
-            course_name: user.course_name().map(str::to_owned),
             nickname: user.nickname().map(str::to_owned),
             email: user.email().map(str::to_owned),
             current_semester: user.current_semester(),
@@ -251,8 +247,6 @@ pub(super) struct AccountSessionResponse {
 pub(super) struct CompleteProfileRequest {
     /// Aceitos apenas se o atributo correspondente estiver ausente na evidência.
     pub name: Option<String>,
-    pub institutional_email: Option<String>,
-    pub course_name: Option<String>,
     pub nickname: String,
     pub current_semester: i32,
     pub institution_entry_semester: String,

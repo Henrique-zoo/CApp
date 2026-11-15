@@ -61,14 +61,17 @@ void main() {
       expect(find.byType(MainPage), findsOneWidget);
       expect(find.byType(AccountPage), findsNothing);
       expect(find.byType(NavigationBar), findsOneWidget);
+      expect(find.byType(LimitedStudentAccessNotice), findsOneWidget);
 
       await openAccount(tester);
+
+      expect(find.byType(LimitedStudentAccessNotice), findsOneWidget);
 
       expect(find.text('Pessoa Exemplo'), findsOneWidget);
       expect(find.text('Instituição'), findsOneWidget);
       expect(find.text('Instituição Exemplo (IEX)'), findsOneWidget);
       expect(
-        find.textContaining('Você não foi reconhecido como estudante'),
+        find.textContaining('não tem permissões de estudante em nenhum CA'),
         findsOneWidget,
       );
       expect(find.text('Verificar instituição'), findsNothing);
@@ -411,6 +414,7 @@ void main() {
 
         final fields = find.byType(TextFormField);
 
+        await tester.enterText(fields.first, 'escolhido@example.test');
         await tester.enterText(fields.at(1), 'transient');
         await tester.enterText(fields.at(2), 'transient');
 
@@ -428,6 +432,69 @@ void main() {
           isFalse,
         );
         expect(h.ms.signInCalls, 0);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.runAsync(h.dispose);
+      }
+    },
+  );
+  for (final course in [null, '', ' \t']) {
+    testWidgets(
+      'restaura acesso limitado com aviso permanente sem curso: $course',
+      (tester) async {
+        final h = AccountIdentityHarness(student: true, courseName: course);
+
+        try {
+          h.controller.start();
+          await tester.pumpWidget(
+            CApp(
+              sessionController: h.controller,
+              backendReadinessController: readiness,
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          expect(find.byType(MainPage), findsOneWidget);
+          expect(find.byType(LimitedStudentAccessNotice), findsOneWidget);
+          expect(
+            find.textContaining('não tem permissões de estudante em nenhum CA'),
+            findsOneWidget,
+          );
+
+          await openAccount(tester);
+
+          expect(find.byType(LimitedStudentAccessNotice), findsOneWidget);
+          expect(find.text('Curso'), findsNothing);
+        } finally {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.runAsync(h.dispose);
+        }
+      },
+    );
+  }
+
+  testWidgets(
+    'curso institucional confirmado dispensa aviso de acesso limitado',
+    (tester) async {
+      final h = AccountIdentityHarness(student: true);
+
+      try {
+        h.controller.start();
+        await tester.pumpWidget(
+          CApp(
+            sessionController: h.controller,
+            backendReadinessController: readiness,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(MainPage), findsOneWidget);
+        expect(find.byType(LimitedStudentAccessNotice), findsNothing);
+
+        await openAccount(tester);
+
+        expect(find.text('Engenharia de Software'), findsOneWidget);
+        expect(find.byType(LimitedStudentAccessNotice), findsNothing);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.runAsync(h.dispose);

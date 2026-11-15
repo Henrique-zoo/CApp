@@ -63,7 +63,7 @@ void main() {
     expect(result.verification.expiresAt.isUtc, isTrue);
   });
 
-  test('preserva estudante com curso nulo e registro expirado', () {
+  test('cache antigo com curso nulo perde o vínculo estudantil', () {
     final record = _record();
     record['verification']['profile']['affiliation'] = {
       'type': 'student',
@@ -75,7 +75,7 @@ void main() {
     ) as SessionCacheFound;
     expect(
       result.verification.profile.affiliation,
-      const StudentAffiliation(courseName: null),
+      const NonStudentAffiliation(),
     );
     expect(result.verification.isValidAt(DateTime.utc(2026, 1, 2)), isFalse);
   });
@@ -138,7 +138,7 @@ void main() {
 
   test('campo nullable ausente não equivale a campo explicitamente nulo', () {
     final record = _record();
-    (record['verification']['profile'] as Map).remove('email');
+    (record['verification']['profile'] as Map).remove('name');
     final result = codec.decode(
       jsonEncode(record),
       expectedFirebaseUid: 'user-a',
@@ -207,11 +207,7 @@ void main() {
     });
   }
 
-  for (final field in [
-    ('profile', 'name'),
-    ('profile', 'email'),
-    ('institution', 'acronym'),
-  ]) {
+  for (final field in [('profile', 'name'), ('institution', 'acronym')]) {
     test('${field.$1}.${field.$2} ausente não equivale a nulo', () {
       final record = _record();
       (record['verification'][field.$1] as Map).remove(field.$2);
@@ -284,4 +280,45 @@ void main() {
     ) as SessionCacheRejected;
     expect(result.reason, SessionCacheRejectionReason.invalidVerification);
   });
+  for (final course in ['', ' \t\n']) {
+    test(
+      'cache legado com curso em branco perde direitos estudantis: $course',
+      () {
+        final record = _record();
+        record['verification']['profile']['affiliation'] = {
+          'type': 'student',
+          'courseName': course,
+        };
+        final result = codec.decode(
+          jsonEncode(record),
+          expectedFirebaseUid: 'user-a',
+        ) as SessionCacheFound;
+
+        expect(
+          result.verification.profile.affiliation,
+          isA<NonStudentAffiliation>(),
+        );
+      },
+    );
+  }
+  test(
+    'e-mail institucional de cache legado é ignorado e não volta a ser gravado',
+    () {
+      final record = _record();
+      record['verification']['profile']['email'] = 'graph@example.test';
+      final decoded = codec.decode(
+        jsonEncode(record),
+        expectedFirebaseUid: 'user-a',
+      ) as SessionCacheFound;
+      final encoded = jsonDecode(
+        codec.encode(firebaseUid: 'user-a', verification: decoded.verification),
+      ) as Map;
+
+      expect(
+        (encoded['verification'] as Map)['profile'],
+        isNot(contains('email')),
+      );
+      expect(encoded, isNot(contains('suggestedEmail')));
+    },
+  );
 }

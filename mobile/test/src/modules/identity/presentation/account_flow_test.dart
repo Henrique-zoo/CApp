@@ -36,7 +36,7 @@ void main() {
     testWidgets(description, (tester) async {
       final h =
           create?.call() ??
-          AccountIdentityHarness(institutionalEmail: 'aluno@aluno.unb.br');
+          AccountIdentityHarness(suggestedEmail: 'aluno@aluno.unb.br');
 
       h.gateway.user = testInternalUser(complete: false);
       h.accounts.hasPassword = false;
@@ -79,6 +79,10 @@ void main() {
   Future<void> submitCredentials(WidgetTester tester) async {
     final fields = find.byType(TextFormField);
 
+    if (tester.widget<TextFormField>(fields.first).controller!.text.isEmpty) {
+      await tester.enterText(fields.first, 'escolhido@example.test');
+    }
+
     await tester.enterText(fields.at(1), 'senha-transitoria');
     await tester.enterText(fields.at(2), 'senha-transitoria');
 
@@ -98,33 +102,34 @@ void main() {
       );
 
   profileTest(
-    'dados não nulos do Graph são somente leitura, incluindo texto vazio',
+    'dados do Graph são somente leitura e curso não é enviado no perfil',
     (tester, h) async {
       expect(input(tester, 'Nome completo').readOnly, isTrue);
       expect(input(tester, 'Nome completo').controller!.text, 'Pessoa Exemplo');
-      expect(input(tester, 'E-mail institucional').readOnly, isTrue);
+      expect(
+        find.widgetWithText(TextFormField, 'E-mail institucional'),
+        findsNothing,
+      );
       expect(input(tester, 'Curso').readOnly, isTrue);
-      expect(input(tester, 'Curso').controller!.text, isEmpty);
+      expect(input(tester, 'Curso').controller!.text, 'Engenharia de Software');
       expect(input(tester, 'Instituição').readOnly, isTrue);
 
       await continueToCredentials(tester);
       await submitCredentials(tester);
 
       expect(h.gateway.completedProfile!.name, isNull);
-      expect(h.gateway.completedProfile!.institutionalEmail, isNull);
-      expect(h.gateway.completedProfile!.courseName, isNull);
     },
     create: () => AccountIdentityHarness(
-      institutionalEmail: 'aluno@aluno.unb.br',
+      suggestedEmail: 'aluno@aluno.unb.br',
       student: true,
-      courseName: '',
+      courseName: 'Engenharia de Software',
     ),
   );
 
   profileTest(
-    'dados nulos do Graph podem ser completados sem mudar a evidência',
+    'nome nulo pode ser completado sem declarar curso ou e-mail institucional',
     (tester, h) async {
-      for (final label in ['Nome completo', 'E-mail institucional', 'Curso']) {
+      for (final label in ['Nome completo']) {
         expect(input(tester, label).readOnly, isFalse);
       }
 
@@ -133,44 +138,37 @@ void main() {
         'Nome declarado',
       );
 
-      await tester.enterText(
+      expect(
         find.widgetWithText(TextFormField, 'E-mail institucional'),
-        'declarado@aluno.unb.br',
+        findsNothing,
       );
 
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'Curso'),
-        'Curso declarado',
+      expect(find.widgetWithText(TextFormField, 'Curso'), findsNothing);
+      expect(find.byType(LimitedStudentAccessNotice), findsOneWidget);
+      expect(
+        find.textContaining('não tem permissões de estudante em nenhum CA'),
+        findsOneWidget,
       );
 
       await continueToCredentials(tester);
 
-      expect(
-        input(tester, 'E-mail de entrada').controller!.text,
-        'declarado@aluno.unb.br',
-      );
+      expect(input(tester, 'E-mail de entrada').controller!.text, '');
 
       await submitCredentials(tester);
 
       expect(h.gateway.completedProfile!.name, 'Nome declarado');
-      expect(
-        h.gateway.completedProfile!.institutionalEmail,
-        'declarado@aluno.unb.br',
-      );
-      expect(h.gateway.completedProfile!.courseName, 'Curso declarado');
       expect(h.proof.profile.name, isNull);
-      expect(h.proof.profile.email, isNull);
-      expect(
-        (h.proof.profile.affiliation as StudentAffiliation).courseName,
-        isNull,
-      );
+      expect(h.proof.profile.affiliation, isA<NonStudentAffiliation>());
       expect(
         (h.controller.state as SessionSignedIn).user!.name,
         'Nome declarado',
       );
     },
-    create: () =>
-        AccountIdentityHarness(institutionalName: null, student: true),
+    create: () => AccountIdentityHarness(
+      institutionalName: null,
+      student: true,
+      courseName: null,
+    ),
   );
 
   profileTest(
@@ -212,8 +210,6 @@ void main() {
   profileTest(
     'pede dados acadêmicos antes das credenciais e só conclui ao final',
     (tester, h) async {
-      expect(find.byType(TextFormField), findsNWidgets(6));
-
       final formState = tester.state(find.byType(ProfileCompletionPage));
       final navigator = Navigator.of(
         tester.element(find.byType(ProfileCompletionPage)),
@@ -246,7 +242,7 @@ void main() {
       expect(fields, findsNWidgets(3));
       expect(
         tester.widget<TextFormField>(fields.first).controller!.text,
-        h.proof.profile.email,
+        isEmpty,
       );
 
       await tester.enterText(fields.at(0), 'escolhido@example.test');
@@ -452,6 +448,7 @@ void main() {
 
       final fields = find.byType(TextFormField);
 
+      await tester.enterText(fields.first, 'escolhido@example.test');
       await tester.enterText(fields.at(1), 'senha-transitoria');
       await tester.enterText(fields.at(2), 'senha-transitoria');
 
@@ -581,4 +578,42 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.runAsync(h.dispose);
   });
+  profileTest(
+    'e-mail do Graph só preenche a segunda etapa e pode ser substituído',
+    (tester, h) async {
+      await h.controller.renewVerification();
+      await tester.pumpAndSettle();
+
+      expect(
+        find.widgetWithText(TextFormField, 'E-mail institucional'),
+        findsNothing,
+      );
+
+      await continueToCredentials(tester);
+
+      expect(
+        input(tester, 'E-mail de entrada').controller!.text,
+        'aluno@aluno.unb.br',
+      );
+      expect(input(tester, 'E-mail de entrada').readOnly, isFalse);
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'E-mail de entrada'),
+        'escolhido@example.test',
+      );
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      await continueToCredentials(tester);
+
+      expect(
+        input(tester, 'E-mail de entrada').controller!.text,
+        'escolhido@example.test',
+      );
+
+      await submitCredentials(tester);
+
+      expect(h.accounts.linkEmail, 'escolhido@example.test');
+      expect((h.controller.state as SessionSignedIn).suggestedEmail, isNull);
+    },
+  );
 }

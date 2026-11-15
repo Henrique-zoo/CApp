@@ -38,8 +38,7 @@ async fn fixture(pool: &PgPool, student: bool) -> InstitutionalVerification {
             .unwrap()
             .id(),
         profile_name: Some("Nome institucional".into()),
-        profile_email: Some("institucional@example.test".into()),
-        course_name: Some("Curso".into()),
+        course_name: student.then(|| "Curso".into()),
         microsoft_object_id: Uuid::new_v4(),
         institution_id: id,
         microsoft_tenant_id: tenant,
@@ -105,6 +104,113 @@ async fn legacy_evidence_migration(pool: &PgPool) {
     assert_eq!(status, "incomplete");
     assert_eq!(expiry, restored_expiry);
 
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/20261112160000_add_user_profile_supplements.sql"
+    ))
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+
+    for (uid, course) in [
+        ("without-course", None),
+        ("empty-course", Some("")),
+        ("blank-course", Some(" \t\n")),
+        ("verified-course", Some("Curso institucional")),
+    ] {
+        let user_id = Uuid::new_v4();
+
+        sqlx::query(
+            "INSERT INTO app_user (id,firebase_uid,course_name) VALUES ($1,$2,'Curso declarado')",
+        )
+        .bind(user_id)
+        .bind(uid)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO institutional_verification (
+                user_id, microsoft_object_id, institution_id, microsoft_tenant_id,
+                microsoft_student_group_id, student_membership_confirmed,
+                checked_at, expires_at, course_name
+            )
+            SELECT $1, gen_random_uuid(), id, microsoft_tenant_id,
+                microsoft_student_group_id, true, now(), now() + interval '120 days', $2
+            FROM institution
+            "#,
+        )
+        .bind(user_id)
+        .bind(course)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/20261114120000_require_verified_student_course.sql"
+    ))
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+
+    sqlx::query("UPDATE app_user SET institutional_email='declarado@example.test',email='escolhido@example.test'")
+        .execute(&mut *tx).await.unwrap();
+    sqlx::query("UPDATE institutional_verification SET profile_email='graph@example.test'")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/20261114123000_remove_institutional_email.sql"
+    ))
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+
+    let emails: Vec<String> = sqlx::query_scalar("SELECT email FROM app_user")
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+
+    assert!(emails.iter().all(|email| email == "escolhido@example.test"));
+
+    let records: Vec<(String, bool, Option<String>)> = sqlx::query_as(
+        r#"
+        SELECT u.firebase_uid, v.student_membership_confirmed, v.course_name
+        FROM institutional_verification v
+        JOIN app_user u ON u.id = v.user_id
+        "#,
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap();
+
+    for (uid, confirmed, course) in records {
+        assert_eq!(confirmed, uid == "verified-course");
+        assert_eq!(
+            course.as_deref(),
+            (uid == "verified-course").then_some("Curso institucional")
+        );
+    }
+
+    let removed_column: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = $1 AND (
+                (table_name = 'app_user' AND column_name IN ('course_name', 'institutional_email'))
+                OR (table_name = 'institutional_verification' AND column_name = 'profile_email')
+            )
+        )
+        "#,
+    )
+    .bind(&schema)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+
+    assert!(!removed_column);
+
     tx.rollback().await.unwrap();
 }
 
@@ -127,8 +233,6 @@ async fn user_provisioning(pool: &PgPool, repo: &PgDatabase) {
             current_semester: 3,
             institution_entry_semester: "2024.1".into(),
             name: Some("Nome declarado".into()),
-            institutional_email: Some("institucional@example.test".into()),
-            course_name: Some("Curso declarado".into()),
         },
         "pessoal@example.test",
         Utc::now(),
@@ -144,8 +248,6 @@ async fn user_provisioning(pool: &PgPool, repo: &PgDatabase) {
                 current_semester: 3,
                 institution_entry_semester: "2024.1".into(),
                 name: Some("Nome declarado".into()),
-                institutional_email: Some("institucional@example.test".into()),
-                course_name: Some("Curso declarado".into()),
             },
             "pessoal@example.test",
             Utc::now() + Duration::seconds(1),
@@ -171,11 +273,6 @@ async fn user_provisioning(pool: &PgPool, repo: &PgDatabase) {
     assert_eq!(restored.status(), UserStatus::Active);
     assert_eq!(restored.nickname(), Some("Apelido"));
     assert_eq!(restored.name(), Some("Nome declarado"));
-    assert_eq!(
-        restored.institutional_email(),
-        Some("institucional@example.test")
-    );
-    assert_eq!(restored.course_name(), Some("Curso declarado"));
     assert_eq!(restored.email(), Some("pessoal@example.test"));
     assert_eq!(restored.current_semester(), Some(3));
     assert_eq!(restored.institution_entry_semester(), Some("2024.1"));
@@ -304,6 +401,7 @@ async fn uid_isolation(pool: &PgPool, repo: &PgDatabase) {
         .unwrap()
         .id();
     other.student_membership_confirmed = false;
+    other.course_name = None;
 
     repo.save(&other).await.unwrap();
 
@@ -378,6 +476,7 @@ async fn newer_evidence_wins(pool: &PgPool, repo: &PgDatabase) {
     let mut tied = latest.clone();
 
     tied.student_membership_confirmed = true;
+    tied.course_name = Some("Curso".into());
 
     assert!(!repo.save(&tied).await.unwrap());
 
@@ -395,6 +494,7 @@ async fn newer_evidence_wins(pool: &PgPool, repo: &PgDatabase) {
     latest.checked_at += Duration::seconds(1);
 
     latest.student_membership_confirmed = true;
+    latest.course_name = Some("Curso".into());
 
     assert!(repo.save(&latest).await.unwrap());
     assert!(
@@ -415,6 +515,7 @@ async fn concurrent_writes_preserve_newest(pool: &PgPool, repo: &PgDatabase) {
     new.expires_at += Duration::seconds(1);
 
     new.student_membership_confirmed = false;
+    new.course_name = None;
 
     let (a, b) = tokio::join!(repo.save(&old), repo.save(&new));
 
@@ -436,13 +537,17 @@ async fn concurrent_writes_preserve_newest(pool: &PgPool, repo: &PgDatabase) {
 async fn invalid_evidence_is_rejected(pool: &PgPool, repo: &PgDatabase) {
     let v = fixture(pool, true).await;
 
-    for kind in 0..4 {
+    for kind in 0..8 {
         let mut invalid = v.clone();
 
         match kind {
             0 => invalid.institution_id = Uuid::new_v4(),
             1 | 2 => invalid.user_id = Uuid::new_v4(),
-            _ => invalid.expires_at = invalid.checked_at,
+            3 => invalid.expires_at = invalid.checked_at,
+            4 => invalid.course_name = None,
+            5 => invalid.course_name = Some(String::new()),
+            6 => invalid.course_name = Some(" \t\n".into()),
+            _ => invalid.student_membership_confirmed = false,
         }
 
         assert!(repo.save(&invalid).await.is_err());
@@ -523,7 +628,6 @@ async fn closed_pool_returns_repository_errors() {
     let v = InstitutionalVerification {
         user_id: Uuid::new_v4(),
         profile_name: None,
-        profile_email: None,
         course_name: None,
         microsoft_object_id: Uuid::new_v4(),
         institution_id: Uuid::new_v4(),

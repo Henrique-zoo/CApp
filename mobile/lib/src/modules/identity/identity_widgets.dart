@@ -25,3 +25,5 @@ export 'presentation/session_failure_message.dart' show sessionFailureMessage;
 
 export 'presentation/account_login_page.dart' show AccountLoginPage;
 export 'presentation/profile_completion_page.dart' show ProfileCompletionPage;
+export 'presentation/limited_student_access_notice.dart'
+    show LimitedStudentAccessNotice;

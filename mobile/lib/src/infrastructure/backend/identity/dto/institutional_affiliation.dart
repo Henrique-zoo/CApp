@@ -7,7 +7,7 @@
 /// ## Leitura e tradução
 ///
 /// InstitutionalIdentityResponse desserializa affiliation por meio desta união.
-/// A variante estudantil exige courseName presente, admitindo nulo; a não
+/// A variante estudantil exige courseName presente e não vazio; a não
 /// estudantil não admite essa propriedade, inclusive nula.
 /// Um discriminador desconhecido produz FormatException.
 ///

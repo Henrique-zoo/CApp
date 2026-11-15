@@ -42,6 +42,7 @@ import 'errors/session_identity_changed_exception.dart';
 import 'errors/identity_exception.dart';
 import 'ports/auth_session.dart';
 import 'models/account_session_result.dart';
+import 'models/internal_user.dart';
 import 'ports/microsoft_sign_in.dart';
 
 /// Executa autenticação e verificação para uma mesma identidade.
@@ -144,6 +145,9 @@ final class InstitutionalAuthService {
       firebaseUid: firebaseUid,
       user: session.user,
       verification: verification,
+      suggestedEmail: session.user.status == InternalUserStatus.incomplete
+          ? session.suggestedEmail
+          : null,
     );
   }
 

@@ -38,7 +38,8 @@ import 'package:capp/src/modules/identity/application/models/institutional_verif
 
 /// Converte [response] em uma verificação própria da aplicação.
 ///
-/// Preserva nome, e-mail, sigla e curso ausentes. O resultado não estudantil permanece
+/// Preserva nome e sigla ausentes. O e-mail de sugestão não integra a evidência.
+/// O resultado não estudantil permanece
 /// uma variante válida do vínculo, sem ser convertido em falha.
 ///
 /// A normalização do instante para UTC pertence ao construtor do modelo.
@@ -63,7 +64,6 @@ InstitutionalVerification mapInstitutionalVerification(
     profile: InstitutionalProfile(
       microsoftObjectId: profile.microsoftObjectId,
       name: profile.name,
-      email: profile.email,
       affiliation: affiliation,
     ),
     institution: InstitutionSummary(

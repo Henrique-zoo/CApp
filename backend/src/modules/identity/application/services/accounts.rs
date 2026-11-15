@@ -4,8 +4,9 @@
 //! determinam o perfil e o prazo de sincronização; cache cliente não é evidência.
 //! Um perfil incompleto pode ser retomado, mas somente uma credencial password
 //! validada no mesmo UID permite concluir o cadastro. Nenhuma senha chega aqui.
-//! Complementos opcionais preenchem apenas ausências do Graph no perfil interno:
-//! os dados externos não nulos e a evidência persistida nunca são substituídos.
+//! Um nome declarado preenche somente uma ausência do Graph no perfil interno,
+//! sem substituir os dados externos ou a evidência persistida. O e-mail escolhido
+//! vem do Firebase; o endereço de sugestão do Graph não é armazenado nem restaurado.
 
 use super::authentication::InstitutionalVerificationResult;
 use crate::modules::identity::{
@@ -73,14 +74,11 @@ pub async fn restore(
                     profile: InstitutionalProfile {
                         id: evidence.microsoft_object_id.to_string(),
                         name: evidence.profile_name,
-                        mail: evidence.profile_email,
-                        affiliation: if evidence.student_membership_confirmed {
-                            InstitutionalAffiliation::Student {
-                                course_name: evidence.course_name,
-                            }
-                        } else {
-                            InstitutionalAffiliation::NonStudent
-                        },
+                        mail: None,
+                        affiliation: InstitutionalAffiliation::from_directory(
+                            evidence.student_membership_confirmed,
+                            evidence.course_name,
+                        ),
                     },
                     institution,
                     expires_at: evidence.expires_at,
@@ -156,11 +154,7 @@ fn validate_supplements(
     data: &ProfileCompletion,
     evidence: &crate::modules::identity::domain::entities::institutional_verification::InstitutionalVerification,
 ) -> Result<(), AuthenticationError> {
-    if (data.name.is_some() && evidence.profile_name.is_some())
-        || (data.institutional_email.is_some() && evidence.profile_email.is_some())
-        || (data.course_name.is_some()
-            && (evidence.course_name.is_some() || !evidence.student_membership_confirmed))
-    {
+    if data.name.is_some() && evidence.profile_name.is_some() {
         return Err(AuthenticationError::InvalidProfile);
     }
 
