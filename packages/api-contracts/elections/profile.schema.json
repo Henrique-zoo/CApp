@@ -182,7 +182,7 @@
           "const": true
         },
         "httpsRequiredInThisDelivery": {
-          "const": false
+          "const": true
         },
         "individualBallotValidityProofs": {
           "const": false

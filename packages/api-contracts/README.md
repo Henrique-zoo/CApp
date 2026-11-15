@@ -25,6 +25,11 @@ Os vetores usam parâmetros de grupo reais e material sintético de teste;
 nenhuma chave privada é versionada. O validador de fixtures não substitui
 o servidor de votação ou o auditor independente do produto.
 
+O transporte entre app e backend deve usar HTTPS, com terminação TLS no
+Caddy e validação do certificado pelo aplicativo. Essa configuração pertence
+à integração; os contratos e vetores não configuram o proxy nem testam TLS.
+O Rustdoc detalha a confiança nos certificados em produção e desenvolvimento.
+
 Instale `requirements-ci.txt` em um ambiente virtual e mantenha OpenSSL no
 PATH. Da raiz do repositório, execute:
 
