@@ -58,6 +58,7 @@
       ],
       "contract": [
         "UID vem do token validado, nunca do corpo do voto.",
+        "Comunicação app/backend usa HTTPS e valida o certificado do servidor; tokens não são enviados inicialmente por HTTP para depois seguir redirecionamento.",
         "Curso vem da evidência institucional vigente, sem declaração manual.",
         "A consulta de contexto não reserva voto; nova participação reavalia elegibilidade.",
         "Consulta de recibo aceito não exige nova chave ou permanência no curso."
@@ -233,6 +234,7 @@
       ],
       "contract": [
         "Exportação pode ser JSON Lines, com um envelope por linha.",
+        "Leitura pela rede usa HTTPS com certificado validado; leitura de arquivo exportado permanece offline e confere assinaturas.",
         "Não exportar tokens, Firebase UID, e-mail, segredos ou aleatoriedades.",
         "Auditor recebe chave pública confiável do servidor, não uma chave privada.",
         "Elegibilidade pública depende da associação feita pelo backend no modelo aprovado."

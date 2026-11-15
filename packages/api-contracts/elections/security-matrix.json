@@ -163,15 +163,24 @@
     {
       "name": "Transporte",
       "mechanisms": [
+        "HTTPS com terminação TLS no Caddy",
+        "Validação de confiança, validade e nome do servidor no app",
         "Firebase Auth e App Check para requisições de negócio"
       ],
       "premises": [
-        "HTTPS adiado por decisão explícita do projeto."
+        "Cliente confia explicitamente na CA/certificado correto; não aceita certificados arbitrários.",
+        "HTTP entre proxy e backend permanece restrito à rede privada do Compose no mesmo host; a porta do backend não é exposta externamente.",
+        "Chamadas com credenciais começam diretamente em HTTPS."
       ],
       "limits": [
-        "Interceptação, alteração e reutilização de credenciais em trânsito são riscos aceitos desta entrega."
+        "TLS não protege dispositivos comprometidos nem comprova validade individual das cédulas.",
+        "Os testes do corpus são offline e não comprovam o transporte; a configuração TLS será implementada e testada na entrega integrada #385 e preservada na integração de produto #386."
       ],
-      "tests": []
+      "tests": [],
+      "implementationIssues": [
+        385,
+        386
+      ]
     },
     {
       "name": "Publicidade e coerção",
@@ -200,7 +209,6 @@
     "Cadastro e chave do eleitor durante a primeira votação.",
     "App Check/cliente assumidos para validade individual, com guardrail agregado.",
     "Chapa única permitida.",
-    "Cliente integrado ao CApp/Firebase em vez de CLI independente.",
-    "HTTPS adiado."
+    "Cliente integrado ao CApp/Firebase em vez de CLI independente."
   ]
 }

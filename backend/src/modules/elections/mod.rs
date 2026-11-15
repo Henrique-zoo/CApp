@@ -107,14 +107,38 @@
 //!
 //! O modelo assume backend confiável e cliente suficientemente protegido por
 //! App Check para geração correta da cédula. Não atribui ao App Check uma prova
-//! matemática dessa propriedade. HTTPS foi adiado por decisão do projeto; riscos
-//! de interceptação, alteração e reutilização de credenciais em trânsito são
-//! reconhecidos. Não se promete resistência a um backend malicioso, anonimato
-//! da participação, ausência de inferência em unanimidade ou resistência à coerção.
+//! matemática dessa propriedade. Não se promete resistência a um backend malicioso,
+//! anonimato da participação, ausência de inferência em unanimidade ou resistência
+//! à coerção.
 //!
 //! `valid` significa contagem consistente sob essas premissas. Vencedor, desempate,
 //! quórum e posse pertencem às respectivas funcionalidades. Sem todas as autoridades
 //! a contagem fica incompleta; não há recuperação por limiar nesta versão.
+//!
+//! # Transporte HTTPS
+//!
+//! HTTPS é obrigatório entre aplicativo e backend, tanto na votação secreta quanto
+//! na identificada. A integração do protocolo na issue #385 deve terminar TLS no
+//! Caddy e encaminhar HTTP ao backend:3000 pela rede privada do Compose, no mesmo host.
+//! A porta HTTP do backend não fica exposta externamente. O aplicativo inicia as
+//! requisições diretamente em HTTPS; redirecionar uma chamada HTTP depois de enviar
+//! credenciais não protege os dados da primeira requisição.
+//!
+//! Em produção, usar certificado de uma CA pública, com emissão e renovação
+//! automáticas pelo Caddy. Em desenvolvimento, uma CA local ou certificado
+//! autoassinado exige confiança explícita no cliente. Instalar a CA no computador
+//! do servidor não a torna automaticamente confiável no aplicativo do celular.
+//! O app valida cadeia/confiança, validade e nome do servidor; não aceita qualquer
+//! certificado nem desabilita essa validação. Chaves privadas TLS ficam no proxy,
+//! fora do repositório, e são distintas dos segredos eleitorais.
+//!
+//! TLS protege o canal; Firebase Auth identifica a conta e App Check verifica a
+//! atestação do aplicativo. Nenhum deles substitui os demais ou comprova o conteúdo
+//! 0/1 da cédula cifrada. A integração deve testar uma chamada HTTPS válida, a recusa
+//! de certificados não confiáveis, expirados ou de outro nome e a ausência de acesso
+//! externo direto por HTTP. Os testes de fixtures desta issue não exercitam rede
+//! nem comprovam a configuração TLS; o proxy será implementado na integração #385
+//! e reaproveitado na integração de produto #386.
 //!
 //! # Fronteiras de implementação e validação
 //!
@@ -137,8 +161,10 @@
 //!
 //! Referências: [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html),
 //! [RFC 3526](https://www.rfc-editor.org/rfc/rfc3526.html),
-//! [RFC 8017](https://www.rfc-editor.org/rfc/rfc8017.html) e
-//! [RFC 8235](https://www.rfc-editor.org/rfc/rfc8235.html).
+//! [RFC 8017](https://www.rfc-editor.org/rfc/rfc8017.html),
+//! [RFC 8235](https://www.rfc-editor.org/rfc/rfc8235.html),
+//! [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446.html) e
+//! [HTTPS automático no Caddy](https://caddyserver.com/docs/automatic-https).
 
 pub mod api;
 pub mod application;
