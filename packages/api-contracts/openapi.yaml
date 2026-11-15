@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: CApp API
-  version: 3.0.0
+  version: 4.0.0
   description: |
     Contrato das rotas atualmente implementadas no backend CApp.
     Os caminhos são servidos sem prefixo /v1.
@@ -12,6 +12,10 @@ info:
     app_check_unavailable retorna 503. /health e /ready dispensam ambos os tokens.
     Desde 3.0.0, POST /auth/institutional/verify retorna user e verification
     no mesmo envelope.
+    Desde 4.0.0, o vínculo student exige curso institucional não vazio e o
+    perfil interno não aceita courseName declarado pelo usuário. O e-mail do Graph
+    é retornado apenas como suggestedEmail durante o cadastro, fora da evidência
+    institucional, e não é persistido. Contas ativas preservam o e-mail escolhido.
 
     A verificação institucional valida um Firebase ID token e um Microsoft access
     token da mesma pessoa, consulta a instituição pelo tenant Microsoft, verifica
@@ -73,10 +77,16 @@ paths:
 
         O backend consulta a organização Microsoft, busca a instituição cadastrada
         pelo tenant e usa o grupo dessa instituição em me/checkMemberGroups.
-        A ausência de participação no grupo resulta em affiliation.type=nonStudent,
-        sem rejeitar a autenticação. jobTitle é interpretado como curso somente
-        quando a participação estudantil foi confirmada. Nome, e-mail e curso
-        podem estar ausentes e são serializados como null.
+        A ausência de participação no grupo ou de curso não vazio no Graph resulta
+        em affiliation.type=nonStudent, sem rejeitar a autenticação. A entrada é
+        limitada e não concede direitos de estudante em nenhum CA. jobTitle é
+        interpretado como curso somente quando o grupo foi confirmado. Nome pode
+        estar ausente e é serializado como null. Curso ausente,
+        nulo ou em branco nunca é substituído por informação declarada pelo usuário.
+        O e-mail do Graph só é retornado em suggestedEmail se a conta estiver
+        incompleta e o endereço estiver disponível. Ele apenas sugere o e-mail do
+        formulário, não integra verification, não é persistido e não altera o e-mail
+        escolhido em verificações posteriores.
 
         A resposta inclui user com a conta provisionada e verification com a evidência,
         dispensando GET /auth/session após esta operação. verification inclui institution com o identificador interno, o nome e a
@@ -115,7 +125,7 @@ paths:
                   summary: Estudante com curso informado pelo diretório
                   externalValue: ./examples/institutional-verification-student.json
                 studentWithoutOptionalData:
-                  summary: Estudante sem nome, e-mail ou curso informado e instituição sem sigla
+                  summary: Estudante com curso informado, nome e e-mail nulos e instituição sem sigla
                   externalValue: ./examples/institutional-verification-student-null-fields.json
                 nonStudent:
                   summary: Pessoa sem participação no grupo estudantil
@@ -193,7 +203,7 @@ paths:
             institutional_verification_required — uma verificação concorrente com
             início igual ou posterior já foi persistida para o mesmo UID e esta
             tentativa não a substituiu; repita a verificação institucional.
-            Não pertencer ao grupo estudantil não gera esses erros; a resposta
+            Não confirmar o grupo estudantil ou o curso não gera esses erros; a resposta
             é 200 com o vínculo nonStudent.
           content:
             application/json:
@@ -309,10 +319,10 @@ paths:
         Não recebe senha, UID, status ou e-mail de login no corpo. O e-mail interno vem do JWT
         validado, podendo ser diferente do institucional. Apelido, período atual e
         semestre de ingresso são obrigatórios. O apelido é aparado.
-        name, institutionalEmail e courseName são complementos opcionais declarados
-        pelo usuário, aceitos somente quando o Graph retornou null para o atributo.
-        courseName só é aceito para estudantes confirmados. Não substituem a evidência
-        institucional nem comprovam titularidade do e-mail ou vínculo com o curso.
+        name é um complemento opcional declarado pelo usuário, aceito somente
+        quando o Graph retornou null para o nome. Não substitui a evidência
+        institucional. Curso e e-mail institucional não são aceitos no formulário.
+        O e-mail escolhido é confirmado pelo Firebase, independente da sugestão Graph.
         Concluir o perfil muda Incomplete para Active, sem reativar contas inativas.
         Repetir a atualização preserva ID e a data da primeira conclusão.
         Apelido não é tratado como identificador único. Timeout total de 15 segundos.
@@ -414,13 +424,6 @@ components:
         name:
           type: [string, "null"]
           description: Nome declarado para uma ausência do Graph; não é evidência institucional.
-        institutionalEmail:
-          type: [string, "null"]
-          format: email
-          description: Contato declarado quando ausente no Graph, distinto do e-mail de login e sem comprovação automática.
-        courseName:
-          type: [string, "null"]
-          description: Curso declarado por estudante quando ausente no Graph; não concede permissões.
         id:
           type: string
           format: uuid
@@ -470,6 +473,23 @@ components:
           $ref: "#/components/schemas/InternalUserResponse"
         verification:
           $ref: "#/components/schemas/InstitutionalVerificationResponse"
+        suggestedEmail:
+          type: string
+          format: email
+          minLength: 1
+          description: Sugestão transitória do Graph para o cadastro. Omitida se indisponível ou a conta não estiver Incomplete. Não integra a verificação nem os caches.
+      allOf:
+        - if:
+            properties:
+              user:
+                properties:
+                  status:
+                    enum: [active, inactive]
+          then:
+            not:
+              properties:
+                suggestedEmail: {}
+              required: [suggestedEmail]
 
     AccountSessionResponse:
       type: object
@@ -489,13 +509,6 @@ components:
         name:
           type: [string, "null"]
           description: Complemento opcional, aceito somente se o nome do Graph for null.
-        institutionalEmail:
-          type: [string, "null"]
-          format: email
-          description: Contato opcional, aceito somente se o e-mail do Graph for null; não altera o login.
-        courseName:
-          type: [string, "null"]
-          description: Complemento opcional, aceito somente para estudante confirmado cujo curso no Graph for null.
         nickname:
           type: string
           minLength: 1
@@ -556,7 +569,7 @@ components:
           description: Sigla cadastrada, como UnB; o campo é retornado como null quando ausente.
     InstitutionalIdentityResponse:
       type: object
-      required: [microsoftObjectId, name, email, affiliation]
+      required: [microsoftObjectId, name, affiliation]
       properties:
         microsoftObjectId:
           type: string
@@ -566,13 +579,10 @@ components:
         name:
           type: [string, "null"]
           description: displayName fornecido pela instituição, ou null se ausente.
-        email:
-          type: [string, "null"]
-          description: mail fornecido pelo diretório Microsoft, ou null se ausente; não há fallback para userPrincipalName.
         affiliation:
           $ref: "#/components/schemas/InstitutionalAffiliation"
     InstitutionalAffiliation:
-      description: Vínculo determinado pela participação no grupo estudantil configurado para a instituição.
+      description: Vínculo estudantil exige participação no grupo configurado e curso não vazio obtido no Graph. A ausência de qualquer um permite apenas acesso limitado.
       oneOf:
         - $ref: "#/components/schemas/StudentAffiliation"
         - $ref: "#/components/schemas/NonStudentAffiliation"
@@ -590,8 +600,10 @@ components:
           type: string
           const: student
         courseName:
-          type: [string, "null"]
-          description: jobTitle do estudante, ou null; ainda não representa associação ao catálogo interno de cursos.
+          type: string
+          minLength: 1
+          pattern: '\S'
+          description: Curso não vazio retornado pelo Graph para integrante do grupo estudantil; ainda sem associação ao catálogo interno de cursos.
     NonStudentAffiliation:
       type: object
       additionalProperties: false
@@ -600,7 +612,7 @@ components:
         type:
           type: string
           const: nonStudent
-          description: Participação no grupo estudantil não confirmada; courseName não é retornado e jobTitle não é interpretado como curso.
+          description: Grupo estudantil não confirmado ou curso ausente, nulo ou em branco no Graph. Permite entrada limitada, sem direitos de estudante em nenhum CA. courseName não é retornado.
     ApiError:
       type: object
       required: [error]

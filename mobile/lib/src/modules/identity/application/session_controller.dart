@@ -131,6 +131,9 @@ final class SessionController {
   final AccountProfileStore _accountProfileStore;
   final Map<String, InternalUser> _users = {};
 
+  /// Dado transitório do cadastro atual, isolado dos caches de perfil/evidência.
+  ({String firebaseUid, String email})? _registrationEmailSuggestion;
+
   final AuthSession _authSession;
   final SessionStore _sessionStore;
   final InstitutionalAuthService _authService;
@@ -733,6 +736,14 @@ final class SessionController {
 
       _requireActiveOperation(operation, result.firebaseUid);
 
+      if (accountUser.status == InternalUserStatus.incomplete &&
+          result.suggestedEmail != null) {
+        _registrationEmailSuggestion = (
+          firebaseUid: result.firebaseUid,
+          email: result.suggestedEmail!,
+        );
+      }
+
       final now = _now();
       final anticipated = result.verification.expiresAt.subtract(
         _automaticRenewalLead,
@@ -889,6 +900,8 @@ final class SessionController {
     if (_disposed) return;
 
     if (_receivedUser && firebaseUid == _currentUid) return;
+
+    _registrationEmailSuggestion = null;
 
     final signOut = _activeSignOut;
 
@@ -1370,10 +1383,19 @@ final class SessionController {
   void _emit(SessionState next) {
     if (_disposed) return;
 
+    if (next is! SessionSignedIn ||
+        _users[next.firebaseUid]?.status != InternalUserStatus.incomplete) {
+      _registrationEmailSuggestion = null;
+    }
+
     if (next is SessionSignedIn) {
       next = SessionSignedIn(
         firebaseUid: next.firebaseUid,
         user: _users[next.firebaseUid],
+        suggestedEmail:
+            _registrationEmailSuggestion?.firebaseUid == next.firebaseUid
+            ? _registrationEmailSuggestion?.email
+            : null,
         verification: next.verification,
         cacheLoadResult: next.cacheLoadResult,
         operation: next.operation,
@@ -1472,6 +1494,8 @@ final class SessionController {
   /// Fecha os recursos próprios mesmo quando cancelar a inscrição falha.
   Future<void> _disposeResources() async {
     _disposed = true;
+
+    _registrationEmailSuggestion = null;
 
     ++_revision;
 

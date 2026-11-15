@@ -13,8 +13,6 @@ abstract class _$InstitutionalIdentityResponseCWProxy {
 
   InstitutionalIdentityResponse name(String? name);
 
-  InstitutionalIdentityResponse email(String? email);
-
   InstitutionalIdentityResponse affiliation(
     InstitutionalAffiliation affiliation,
   );
@@ -30,7 +28,6 @@ abstract class _$InstitutionalIdentityResponseCWProxy {
   InstitutionalIdentityResponse call({
     UuidValue microsoftObjectId,
     String? name,
-    String? email,
     InstitutionalAffiliation affiliation,
   });
 }
@@ -52,9 +49,6 @@ class _$InstitutionalIdentityResponseCWProxyImpl
   InstitutionalIdentityResponse name(String? name) => call(name: name);
 
   @override
-  InstitutionalIdentityResponse email(String? email) => call(email: email);
-
-  @override
   InstitutionalIdentityResponse affiliation(
     InstitutionalAffiliation affiliation,
   ) => call(affiliation: affiliation);
@@ -71,7 +65,6 @@ class _$InstitutionalIdentityResponseCWProxyImpl
   InstitutionalIdentityResponse call({
     Object? microsoftObjectId = const $CopyWithPlaceholder(),
     Object? name = const $CopyWithPlaceholder(),
-    Object? email = const $CopyWithPlaceholder(),
     Object? affiliation = const $CopyWithPlaceholder(),
   }) {
     return InstitutionalIdentityResponse(
@@ -85,10 +78,6 @@ class _$InstitutionalIdentityResponseCWProxyImpl
           ? _value.name
           // ignore: cast_nullable_to_non_nullable
           : name as String?,
-      email: email == const $CopyWithPlaceholder()
-          ? _value.email
-          // ignore: cast_nullable_to_non_nullable
-          : email as String?,
       affiliation:
           affiliation == const $CopyWithPlaceholder() || affiliation == null
           ? _value.affiliation
@@ -116,7 +105,7 @@ InstitutionalIdentityResponse _$InstitutionalIdentityResponseFromJson(
 ) => $checkedCreate('InstitutionalIdentityResponse', json, ($checkedConvert) {
   $checkKeys(
     json,
-    requiredKeys: const ['microsoftObjectId', 'name', 'email', 'affiliation'],
+    requiredKeys: const ['microsoftObjectId', 'name', 'affiliation'],
   );
   final val = InstitutionalIdentityResponse(
     microsoftObjectId: $checkedConvert(
@@ -124,7 +113,6 @@ InstitutionalIdentityResponse _$InstitutionalIdentityResponseFromJson(
       (v) => const UuidValueConverter().fromJson(v as String),
     ),
     name: $checkedConvert('name', (v) => v as String?),
-    email: $checkedConvert('email', (v) => v as String?),
     affiliation: $checkedConvert(
       'affiliation',
       (v) => InstitutionalAffiliation.fromJson(v as Map<String, dynamic>),
@@ -140,6 +128,5 @@ Map<String, dynamic> _$InstitutionalIdentityResponseToJson(
     instance.microsoftObjectId,
   ),
   'name': instance.name,
-  'email': instance.email,
   'affiliation': instance.affiliation.toJson(),
 };

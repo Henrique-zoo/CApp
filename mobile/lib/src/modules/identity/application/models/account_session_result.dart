@@ -11,6 +11,8 @@
 /// observado, sem estender a validade de uma confirmação reutilizada. O
 /// controlador confere o contexto e o prazo antes de publicar o resultado
 /// e persistir sob a chave da conta correspondente.
+/// Somente perfil interno e verificação são persistidos; uma sugestão de e-mail
+/// recebida no cadastro acompanha a operação apenas em memória.
 ///
 /// ## Alcance da associação
 ///
@@ -39,6 +41,7 @@ final class AccountSessionResult {
     required this.firebaseUid,
     required this.verification,
     required this.user,
+    this.suggestedEmail,
   });
 
   /// Usuário ao qual pertence a resposta.
@@ -49,4 +52,8 @@ final class AccountSessionResult {
 
   /// Perfil, vínculo e validade retornados pelo backend.
   final InstitutionalVerification verification;
+
+  /// Pré-preenchimento recebido durante o cadastro, independente da evidência.
+  /// Não é persistido nem substitui o endereço escolhido para a credencial interna.
+  final String? suggestedEmail;
 }

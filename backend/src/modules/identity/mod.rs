@@ -16,10 +16,11 @@
 //! valida Firebase, consulta o tenant Microsoft, localiza a instituição e verifica
 //! o grupo estudantil configurado. Obtém então o perfil com seu vínculo e confronta
 //! o objeto Microsoft com a identidade vinculada ao Firebase antes de persistir.
-//! Estudantes e não estudantes podem concluir a verificação. O grupo determina
+//! Estudantes e não estudantes podem concluir a verificação. Grupo e curso determinam
 //! [`InstitutionalAffiliation`](application::ports::InstitutionalAffiliation);
-//! `jobTitle` só é interpretado como curso para estudantes. Nome, e-mail e curso
-//! ausentes não impedem a operação; `userPrincipalName` não integra o perfil.
+//! `jobTitle` só é interpretado como curso para integrantes do grupo estudantil.
+//! Nome e e-mail podem estar ausentes. Sem curso não vazio, a operação permite
+//! somente acesso limitado; `userPrincipalName` não integra o perfil.
 //!
 //! A instituição é resolvida pelo tenant, sem restrição fixa à UnB. Seu cadastro
 //! deve existir antes do login; `institution.status` não é uma regra de acesso
@@ -35,9 +36,14 @@
 //! A primeira verificação provisiona uma conta Incomplete por UID. A restauração de
 //! sessão usa somente Firebase e a evidência persistida, sem Graph. A conclusão do
 //! perfil exige autenticação password, apelido, período atual e ingresso na instituição;
-//! o e-mail vem do JWT, separado do e-mail institucional. A conta passa a Active.
+//! o e-mail escolhido vem do JWT e a conta passa a Active. O endereço do Graph
+//! serve apenas como sugestão transitória durante o cadastro; não é persistido,
+//! não integra a evidência e não substitui o endereço escolhido em sincronizações.
 //! O módulo não administra senhas/sessões Firebase nem associa cursos ao catálogo.
-//! O curso é um dado externo opcional, sem associação ao catálogo interno.
+//! O vínculo estudantil exige grupo e curso não vazio confirmados pelo Graph.
+//! A ausência de qualquer um mantém a entrada limitada, sem direitos estudantis
+//! em nenhum CA. Curso não é aceito como complemento declarado pelo usuário;
+//! a associação do texto externo ao catálogo interno continua em outro recorte.
 //! A identidade institucional não representa pertencimento a um Centro Acadêmico
 //! nem concede permissões de curso ou administrativas.
 //!

@@ -10,7 +10,9 @@
 /// instituição e validade. Os UUIDs são gravados como texto e reconstruídos como
 /// UuidValue após validação de formato, sem exigir uma versão específica de UUID.
 /// A gravação preserva campos nullable e representa expiresAt em UTC.
-/// Não inclui credenciais Firebase ou Microsoft. Registros da versão 1 são
+/// Não inclui credenciais Firebase/Microsoft nem o e-mail de sugestão do cadastro.
+/// E-mails presentes em caches antigos são ignorados e não voltam a ser gravados.
+/// Registros da versão 1 são
 /// rejeitados como versão não suportada porque não contêm a instituição;
 /// o codec não inventa esse dado nem consulta a rede para completá-lo.
 ///
@@ -180,7 +182,6 @@ final class SessionCacheCodec {
       'profile': {
         'microsoftObjectId': profile.microsoftObjectId.uuid,
         'name': profile.name,
-        'email': profile.email,
         'affiliation': affiliation,
       },
       'institution': {
@@ -195,8 +196,9 @@ final class SessionCacheCodec {
   /// Reconstrói uma verificação a partir do formato persistente.
   ///
   /// Exige os campos obrigatórios da versão 2, incluindo instituição e UUIDs
-  /// textuais válidos. Nome e e-mail do perfil, sigla da instituição e curso
-  /// estudantil admitem nulo, mas precisam estar presentes nos respectivos objetos.
+  /// textuais válidos. Nome do perfil e sigla da instituição admitem nulo,
+  /// mas precisam estar presentes. Curso estudantil exige texto não vazio; valores
+  /// nulos ou em branco de caches antigos são reconstituídos com acesso limitado.
   ///
   /// A data segue a interpretação de DateTime.parse, preservando a política
   /// de leitura do formato anterior. O modelo normaliza o instante para UTC.
@@ -221,7 +223,6 @@ final class SessionCacheCodec {
       profile: InstitutionalProfile(
         microsoftObjectId: _readUuid(profile, 'microsoftObjectId'),
         name: _readNullableString(profile, 'name'),
-        email: _readNullableString(profile, 'email'),
         affiliation: _readAffiliation(affiliation),
       ),
       institution: InstitutionSummary(
@@ -235,7 +236,8 @@ final class SessionCacheCodec {
 
   /// Reconstrói a variante de vínculo definida no formato persistente.
   ///
-  /// Estudantes exigem `courseName`, admitindo nulo.
+  /// Estudantes exigem curso não vazio. Um cache antigo com curso nulo ou em
+  /// branco é rebaixado para acesso limitado, sem preservar direitos estudantis.
   /// A variante não estudantil não admite esse campo, inclusive com valor nulo.
   ///
   /// Lança FormatException para discriminador ou conteúdo incompatível.
@@ -244,9 +246,11 @@ final class SessionCacheCodec {
 
     switch (type) {
       case 'student':
-        return StudentAffiliation(
-          courseName: _readNullableString(json, 'courseName'),
-        );
+        final courseName = _readNullableString(json, 'courseName');
+
+        return courseName == null || courseName.trim().isEmpty
+            ? const NonStudentAffiliation()
+            : StudentAffiliation(courseName: courseName);
 
       case 'nonStudent':
         if (json.containsKey('courseName')) {

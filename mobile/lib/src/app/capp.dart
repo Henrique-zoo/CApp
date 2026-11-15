@@ -23,7 +23,8 @@
 /// ## Área principal atual
 ///
 /// A área pronta começa em Início, com rodapé para alternar entre Início e Conta.
-/// A página Conta apresenta o perfil e o aviso informativo de vínculo não estudantil.
+/// A página Conta apresenta o perfil. Um aviso persistente de acesso limitado
+/// acompanha todas as abas quando não há grupo e curso institucionais confirmados.
 /// Falha exclusiva de persistência acrescenta um aviso e preserva a entrada na
 /// execução atual.
 /// A ação de saída é injetada na página Conta. Falhas esperadas são apresentadas pelo

@@ -48,7 +48,7 @@ Map<String, Object?> loadApiContractExample(String filename) {
 
 /// Evidência do protocolo extraída do exemplo de resposta compartilhado.
 ///
-/// [student] seleciona o exemplo estudantil com curso nulo.
+/// [student] seleciona o exemplo estudantil com nome e e-mail nulos.
 /// [institutionAcronym] permite variar a sigla sem omitir a propriedade.
 Map<String, Object?> backendVerificationBody({
   bool student = false,

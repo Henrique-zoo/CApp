@@ -272,6 +272,13 @@ void main() {
     final auth = await create();
 
     addTearDown(auth.dispose);
+
+    expect((await auth.savedAccounts()).single.email, isNull);
+    expect(
+      preferences.values.toString(),
+      isNot(contains('institucional@test.example')),
+    );
+
     await auth.setUpPassword(
       email: 'pessoal@test.example',
       password: 'valid-password',

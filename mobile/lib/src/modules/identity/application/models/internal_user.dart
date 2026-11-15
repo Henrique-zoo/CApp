@@ -3,9 +3,10 @@
 /// E-mail de login e dados acadêmicos escolhidos pelo usuário são independentes
 /// do perfil institucional. O backend decide o estado; a apresentação apenas
 /// escolhe entre concluir o cadastro e entrar no aplicativo.
-/// Complementos de nome, contato institucional e curso são declarações para
-/// ausências do Graph. A apresentação dá prioridade aos dados externos quando
-/// disponíveis e identifica os complementos; nenhum deles comprova um vínculo.
+/// O complemento de nome é uma declaração para uma ausência do Graph. A
+/// apresentação dá prioridade ao dado externo e identifica o complemento;
+/// o nome declarado não comprova um vínculo. O e-mail do Graph pode acompanhar
+/// o resultado do cadastro como sugestão transitória, sem integrar este perfil.
 library;
 
 import 'package:uuid/uuid.dart';
@@ -27,8 +28,6 @@ final class InternalUser {
     int? currentSemester,
     String? institutionEntrySemester,
     String? name,
-    String? institutionalEmail,
-    String? courseName,
   }) {
     if ((currentSemester != null && currentSemester < 1) ||
         (institutionEntrySemester != null &&
@@ -51,8 +50,6 @@ final class InternalUser {
       currentSemester: currentSemester,
       institutionEntrySemester: institutionEntrySemester,
       name: name,
-      institutionalEmail: institutionalEmail,
-      courseName: courseName,
     );
   }
 
@@ -64,8 +61,6 @@ final class InternalUser {
     this.currentSemester,
     this.institutionEntrySemester,
     this.name,
-    this.institutionalEmail,
-    this.courseName,
   });
 
   final UuidValue id;
@@ -73,10 +68,8 @@ final class InternalUser {
   final String? nickname;
   final String? email;
 
-  /// Complementos declarados para ausências do Graph; não são comprovações.
+  /// Nome declarado para uma ausência do Graph; não é uma comprovação.
   final String? name;
-  final String? institutionalEmail;
-  final String? courseName;
 
   /// Período atual do curso, a partir de 1.
   final int? currentSemester;
@@ -87,12 +80,20 @@ final class InternalUser {
 
 /// Resposta autenticada que dispensa Microsoft enquanto a evidência estiver válida.
 final class AccountSession {
-  const AccountSession({required this.user, required this.verification});
+  const AccountSession({
+    required this.user,
+    required this.verification,
+    this.suggestedEmail,
+  });
 
   final InternalUser user;
 
   /// Nulo quando a evidência precisa de sincronização institucional.
   final InstitutionalVerification? verification;
+
+  /// Sugestão transitória do Graph para concluir o cadastro; nunca vai ao cache.
+  /// A restauração de sessão não fornece esse campo e contas ativas o ignoram.
+  final String? suggestedEmail;
 }
 
 /// Dados necessários para concluir o perfil, sem UID ou estado enviados pelo cliente.
@@ -102,18 +103,14 @@ final class ProfileCompletion {
     required this.currentSemester,
     required this.institutionEntrySemester,
     this.name,
-    this.institutionalEmail,
-    this.courseName,
   });
 
   final String nickname;
   final int currentSemester;
   final String institutionEntrySemester;
 
-  /// Enviados somente para atributos nulos do Graph; não alteram a evidência.
+  /// Nome enviado somente quando ausente no Graph; não altera a evidência.
   final String? name;
-  final String? institutionalEmail;
-  final String? courseName;
 }
 
 /// Valida o semestre institucional no formato AAAA.1 ou AAAA.2.

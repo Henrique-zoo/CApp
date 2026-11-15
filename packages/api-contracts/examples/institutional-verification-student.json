@@ -6,15 +6,12 @@
     "email": null,
     "currentSemester": null,
     "institutionEntrySemester": null,
-    "name": null,
-    "institutionalEmail": null,
-    "courseName": null
+    "name": null
   },
   "verification": {
     "profile": {
       "microsoftObjectId": "00000000-0000-0000-0000-000000000001",
       "name": "Pessoa Exemplo",
-      "email": "pessoa@instituicao.example",
       "affiliation": {
         "type": "student",
         "courseName": "Engenharia de Software"
@@ -26,5 +23,6 @@
       "name": "Instituição Exemplo",
       "acronym": "IEX"
     }
-  }
+  },
+  "suggestedEmail": "pessoa@instituicao.example"
 }

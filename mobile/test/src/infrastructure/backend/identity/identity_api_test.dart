@@ -45,7 +45,7 @@ void main() {
         response.verification.profile.affiliation,
         isA<NonStudentAffiliation>(),
       );
-      expect(response.verification.profile.email, isNull);
+      expect(response.suggestedEmail, isNull);
       expect(
         response.verification.profile.microsoftObjectId,
         const UuidValue.raw('00000000-0000-0000-0000-000000000001'),
@@ -242,4 +242,52 @@ void main() {
       );
     });
   }
+  for (final course in [null, '', ' \t\n', 42]) {
+    test('vínculo student exige curso institucional não vazio: $course', () {
+      expect(
+        () => InstitutionalAffiliation.fromJson({
+          'type': 'student',
+          'courseName': course,
+        }),
+        throwsFormatException,
+      );
+    });
+  }
+  for (final suggestion in [null, 42, '', ' \t']) {
+    test(
+      'sugestão de e-mail presente precisa ser texto não vazio: $suggestion',
+      () async {
+        final body = backendInstitutionalAuthBody();
+        body['suggestedEmail'] = suggestion;
+        final api = IdentityApi(
+          createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
+        );
+
+        await expectLater(
+          api.verifyInstitutionalIdentity(request: _request()),
+          throwsFormatException,
+        );
+      },
+    );
+  }
+
+  test('conta ativa não admite sugestão de e-mail no contrato', () async {
+    final body = backendInstitutionalAuthBody();
+    (body['user'] as Map<String, dynamic>).addAll({
+      'status': 'active',
+      'nickname': 'Pessoa',
+      'email': 'escolhido@example.test',
+      'currentSemester': 4,
+      'institutionEntrySemester': '2024.1',
+    });
+    body['suggestedEmail'] = 'graph@example.test';
+    final api = IdentityApi(
+      createTestDio(FakeHttpAdapter((_) => jsonTestResponse(body))),
+    );
+
+    await expectLater(
+      api.verifyInstitutionalIdentity(request: _request()),
+      throwsFormatException,
+    );
+  });
 }

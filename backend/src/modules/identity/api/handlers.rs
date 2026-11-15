@@ -115,8 +115,6 @@ pub(super) async fn complete_profile(
     let Json(body) = body.map_err(|_| ApiError::bad_request())?;
     let data = crate::modules::identity::domain::entities::user::ProfileCompletion {
         name: body.name,
-        institutional_email: body.institutional_email,
-        course_name: body.course_name,
         nickname: body.nickname,
         current_semester: body.current_semester,
         institution_entry_semester: body.institution_entry_semester,

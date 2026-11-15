@@ -95,6 +95,7 @@ final class BackendInstitutionalIdentityGateway
       return AccountSession(
         user: _mapUser(response.user),
         verification: mapInstitutionalVerification(response.verification),
+        suggestedEmail: response.suggestedEmail,
       );
     });
   }
@@ -119,8 +120,6 @@ final class BackendInstitutionalIdentityGateway
         currentSemester: profile.currentSemester,
         institutionEntrySemester: profile.institutionEntrySemester,
         name: profile.name,
-        institutionalEmail: profile.institutionalEmail,
-        courseName: profile.courseName,
       ),
     ),
   );
@@ -133,8 +132,6 @@ final class BackendInstitutionalIdentityGateway
     currentSemester: dto.currentSemester,
     institutionEntrySemester: dto.institutionEntrySemester,
     name: dto.name,
-    institutionalEmail: dto.institutionalEmail,
-    courseName: dto.courseName,
   );
 
   Future<T> _request<T>(Future<T> Function() operation) async {

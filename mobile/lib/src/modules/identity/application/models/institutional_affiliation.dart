@@ -10,9 +10,9 @@
 /// NonStudentAffiliation; o codec reconstrói as mesmas variantes ao ler o cache.
 /// InstitutionalProfile agrega esse resultado, acompanhado dos dados do perfil.
 ///
-/// A variante estudantil admite o texto externo do curso, inclusive nulo.
+/// A variante estudantil exige grupo confirmado e curso externo não vazio.
 /// A variante não estudantil expressa uma consulta concluída sem confirmação
-/// de participação no grupo, e pode orientar uma mensagem informativa.
+/// do grupo ou do curso. A apresentação informa o acesso limitado resultante.
 ///
 /// ## Limites semânticos
 ///
@@ -35,16 +35,22 @@ sealed class InstitutionalAffiliation {
 
 /// Participação estudantil reconhecida pela instituição.
 ///
-/// O curso é uma informação opcional e não determina permissões do aplicativo.
+/// O curso vem exclusivamente da instituição; não pode ser declarado pelo usuário.
 final class StudentAffiliation extends InstitutionalAffiliation {
   /// Cria o vínculo com o curso informado pela fonte institucional.
   ///
-  /// [courseName] pode ser nulo quando a instituição não fornece esse dado.
-  /// O texto é preservado sem normalização.
-  const StudentAffiliation({required this.courseName});
+  /// Rejeita curso vazio ou em branco com [FormatException]. O texto válido é
+  /// preservado sem normalização; a autorização das operações cabe ao servidor.
+  StudentAffiliation({required this.courseName}) {
+    if (courseName.trim().isEmpty) {
+      throw const FormatException(
+        'Vínculo estudantil exige curso institucional',
+      );
+    }
+  }
 
-  /// Curso informado pela instituição, ou nulo quando ausente.
-  final String? courseName;
+  /// Curso não vazio informado pela instituição.
+  final String courseName;
 
   /// Compara a variante e o curso informado
   @override
@@ -58,10 +64,10 @@ final class StudentAffiliation extends InstitutionalAffiliation {
   int get hashCode => Object.hash(StudentAffiliation, courseName);
 }
 
-/// Participação estudantil não reconhecida na consulta institucional.
+/// Grupo estudantil ou curso não confirmado na consulta institucional.
 ///
-/// Deve orientar uma mensagem informativa ao usuário.
-/// Sua presença não exige logout e não impede, por si só, a entrada no app.
+/// Permite entrada limitada, sem direitos de estudante em qualquer CA, com aviso
+/// explícito. Sua presença não exige logout nem impede a conclusão do cadastro.
 final class NonStudentAffiliation extends InstitutionalAffiliation {
   /// Cria o resultado de vínculo estudantil não reconhecido.
   const NonStudentAffiliation();

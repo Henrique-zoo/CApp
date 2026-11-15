@@ -1,9 +1,12 @@
 /// Cadastro em uma única tela, com duas etapas no mesmo formulário.
 ///
-/// A etapa inicial apresenta nome, e-mail institucional e curso do Graph, além
+/// A etapa inicial apresenta nome e curso do Graph, além
 /// da instituição identificada. Valores externos não nulos são somente leitura;
-/// ausências podem receber complementos opcionais declarados pelo usuário. Esses
-/// complementos pertencem ao perfil CApp e não alteram a evidência ou o vínculo.
+/// a ausência de nome pode receber um complemento declarado pelo usuário,
+/// sem alterar a evidência ou o vínculo. O e-mail do Graph é apenas sugestão
+/// transitória para o campo de acesso na segunda etapa, sem outro campo institucional.
+/// Curso nunca é declarado: sua ausência mantém um aviso de acesso limitado
+/// durante as duas etapas, sem impedir a conclusão do perfil interno.
 /// Apelido, período atual e ingresso são os dados acadêmicos obrigatórios.
 ///
 /// Avançar valida os dados e troca o conteúdo do cartão, sem abrir outra rota ou
@@ -22,6 +25,7 @@ import 'package:flutter/material.dart';
 import '../identity.dart';
 import 'account_sign_out_dialog.dart';
 import 'institution_entry_suggestion.dart';
+import 'limited_student_access_notice.dart';
 import 'session_failure_message.dart';
 
 enum _ProfileStep { academic, credentials }
@@ -50,8 +54,6 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
   final _credentialsForm = GlobalKey<FormState>();
   final _scroll = ScrollController();
   final _name = TextEditingController();
-  final _institutionalEmail = TextEditingController();
-  final _course = TextEditingController();
   final _nickname = TextEditingController();
   final _semester = TextEditingController();
   final _entry = TextEditingController();
@@ -83,15 +85,8 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
 
   void _loadGraphData() {
     final profile = widget.state.verification?.profile;
-    final affiliation = profile?.affiliation;
 
     _name.text = profile?.name ?? widget.state.user?.name ?? '';
-    _institutionalEmail.text =
-        profile?.email ?? widget.state.user?.institutionalEmail ?? '';
-    _course.text =
-        (affiliation is StudentAffiliation ? affiliation.courseName : null) ??
-        widget.state.user?.courseName ??
-        '';
   }
 
   @override
@@ -115,8 +110,6 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
 
     for (final controller in [
       _name,
-      _institutionalEmail,
-      _course,
       _nickname,
       _semester,
       _entry,
@@ -160,10 +153,7 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
       _email.text = widget.controller.internalEmail ?? _email.text;
     } else if (!_credentialsOpened) {
       _email.text =
-          widget.state.user?.email ??
-          _optional(_institutionalEmail.text) ??
-          widget.controller.internalEmail ??
-          '';
+          widget.state.user?.email ?? widget.state.suggestedEmail ?? '';
     }
 
     _credentialsOpened = true;
@@ -196,7 +186,6 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
 
     final profile =
         (widget.controller.state as SessionSignedIn).verification!.profile;
-    final affiliation = profile.affiliation;
 
     setState(() => _message = null);
 
@@ -209,14 +198,6 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
           currentSemester: int.parse(_semester.text),
           institutionEntrySemester: _entry.text,
           name: profile.name == null ? _optional(_name.text) : null,
-          institutionalEmail: profile.email == null
-              ? _optional(_institutionalEmail.text)
-              : null,
-          courseName:
-              affiliation is StudentAffiliation &&
-                  affiliation.courseName == null
-              ? _optional(_course.text)
-              : null,
         ),
       );
     } on Exception catch (error) {
@@ -324,6 +305,11 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
                           const SizedBox(height: 8),
                           LinearProgressIndicator(value: academic ? 0.5 : 1),
                           const SizedBox(height: 24),
+                          if (widget.state.verification?.profile.affiliation
+                              is NonStudentAffiliation) ...[
+                            const LimitedStudentAccessNotice(),
+                            const SizedBox(height: 16),
+                          ],
                           if (widget.state.user == null) ...[
                             const Text(
                               'Precisamos recuperar o perfil da sua conta antes de continuar.',
@@ -374,7 +360,7 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Confira seus dados. Os valores fornecidos pela instituição não podem ser alterados; os campos não informados podem ser completados.',
+            'Confira seus dados. Os valores fornecidos pela instituição não podem ser alterados. Nome ausente pode ser completado; o curso é confirmado somente pela instituição.',
           ),
           const SizedBox(height: 24),
           _graphField(
@@ -382,14 +368,6 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
             controller: _name,
             readOnly: profile.name != null,
             busy: busy,
-          ),
-          const SizedBox(height: 12),
-          _graphField(
-            label: 'E-mail institucional',
-            controller: _institutionalEmail,
-            readOnly: profile.email != null,
-            busy: busy,
-            email: true,
           ),
           const SizedBox(height: 12),
           TextFormField(
@@ -404,19 +382,19 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
           ),
           if (affiliation is StudentAffiliation) ...[
             const SizedBox(height: 12),
-            _graphField(
-              label: 'Curso',
-              controller: _course,
-              readOnly: affiliation.courseName != null,
-              busy: busy,
+            TextFormField(
+              initialValue: affiliation.courseName,
+              readOnly: true,
+              enabled: !busy,
+              decoration: const InputDecoration(
+                labelText: 'Curso',
+                suffixIcon: Icon(Icons.lock_outline),
+              ),
             ),
           ],
           const SizedBox(height: 8),
-          Text(
-            affiliation is StudentAffiliation
-                ? 'Vínculo estudantil confirmado.'
-                : 'Vínculo estudantil não confirmado.',
-          ),
+          if (affiliation is StudentAffiliation)
+            const Text('Vínculo estudantil confirmado.'),
           const SizedBox(height: 24),
           TextFormField(
             controller: _nickname,
@@ -469,27 +447,15 @@ class _ProfileCompletionPageState extends State<ProfileCompletionPage> {
     required TextEditingController controller,
     required bool readOnly,
     required bool busy,
-    bool email = false,
   }) => TextFormField(
     controller: controller,
     readOnly: readOnly,
     enabled: !busy,
-    keyboardType: email ? TextInputType.emailAddress : TextInputType.text,
     decoration: InputDecoration(
       labelText: label,
       hintText: readOnly ? null : 'Não informado (opcional)',
       suffixIcon: readOnly ? const Icon(Icons.lock_outline) : null,
     ),
-    validator: !email || readOnly
-        ? null
-        : (value) {
-            final text = value?.trim() ?? '';
-
-            return text.isNotEmpty &&
-                    (!text.contains('@') || RegExp(r'\s').hasMatch(text))
-                ? 'Informe um e-mail válido.'
-                : null;
-          },
   );
 
   Widget _buildCredentialsForm(bool busy) {

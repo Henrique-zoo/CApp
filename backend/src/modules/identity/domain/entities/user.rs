@@ -14,8 +14,6 @@ pub struct User {
     id: Uuid,
     firebase_uid: String,
     name: Option<String>,
-    institutional_email: Option<String>,
-    course_name: Option<String>,
     nickname: Option<String>,
     email: Option<String>,
     current_semester: Option<i32>,
@@ -32,12 +30,6 @@ pub struct User {
 pub struct ProfileCompletion {
     /// Nome declarado quando o Graph não o informou; não constitui evidência.
     pub name: Option<String>,
-
-    /// Contato institucional declarado, independente do e-mail de login.
-    pub institutional_email: Option<String>,
-
-    /// Curso declarado por estudante quando o Graph não o informou.
-    pub course_name: Option<String>,
 
     /// Apelido público obrigatório, aparado antes da persistência.
     pub nickname: String,
@@ -68,16 +60,6 @@ impl User {
     /// Nome declarado para uma ausência do Graph; não substitui o apelido.
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
-    }
-
-    /// Contato declarado para uma ausência no Graph, sem comprovação automática.
-    pub fn institutional_email(&self) -> Option<&str> {
-        self.institutional_email.as_deref()
-    }
-
-    /// Curso declarado; não atribui vínculo estudantil nem permissões.
-    pub fn course_name(&self) -> Option<&str> {
-        self.course_name.as_deref()
     }
 
     /// Apelido escolhido e normalizado na conclusão do perfil.
@@ -134,15 +116,10 @@ impl User {
         now: DateTime<Utc>,
     ) -> Result<(), InvalidProfile> {
         let term = data.institution_entry_semester.as_bytes();
-        let institutional_email = optional_text(data.institutional_email);
-
         if self.status == UserStatus::Inactive
             || data.nickname.trim().is_empty()
             || data.current_semester < 1
             || email.is_empty()
-            || institutional_email
-                .as_ref()
-                .is_some_and(|value| !value.contains('@') || value.chars().any(char::is_whitespace))
             || term.len() != 6
             || !term[..4].iter().all(u8::is_ascii_digit)
             || term[4] != b'.'
@@ -153,8 +130,6 @@ impl User {
 
         self.nickname = Some(data.nickname.trim().into());
         self.name = optional_text(data.name);
-        self.institutional_email = institutional_email;
-        self.course_name = optional_text(data.course_name);
         self.email = Some(email.into());
         self.current_semester = Some(data.current_semester);
         self.institution_entry_semester = Some(data.institution_entry_semester);
@@ -173,8 +148,6 @@ impl User {
             id,
             firebase_uid,
             name: None,
-            institutional_email: None,
-            course_name: None,
             nickname: None,
             email: None,
             current_semester: None,

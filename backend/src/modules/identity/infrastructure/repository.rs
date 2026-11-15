@@ -155,9 +155,9 @@ impl InstitutionalVerificationRepository for PgDatabase {
                 microsoft_student_group_id,
                 student_membership_confirmed,
                 checked_at,
-                expires_at, profile_name, profile_email, course_name
+                expires_at, profile_name, course_name
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (user_id) DO UPDATE SET
                 microsoft_object_id = EXCLUDED.microsoft_object_id,
                 institution_id = EXCLUDED.institution_id,
@@ -168,7 +168,6 @@ impl InstitutionalVerificationRepository for PgDatabase {
                 checked_at = EXCLUDED.checked_at,
                 expires_at = EXCLUDED.expires_at,
                 profile_name = EXCLUDED.profile_name,
-                profile_email = EXCLUDED.profile_email,
                 course_name = EXCLUDED.course_name
             WHERE EXCLUDED.checked_at > institutional_verification.checked_at
             "#,
@@ -182,7 +181,6 @@ impl InstitutionalVerificationRepository for PgDatabase {
         .bind(verification.checked_at)
         .bind(verification.expires_at)
         .bind(&verification.profile_name)
-        .bind(&verification.profile_email)
         .bind(&verification.course_name)
         .execute(&self.pool)
         .await
@@ -208,7 +206,7 @@ impl UserRepository for PgDatabase {
                 institution_entry_semester = $5, status = 'active',
                 profile_completed_at = COALESCE(profile_completed_at, $6),
                 updated_at = GREATEST(updated_at, $7),
-                name = $9, institutional_email = $10, course_name = $11
+                name = $9
             WHERE id = $1 AND status <> 'inactive' AND firebase_uid = $8
             "#,
         )
@@ -221,8 +219,6 @@ impl UserRepository for PgDatabase {
         .bind(user.updated_at())
         .bind(user.firebase_uid())
         .bind(user.name())
-        .bind(user.institutional_email())
-        .bind(user.course_name())
         .execute(&self.pool)
         .await
         .map(|result| result.rows_affected() == 1)
