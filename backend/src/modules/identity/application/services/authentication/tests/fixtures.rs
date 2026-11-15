@@ -1,6 +1,6 @@
 //! Dados-padrão reaproveitados pelos testes da aplicação.
 
-use crate::modules::identity::domain::CatalogStatus;
+use crate::modules::identity::domain::{CatalogStatus, entities::user::User};
 
 use super::*;
 
@@ -93,11 +93,9 @@ pub fn profile_with_id(id: &str, is_student: bool) -> InstitutionalProfile {
 pub fn repositories() -> MockRepositories {
     let mut repositories = MockRepositories::new();
 
-    repositories.expect_provision().returning(|uid| {
-        use crate::modules::identity::domain::entities::user::User;
-
-        Ok(User::provisioned(Uuid::nil(), uid.into(), Utc::now()))
-    });
+    repositories
+        .expect_provision()
+        .returning(|uid| Ok(User::provisioned(Uuid::nil(), uid.into(), Utc::now())));
 
     repositories
 }

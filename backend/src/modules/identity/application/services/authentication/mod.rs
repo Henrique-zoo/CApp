@@ -11,18 +11,21 @@
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
-use super::super::ports::InstitutionalDirectory;
 use crate::modules::identity::{
     application::{
         error::AuthenticationError,
         ports::{
             IdentityTokenVerifier, InstitutionRepository, InstitutionalAffiliation,
-            InstitutionalProfile, InstitutionalVerificationRepository, UserRepository,
-            VerifiedIdentity,
+            InstitutionalDirectory, InstitutionalProfile, InstitutionalVerificationRepository,
+            UserRepository, VerifiedIdentity,
         },
     },
-    domain::entities::{
-        institution::Institution, institutional_verification::InstitutionalVerification, user::User,
+    domain::{
+        UserStatus,
+        entities::{
+            institution::Institution, institutional_verification::InstitutionalVerification,
+            user::User,
+        },
     },
 };
 
@@ -192,7 +195,7 @@ pub async fn verify_institutional_identity(
 
     let user = repositories.provision(&identity.firebase_uid).await?;
 
-    if user.status() == crate::modules::identity::domain::UserStatus::Inactive {
+    if user.status() == UserStatus::Inactive {
         return Err(AuthenticationError::AccountInactive);
     }
 
@@ -223,15 +226,14 @@ pub async fn verify_institutional_identity(
         return Err(AuthenticationError::InstitutionalVerificationRequired);
     }
 
-    let suggested_email =
-        if user.status() == crate::modules::identity::domain::UserStatus::Incomplete {
-            profile
-                .mail
-                .clone()
-                .filter(|email| !email.trim().is_empty())
-        } else {
-            None
-        };
+    let suggested_email = if user.status() == UserStatus::Incomplete {
+        profile
+            .mail
+            .clone()
+            .filter(|email| !email.trim().is_empty())
+    } else {
+        None
+    };
 
     Ok(InstitutionalAuthResult {
         suggested_email,
