@@ -32,9 +32,12 @@ tratarem códigos desconhecidos com segurança. Alterar o significado de um
 código existente é uma mudança MAJOR.
 
 A versão do contrato deve ser atualizada em `info.version` no mesmo PR da
-mudança de protocolo. O OASDiff verifica automaticamente se uma alteração
-incompatível exige aumento da versão MAJOR. Uma alteração compatível não exige
-aumento MAJOR; a escolha entre MINOR e PATCH deve seguir a tabela acima.
+mudança de protocolo. O [OASDiff 1.38.0](https://github.com/oasdiff/oasdiff/releases/tag/v1.38.0)
+usa `MISSING-VERSION-BUMP` para bloquear
+alterações incompatíveis sem aumento MAJOR, inclusive versões iguais, menores
+ou inválidas. As incompatibilidades continuam visíveis no relatório quando o
+aumento MAJOR permite a mudança. Uma alteração compatível não exige aumento
+MAJOR; a escolha entre MINOR e PATCH deve seguir a tabela acima.
 
 Aumentar a versão MAJOR não torna uma remoção automaticamente compatível com
 clientes antigos. Se versões diferentes do aplicativo precisarem coexistir,
@@ -235,11 +238,27 @@ O workflow executa as seguintes verificações:
 5. Compara a especificação proposta com a versão exata do commit-base da
    pull request usando OASDiff, para identificar alterações incompatíveis.
 
-As configurações do OASDiff ficam neste pacote: `.oasdiff.yaml` define a política,
-`.oasdiff-levels.txt` define os níveis dos diagnósticos e `.oasdiff-err-ignore.txt`
-registra exceções aprovadas. O workflow seleciona a configuração por
+As configurações do OASDiff ficam neste pacote: `.oasdiff.yaml` define a política
+e `.oasdiff-err-ignore.txt` registra exceções aprovadas. O workflow seleciona a configuração por
 `OASDIFF_CONFIG=packages/api-contracts/.oasdiff.yaml`. Os caminhos dos arquivos
 auxiliares são relativos ao diretório da própria configuração.
+
+CI e validação local usam **OASDiff 1.38.0**. O workflow fixa a revisão da ação
+que contém essa versão, e `test_oasdiff_policy.py` executa a imagem oficial
+`tufin/oasdiff:v1.38.0` com a configuração real do pacote. Os testes verificam
+mudanças incompatíveis com versão igual, menor, inválida ou com aumento apenas
+MINOR, além da aceitação de aumento MAJOR e de contratos sem quebra.
+
+As regras `api-version-not-bumped`, `api-version-decreased` e
+`api-major-version-not-bumped` foram removidas no OASDiff 1.38.0; a política
+nativa substitui o antigo arquivo de níveis de severidade. Para executar os
+testes dessa política, com Docker disponível:
+
+```bash
+python -m unittest discover \
+  -s packages/api-contracts/scripts \
+  -p 'test_oasdiff_policy.py' -v
+```
 
 Para executar localmente a validação dos exemplos, instale as dependências
 em um ambiente virtual Python e execute:
@@ -272,6 +291,10 @@ Uma alteração incompatível intencional exige:
 - estratégia de migração e data de encerramento da compatibilidade anterior;
 - atualização da versão MAJOR do contrato;
 - aprovação explícita dos mantenedores responsáveis.
+
+O CI verifica o aumento de versão. A justificativa, o plano de migração e a
+aprovação continuam fazendo parte da revisão da PR; uma execução bem-sucedida
+da ferramenta não declara clientes antigos compatíveis com o novo contrato.
 
 A alternativa preferencial é introduzir o novo comportamento sem remover
 imediatamente o anterior e aplicar o processo de descontinuação.
