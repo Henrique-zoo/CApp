@@ -10,10 +10,19 @@
 
 use super::authentication::InstitutionalVerificationResult;
 use crate::modules::identity::{
-    application::{error::AuthenticationError, ports::*},
+    application::{
+        error::AuthenticationError,
+        ports::{
+            IdentityTokenVerifier, InstitutionRepository, InstitutionalAffiliation,
+            InstitutionalProfile, InstitutionalVerificationRepository, UserRepository,
+        },
+    },
     domain::{
         UserStatus,
-        entities::user::{ProfileCompletion, User},
+        entities::{
+            institutional_verification::InstitutionalVerification,
+            user::{ProfileCompletion, User},
+        },
     },
 };
 
@@ -152,7 +161,7 @@ pub async fn complete_profile(
 /// Complementos nunca mudam a evidência ou tornam um não estudante em estudante.
 fn validate_supplements(
     data: &ProfileCompletion,
-    evidence: &crate::modules::identity::domain::entities::institutional_verification::InstitutionalVerification,
+    evidence: &InstitutionalVerification,
 ) -> Result<(), AuthenticationError> {
     if data.name.is_some() && evidence.profile_name.is_some() {
         return Err(AuthenticationError::InvalidProfile);

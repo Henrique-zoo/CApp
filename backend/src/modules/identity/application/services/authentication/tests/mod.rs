@@ -17,9 +17,15 @@ use crate::modules::identity::{
             InstitutionalVerificationRepositoryError,
         },
         ports::{InstitutionalAffiliation, InstitutionalProfile, VerifiedIdentity},
+        services::accounts::restore,
     },
-    domain::entities::{
-        institution::Institution, institutional_verification::InstitutionalVerification,
+    domain::{
+        UserStatus,
+        entities::{
+            institution::Institution,
+            institutional_verification::InstitutionalVerification,
+            user::{ProfileCompletion, User},
+        },
     },
 };
 
@@ -139,10 +145,7 @@ async fn first_verification_persists_positive_evidence_with_all_identifiers() {
     let after = Utc::now();
 
     assert_eq!(result.user.id(), Uuid::nil());
-    assert_eq!(
-        result.user.status(),
-        crate::modules::identity::domain::UserStatus::Incomplete
-    );
+    assert_eq!(result.user.status(), UserStatus::Incomplete);
 
     assert_eq!(result.verification.profile.id, MICROSOFT_OBJECT_ID);
     assert!(matches!(
@@ -905,10 +908,6 @@ async fn request_authentication_rejects_malformed_linked_microsoft_id() {
 /// O mesmo cuidado vale sem migrations, por exemplo em outra implementação da porta.
 #[tokio::test]
 async fn restore_downgrades_legacy_student_evidence_without_course() {
-    use crate::modules::identity::{
-        application::services::accounts::restore, domain::entities::user::User,
-    };
-
     for course in [None, Some(String::new()), Some(" \t\n".into())] {
         let verifier = verifier_ok();
         let mut repo = repositories_institution();
@@ -937,8 +936,6 @@ async fn restore_downgrades_legacy_student_evidence_without_course() {
 /// O endereço do Graph só é sugerido no cadastro, sem alterar o e-mail já escolhido.
 #[tokio::test]
 async fn graph_email_is_transient_and_only_suggested_for_incomplete_accounts() {
-    use crate::modules::identity::domain::entities::user::{ProfileCompletion, User};
-
     for (complete, mail) in [
         (false, Some("graph@example.test")),
         (false, None),
