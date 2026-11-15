@@ -198,6 +198,17 @@ impl InstitutionalVerificationRepository for PgDatabase {
 /// O UPSERT preserva o ID e o perfil existente; nunca reativa conta desativada.
 #[async_trait::async_trait]
 impl UserRepository for PgDatabase {
+    /// Grava a fotografia validada do perfil usando ID e UID como condições.
+    ///
+    /// O serviço deve fornecer um [`User`] concluído. O UPDATE grava seus dados
+    /// internos e o estado ativo, mantém a primeira conclusão com `COALESCE` e
+    /// impede que `updated_at` retroceda. Identidade e criação não são alteradas.
+    /// A condição de estado recusa uma conta desativada depois da leitura do serviço.
+    ///
+    /// Retorna `true` para uma linha atualizada e `false` se ID/UID não correspondem
+    /// a uma conta não desativada. Falhas SQL, de restrição ou conexão são registradas
+    /// e convertidas em [`UserRepositoryError::InternalServer`]. Não autentica,
+    /// consulta o Graph ou altera a evidência institucional.
     async fn update_profile(&self, user: &User) -> Result<bool, UserRepositoryError> {
         sqlx::query(
             r#"
@@ -228,6 +239,17 @@ impl UserRepository for PgDatabase {
         })
     }
 
+    /// Obtém uma única conta por UID com INSERT/UPSERT atômico.
+    ///
+    /// `firebase_uid` deve ter sido autenticado pelo serviço. Uma conta nova recebe
+    /// UUID aleatório e os valores iniciais definidos na migration. No conflito,
+    /// somente `last_login_at` é atualizado pelo relógio PostgreSQL; ID, perfil e
+    /// estado são preservados, inclusive para contas inativas. A restrição única
+    /// evita duplicação quando primeiros acessos ocorrem concorrentemente.
+    ///
+    /// Retorna a linha persistida como [`User`]. Falhas SQL ou de mapeamento são
+    /// registradas e convertidas em [`UserRepositoryError::InternalServer`].
+    /// Não inicia uma sessão Firebase nem cria credenciais.
     async fn provision(&self, firebase_uid: &str) -> Result<User, UserRepositoryError> {
         sqlx::query_as(
             r#"
@@ -247,6 +269,13 @@ impl UserRepository for PgDatabase {
         })
     }
 
+    /// Lê a conta de um UID autenticado, incluindo seu estado atual.
+    ///
+    /// Retorna `None` se o provisionamento ainda não aconteceu. Não filtra contas
+    /// inativas, modifica último login ou consulta a confirmação institucional;
+    /// a aplicação decide o acesso a partir da fotografia retornada. Falhas de
+    /// consulta/mapeamento são registradas e convertidas em
+    /// [`UserRepositoryError::InternalServer`], preservando a distinção de ausência.
     async fn get_by_firebase_uid(
         &self,
         firebase_uid: &str,

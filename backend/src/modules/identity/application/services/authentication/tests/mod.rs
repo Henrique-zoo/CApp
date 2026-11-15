@@ -906,6 +906,11 @@ async fn request_authentication_rejects_malformed_linked_microsoft_id() {
 
 /// Evidências legadas com grupo positivo e curso ausente não restauram direitos.
 /// O mesmo cuidado vale sem migrations, por exemplo em outra implementação da porta.
+///
+/// Reconstitui registros com curso nulo, vazio e em branco por mocks de
+/// repositório. Espera restauração bem-sucedida com perfil não estudantil,
+/// sem transformar essa inconsistência em falha de autenticação ou consultar
+/// provedores. Exercita a defesa no caso de uso, independente da restrição SQL.
 #[tokio::test]
 async fn restore_downgrades_legacy_student_evidence_without_course() {
     for course in [None, Some(String::new()), Some(" \t\n".into())] {
@@ -934,6 +939,12 @@ async fn restore_downgrades_legacy_student_evidence_without_course() {
 }
 
 /// O endereço do Graph só é sugerido no cadastro, sem alterar o e-mail já escolhido.
+///
+/// Confere os resultados para perfil incompleto com endereço presente, ausente
+/// ou em branco e para perfil ativo com outro endereço interno. A verificação
+/// continua sendo persistida, mas somente o cadastro com texto não vazio recebe
+/// sugestão; o perfil ativo preserva o e-mail escolhido. Usa portas controladas,
+/// sem depender de Firebase, Graph ou PostgreSQL reais.
 #[tokio::test]
 async fn graph_email_is_transient_and_only_suggested_for_incomplete_accounts() {
     for (complete, mail) in [

@@ -3,12 +3,24 @@
 //! O UID é estável entre os provedores vinculados no Firebase. A conta nasce
 //! incompleta; dados institucionais e credenciais têm ciclos de vida separados.
 //! Senhas e tokens pertencem ao Firebase e nunca são campos desta entidade.
+//!
+//! O provisionamento estabelece a identidade interna antes de concluir os dados
+//! do perfil. [`User::complete_profile`] centraliza as invariantes da conclusão
+//! e a transição para [`UserStatus::Active`]. A aplicação confere a credencial,
+//! a validade institucional e a admissibilidade do nome declarado antes de chamar
+//! esse método; a entidade não conhece provedores ou contratos HTTP.
+//! A reconstituição PostgreSQL usa o mapeamento `sqlx::FromRow` adotado no projeto,
+//! e as restrições do banco complementam os caminhos de alteração da entidade.
 
 use crate::modules::identity::domain::UserStatus;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 /// Fotografia persistida da conta interna. Não é um contrato HTTP.
+///
+/// Os campos privados expõem leitura por métodos e alteração pelo caminho de
+/// conclusão validado. O curso pertence à evidência institucional; o e-mail aqui
+/// é o escolhido para a credencial interna, nunca um segundo contato do Graph.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct User {
     id: Uuid,
@@ -26,6 +38,10 @@ pub struct User {
 }
 
 /// Dados exigidos para concluir o perfil; o semestre de ingresso usa AAAA.1/AAAA.2.
+///
+/// Este agrupamento transporta valores até [`User::complete_profile`]; criá-lo,
+/// inclusive com `Default`, não comprova validade. A origem da identidade e do
+/// e-mail é conferida na aplicação, não recebida como parte deste formulário.
 #[derive(Debug, Clone, Default)]
 pub struct ProfileCompletion {
     /// Nome declarado quando o Graph não o informou; não constitui evidência.
@@ -108,7 +124,56 @@ impl User {
     }
 
     /// Conclui ou atualiza o perfil sem permitir reativação de uma conta inativa.
-    /// A credencial e o e-mail devem ter sido conferidos pela aplicação no Firebase.
+    ///
+    /// # Parâmetros e pré-condições
+    ///
+    /// - `data`: valores do formulário. Apelido e nome declarado são aparados;
+    ///   o ingresso deve ter exatamente o formato `AAAA.1` ou `AAAA.2`.
+    /// - `email`: endereço não vazio da credencial interna, já conferido no JWT
+    ///   Firebase pela aplicação. Não é aparado nem validado como endereço aqui.
+    /// - `now`: instante atribuído à alteração; não é obtido de um relógio global.
+    ///
+    /// A aplicação deve confirmar a autenticação por senha, a evidência
+    /// institucional e que um nome declarado pode completar uma ausência do Graph.
+    /// Este método verifica a estrutura do perfil, não essas condições externas.
+    ///
+    /// # Retorno e alteração de estado
+    ///
+    /// Em `Ok(())`, substitui os dados internos do perfil, normaliza nome opcional,
+    /// muda o estado para [`UserStatus::Active`] e atualiza `updated_at`. A primeira
+    /// data de conclusão é preservada nas chamadas posteriores. ID, UID, criação
+    /// e último login não mudam. A alteração ocorre somente em memória; o chamador
+    /// precisa persistir a entidade pelo repositório.
+    ///
+    /// # Erros
+    ///
+    /// Retorna [`InvalidProfile`] para conta inativa, apelido vazio após `trim`,
+    /// período menor que um, e-mail vazio ou ingresso fora do formato exigido.
+    /// Toda a validação precede as atribuições, deixando o objeto intacto em erro.
+    /// O formato de ingresso não comprova matrícula, plausibilidade do ano ou
+    /// correspondência entre tempo de ingresso e período atual do curso.
+    ///
+    /// # Exemplos
+    ///
+    /// ```
+    /// use backend::modules::identity::domain::{
+    ///     UserStatus, entities::user::{InvalidProfile, ProfileCompletion, User},
+    /// };
+    /// use chrono::Utc;
+    /// use uuid::Uuid;
+    ///
+    /// # fn main() -> Result<(), InvalidProfile> {
+    /// let now = Utc::now();
+    /// let mut user = User::provisioned(Uuid::new_v4(), "firebase-uid-exemplo".into(), now);
+    /// user.complete_profile(ProfileCompletion {
+    ///     nickname: " Pessoa ".into(), current_semester: 4,
+    ///     institution_entry_semester: "2024.1".into(), name: None,
+    /// }, "pessoa@example.test", now)?;
+    /// assert_eq!(user.nickname(), Some("Pessoa"));
+    /// assert_eq!(user.status(), UserStatus::Active);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn complete_profile(
         &mut self,
         data: ProfileCompletion,
@@ -143,6 +208,14 @@ impl User {
     }
 
     /// Cria a representação incompleta usada pelo provisionamento e pelos testes.
+    ///
+    /// `id` é a identidade interna escolhida pelo chamador; `firebase_uid` deve
+    /// identificar uma conta já autenticada. `now` inicializa criação, atualização
+    /// e último login. Os dados de perfil e a data de conclusão começam ausentes.
+    ///
+    /// Não consulta o Firebase, valida o UID ou grava no banco. O adaptador
+    /// PostgreSQL atual obtém a entidade pelo UPSERT e pelo mapeamento SQLx;
+    /// este construtor também permite implementar outras portas e preparar fixtures.
     pub fn provisioned(id: Uuid, firebase_uid: String, now: DateTime<Utc>) -> Self {
         Self {
             id,
@@ -161,6 +234,11 @@ impl User {
     }
 }
 
+/// Normaliza um complemento opcional antes de armazená-lo no perfil interno.
+///
+/// Preserva `None`, apara o texto presente e converte vazio/em branco em `None`.
+/// Não infere conteúdo nem decide se o complemento é permitido para a evidência;
+/// essa checagem de origem pertence ao caso de uso anterior à alteração da conta.
 fn optional_text(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_owned())

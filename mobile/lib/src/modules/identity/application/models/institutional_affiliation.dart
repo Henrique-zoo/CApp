@@ -41,6 +41,12 @@ final class StudentAffiliation extends InstitutionalAffiliation {
   ///
   /// Rejeita curso vazio ou em branco com [FormatException]. O texto válido é
   /// preservado sem normalização; a autorização das operações cabe ao servidor.
+  ///
+  /// [courseName] deve vir do vínculo confirmado pelo backend, não de um campo
+  /// editável. A construção apenas conserva esse resultado e valida seu conteúdo;
+  /// não consulta grupo estudantil, revalida evidência ou associa o texto a um CA.
+  /// Na leitura de caches antigos, o codec converte curso nulo/em branco para
+  /// acesso não estudantil antes de tentar construir esta variante.
   StudentAffiliation({required this.courseName}) {
     if (courseName.trim().isEmpty) {
       throw const FormatException(
