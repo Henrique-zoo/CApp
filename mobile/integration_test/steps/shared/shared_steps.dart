@@ -78,4 +78,6 @@ final sharedSteps = <StepDefinition>[
     r'^"([^"]*)" permanece com a permissão de "([^"]*)" em "([^"]*)"$',
   ),
   pendingStep(r'^"([^"]*)" permanece no cargo "([^"]*)" em "([^"]*)"$'),
+
+  pendingStep(r'^nenhum vencedor ou posse é produzido$'),
 ];

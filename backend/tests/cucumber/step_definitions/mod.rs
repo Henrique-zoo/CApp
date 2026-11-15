@@ -21,6 +21,7 @@ mod criacao_centro_academico;
 mod criacao_demandas;
 mod criacao_edicao_eventos;
 mod demandas_espaco_fisico;
+mod eleicoes;
 mod exclusao_de_cargos;
 mod integrantes_da_gestao;
 mod organizacao_materiais;
