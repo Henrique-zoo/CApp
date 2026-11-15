@@ -73,6 +73,10 @@ pub struct InstitutionalAuthResult {
 
     /// Evidência persistida nesta operação, sempre presente em caso de sucesso.
     pub verification: InstitutionalVerificationResult,
+
+    /// Sugestão transitória do Graph, somente enquanto a conta estiver incompleta.
+    /// Não integra a evidência persistida nem substitui o e-mail escolhido no Firebase.
+    pub suggested_email: Option<String>,
 }
 
 /// Verifica identidade e elegibilidade, persiste a evidência e devolve a conta com sua verificação.
@@ -90,7 +94,8 @@ pub struct InstitutionalAuthResult {
 /// Primeiro valida Firebase e interpreta o objeto Microsoft vinculado. Consulta
 /// tenant, instituição e grupo, obtém o perfil com o vínculo correspondente e
 /// confronta seu ID com o vínculo Firebase antes de persistir a evidência.
-/// Nome, e-mail e curso ausentes não impedem a verificação;
+/// Nome e e-mail ausentes não impedem a verificação. Curso ausente ou em branco
+/// produz acesso limitado, mesmo com participação confirmada no grupo estudantil;
 /// `institution.status` não é usado como regra de acesso.
 ///
 /// O prazo de 120 dias começa antes das consultas ao diretório. Somente respostas
@@ -171,7 +176,13 @@ pub async fn verify_institutional_identity(
         .is_student_member(microsoft_token, institution.microsoft_student_group_id)
         .await?;
 
-    let profile = directory.get_profile(microsoft_token, is_student).await?;
+    let mut profile = directory.get_profile(microsoft_token, is_student).await?;
+    let course_name = match profile.affiliation {
+        InstitutionalAffiliation::Student { course_name } => Some(course_name),
+        InstitutionalAffiliation::NonStudent => None,
+    };
+
+    profile.affiliation = InstitutionalAffiliation::from_directory(is_student, course_name);
     let actual_id =
         Uuid::parse_str(&profile.id).map_err(|_| AuthenticationError::ProviderUnavailable)?;
 
@@ -188,16 +199,18 @@ pub async fn verify_institutional_identity(
     let verification = InstitutionalVerification {
         user_id: user.id(),
         profile_name: profile.name.clone(),
-        profile_email: profile.mail.clone(),
         course_name: match &profile.affiliation {
-            InstitutionalAffiliation::Student { course_name } => course_name.clone(),
+            InstitutionalAffiliation::Student { course_name } => Some(course_name.clone()),
             InstitutionalAffiliation::NonStudent => None,
         },
         microsoft_object_id: actual_id,
         institution_id: institution.id,
         microsoft_tenant_id: tenant_id,
         microsoft_student_group_id: institution.microsoft_student_group_id,
-        student_membership_confirmed: is_student,
+        student_membership_confirmed: matches!(
+            profile.affiliation,
+            InstitutionalAffiliation::Student { .. }
+        ),
         checked_at,
         expires_at: checked_at + Duration::days(VERIFICATION_TTL_DAYS),
     };
@@ -210,7 +223,18 @@ pub async fn verify_institutional_identity(
         return Err(AuthenticationError::InstitutionalVerificationRequired);
     }
 
+    let suggested_email =
+        if user.status() == crate::modules::identity::domain::UserStatus::Incomplete {
+            profile
+                .mail
+                .clone()
+                .filter(|email| !email.trim().is_empty())
+        } else {
+            None
+        };
+
     Ok(InstitutionalAuthResult {
+        suggested_email,
         user,
         verification: InstitutionalVerificationResult {
             profile,

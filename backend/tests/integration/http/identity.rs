@@ -82,6 +82,28 @@ async fn request(
 
 /// Configura a sequência Graph para um usuário e exige token e grupo corretos.
 async fn graph_mocks(graph: &MockServer, tenant: Uuid, group: Uuid, object: Uuid, student: bool) {
+    graph_mocks_with_course(
+        graph,
+        tenant,
+        group,
+        object,
+        student,
+        Some(json!("Curso")),
+        "graph@example.test",
+    )
+    .await;
+}
+
+/// Permite distinguir curso ausente de nulo e de texto vazio no Graph real simulado.
+async fn graph_mocks_with_course(
+    graph: &MockServer,
+    tenant: Uuid,
+    group: Uuid,
+    object: Uuid,
+    student: bool,
+    course: Option<Value>,
+    mail: &str,
+) {
     Mock::given(method("GET"))
         .and(path("/v1.0/organization"))
         .and(header("authorization", "Bearer graph-token"))
@@ -102,8 +124,19 @@ async fn graph_mocks(graph: &MockServer, tenant: Uuid, group: Uuid, object: Uuid
         .mount(graph)
         .await;
 
-    Mock::given(method("GET")).and(path("/v1.0/me")).and(header("authorization","Bearer graph-token"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id":object,"displayName":"Pessoa","jobTitle":if student {"Curso"} else {"Professor"}}))).expect(1).mount(graph).await;
+    let mut body = json!({"id": object, "displayName": "Pessoa", "mail": mail});
+
+    if let Some(course) = course {
+        body["jobTitle"] = course;
+    }
+
+    Mock::given(method("GET"))
+        .and(path("/v1.0/me"))
+        .and(header("authorization", "Bearer graph-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .expect(1)
+        .mount(graph)
+        .await;
 }
 
 /// Exercita verificação, persistência, reutilização e rejeições através do router real.
@@ -151,7 +184,19 @@ async fn institutional_http_flows_with_real_database() {
     sqlx::query("INSERT INTO institution (id,name,microsoft_tenant_id,microsoft_student_group_id) VALUES ($1,'Instituição HTTP',$2,$3)")
         .bind(institution).bind(tenant).bind(group).execute(&pool).await.unwrap();
 
-    for student in [true, false] {
+    for (group_member, course) in [
+        (true, Some(json!("Curso"))),
+        (false, Some(json!("Professor"))),
+        (true, None),
+        (true, Some(Value::Null)),
+        (true, Some(json!(""))),
+        (true, Some(json!(" \t\n"))),
+    ] {
+        let student = group_member
+            && course
+                .as_ref()
+                .and_then(Value::as_str)
+                .is_some_and(|course| !course.trim().is_empty());
         let uid = Uuid::new_v4().to_string();
         let jwt = token(&uid, object);
         let (status, body) = request(&app, "/protected", &jwt, None).await;
@@ -165,7 +210,16 @@ async fn institutional_http_flows_with_real_database() {
         assert_eq!(body["error"]["code"], "account_not_provisioned");
         assert!(graph.received_requests().await.unwrap().is_empty());
 
-        graph_mocks(&graph, tenant, group, object, student).await;
+        graph_mocks_with_course(
+            &graph,
+            tenant,
+            group,
+            object,
+            group_member,
+            course.clone(),
+            "graph@example.test",
+        )
+        .await;
 
         let (status, body) = request(
             &app,
@@ -180,6 +234,9 @@ async fn institutional_http_flows_with_real_database() {
         let provisioned_user_id = Uuid::parse_str(body["user"]["id"].as_str().unwrap()).unwrap();
 
         assert_eq!(body["user"]["status"], "incomplete");
+        assert_eq!(body["suggestedEmail"], "graph@example.test");
+        assert!(body["verification"]["profile"].get("email").is_none());
+        assert!(body["user"].get("institutionalEmail").is_none());
         assert!(body["user"]["nickname"].is_null());
         assert_eq!(
             body["verification"]["profile"]["affiliation"]["type"],
@@ -217,10 +274,56 @@ async fn institutional_http_flows_with_real_database() {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(session["user"]["id"], provisioned_user_id.to_string());
         assert_eq!(session["user"]["status"], "incomplete");
+        assert!(session.get("suggestedEmail").is_none());
+        assert!(session["verification"]["profile"].get("email").is_none());
         assert_eq!(
             session["verification"]["profile"]["microsoftObjectId"],
             object.to_string()
         );
+
+        assert_eq!(
+            session["verification"]["profile"]["affiliation"]["type"],
+            if student { "student" } else { "nonStudent" }
+        );
+
+        if student {
+            // Uma sincronização sem curso revoga a confirmação anterior, mantendo a conta.
+            graph_mocks_with_course(
+                &graph,
+                tenant,
+                group,
+                object,
+                true,
+                Some(Value::Null),
+                "graph@example.test",
+            )
+            .await;
+
+            let (status, limited) = request(
+                &app,
+                "/auth/institutional/verify",
+                &jwt,
+                Some(json!({"microsoftAccessToken": "graph-token"})),
+            )
+            .await;
+
+            assert_eq!(status, StatusCode::OK, "{limited}");
+            assert_eq!(limited["user"]["id"], session["user"]["id"]);
+            assert_eq!(
+                limited["verification"]["profile"]["affiliation"]["type"],
+                "nonStudent"
+            );
+
+            graph.verify().await;
+            graph.reset().await;
+
+            let (_, restored) = request(&app, "/auth/session", &jwt, None).await;
+
+            assert_eq!(
+                restored["verification"]["profile"]["affiliation"]["type"],
+                "nonStudent"
+            );
+        }
 
         let profile =
             json!({"nickname":" Apelido ","currentSemester":4,"institutionEntrySemester":"2023.2"});
@@ -271,6 +374,33 @@ async fn institutional_http_flows_with_real_database() {
         assert_eq!(completed["currentSemester"], 4);
         assert_eq!(completed["institutionEntrySemester"], "2023.2");
         assert_eq!(completed["id"], session["user"]["id"]);
+
+        graph_mocks_with_course(
+            &graph,
+            tenant,
+            group,
+            object,
+            group_member,
+            course,
+            "novo-graph@example.test",
+        )
+        .await;
+        let (status, refreshed) = request(
+            &app,
+            "/auth/institutional/verify",
+            &jwt,
+            Some(json!({"microsoftAccessToken": "graph-token"})),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{refreshed}");
+        assert!(refreshed.get("suggestedEmail").is_none());
+        assert_eq!(refreshed["user"]["email"], "escolhido@example.test");
+        assert!(refreshed["verification"]["profile"].get("email").is_none());
+
+        graph.verify().await;
+        graph.reset().await;
+
         // O backend também protege os dados do Graph, mesmo sem a interface.
 
         for (key, value) in [("name", "Outro nome"), ("courseName", "Outro curso")] {
@@ -286,32 +416,38 @@ async fn institutional_http_flows_with_real_database() {
             );
         }
 
-        sqlx::query("UPDATE institutional_verification SET profile_email='graph@example.test' WHERE user_id=(SELECT id FROM app_user WHERE firebase_uid=$1)")
-            .bind(&uid).execute(&pool).await.unwrap();
+        // Nem um endereço declarado nem null são aceitos no perfil institucional.
+        for email in [json!("outro@example.test"), Value::Null] {
+            let mut overwrite = profile.clone();
+            overwrite["institutionalEmail"] = email;
 
-        let mut overwrite = profile.clone();
-
-        overwrite["institutionalEmail"] = json!("outro@example.test");
-
-        assert_eq!(
-            request(&app, "/users/me/profile", &password_token, Some(overwrite))
-                .await
-                .0,
-            StatusCode::BAD_REQUEST
-        );
+            assert_eq!(
+                request(&app, "/users/me/profile", &password_token, Some(overwrite))
+                    .await
+                    .0,
+                StatusCode::BAD_REQUEST
+            );
+        }
 
         // Complementos são persistidos em app_user; a evidência continua nula.
 
-        sqlx::query("UPDATE institutional_verification SET profile_name=NULL,profile_email=NULL,course_name=NULL WHERE user_id=(SELECT id FROM app_user WHERE firebase_uid=$1)")
+        sqlx::query("UPDATE institutional_verification SET profile_name=NULL,course_name=NULL,student_membership_confirmed=FALSE WHERE user_id=(SELECT id FROM app_user WHERE firebase_uid=$1)")
             .bind(&uid).execute(&pool).await.unwrap();
 
         let mut supplement = profile.clone();
 
         supplement["name"] = json!(" Nome declarado ");
-        supplement["institutionalEmail"] = json!("declarado@example.test");
 
-        if student {
-            supplement["courseName"] = json!("Curso declarado");
+        for course in [json!("Curso declarado"), Value::Null] {
+            let mut declared = supplement.clone();
+            declared["courseName"] = course;
+
+            assert_eq!(
+                request(&app, "/users/me/profile", &password_token, Some(declared))
+                    .await
+                    .0,
+                StatusCode::BAD_REQUEST
+            );
         }
 
         let (status, supplemented) =
@@ -319,22 +455,25 @@ async fn institutional_http_flows_with_real_database() {
 
         assert_eq!(status, StatusCode::OK, "{supplemented}");
         assert_eq!(supplemented["name"], "Nome declarado");
-        assert_eq!(supplemented["institutionalEmail"], "declarado@example.test");
 
         let (_, restored) = request(&app, "/auth/session", &password_token, None).await;
 
         assert_eq!(restored["user"]["name"], "Nome declarado");
-        assert_eq!(
-            restored["user"]["institutionalEmail"],
-            "declarado@example.test"
-        );
+        assert!(restored["user"].get("institutionalEmail").is_none());
         assert!(restored["verification"]["profile"]["name"].is_null());
-        assert!(restored["verification"]["profile"]["email"].is_null());
+        assert!(restored["verification"]["profile"].get("email").is_none());
+        assert!(restored.get("suggestedEmail").is_none());
 
-        if student {
-            assert_eq!(restored["user"]["courseName"], "Curso declarado");
-            assert!(restored["verification"]["profile"]["affiliation"]["courseName"].is_null());
-        }
+        assert!(restored["user"].get("courseName").is_none());
+        assert_eq!(
+            restored["verification"]["profile"]["affiliation"]["type"],
+            "nonStudent"
+        );
+        assert!(
+            restored["verification"]["profile"]["affiliation"]
+                .get("courseName")
+                .is_none()
+        );
 
         assert_eq!(
             request(&app, "/auth/session", &password_token, None)

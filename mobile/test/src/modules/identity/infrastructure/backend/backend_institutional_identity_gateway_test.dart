@@ -104,7 +104,7 @@ void main() {
       '00000000-0000-0000-0000-000000000001',
       'Pessoa Exemplo',
       'pessoa@instituicao.example',
-      const StudentAffiliation(courseName: 'Engenharia de Software'),
+      StudentAffiliation(courseName: 'Engenharia de Software'),
       'IEX',
     ),
     (
@@ -112,7 +112,7 @@ void main() {
       '00000000-0000-0000-0000-000000000002',
       null,
       null,
-      const StudentAffiliation(courseName: null),
+      StudentAffiliation(courseName: 'Engenharia de Software'),
       null,
     ),
   ]) {
@@ -142,7 +142,7 @@ void main() {
       expect(result.user.status, InternalUserStatus.incomplete);
       expect(proof.profile.microsoftObjectId, UuidValue.raw(scenario.$2));
       expect(proof.profile.name, scenario.$3);
-      expect(proof.profile.email, scenario.$4);
+      expect(result.suggestedEmail, scenario.$4);
       expect(proof.profile.affiliation, scenario.$5);
       expect(
         proof.institution,
@@ -168,7 +168,7 @@ void main() {
 
     expect(
       result.verification!.profile.affiliation,
-      const StudentAffiliation(courseName: null),
+      StudentAffiliation(courseName: 'Engenharia de Software'),
     );
     expect(result.verification!.institution.name, 'Instituição Exemplo');
     expect(result.verification!.institution.acronym, isNull);

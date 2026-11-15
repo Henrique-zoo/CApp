@@ -22,20 +22,19 @@ const testProfileCompletion = ProfileCompletion(
 class AccountIdentityHarness {
   AccountIdentityHarness({
     String? uid = 'a',
-    String? institutionalEmail,
+    String? suggestedEmail,
     String? institutionalName = 'Pessoa Exemplo',
     bool student = false,
-    String? courseName,
+    String? courseName = 'Engenharia de Software',
   }) : auth = FakeAuthSession(uid) {
     accounts = FakeAccountAuthentication(auth);
     proof = testVerification(
       expiresAt: accountTestNow.add(const Duration(days: 120)),
-      email: institutionalEmail,
       name: institutionalName,
       student: student,
       courseName: courseName,
     );
-    identity = FakeIdentityGateway(proof);
+    identity = FakeIdentityGateway(proof)..suggestedEmail = suggestedEmail;
     gateway = FakeAccountGateway(testInternalUser(), proof);
     identity.userProvider = () => gateway.user;
     identity.resolveUid = () => auth.currentUserId;

@@ -31,17 +31,15 @@ InstitutionalVerification testVerification({
   DateTime? expiresAt,
   bool student = false,
   String? institutionAcronym = 'IEX',
-  String? email,
   String? name = 'Pessoa Exemplo',
-  String? courseName,
+  String? courseName = 'Engenharia de Software',
 }) => InstitutionalVerification(
   profile: InstitutionalProfile(
     microsoftObjectId: const UuidValue.raw(
       '00000000-0000-0000-0000-000000000001',
     ),
     name: name,
-    email: email,
-    affiliation: student
+    affiliation: student && courseName != null && courseName.trim().isNotEmpty
         ? StudentAffiliation(courseName: courseName)
         : const NonStudentAffiliation(),
   ),
@@ -199,6 +197,9 @@ final class FakeIdentityGateway implements InstitutionalIdentityGateway {
 
   InternalUser Function()? userProvider;
 
+  /// Sugestão somente da verificação; restauração e caches nunca a fornecem.
+  String? suggestedEmail;
+
   /// Registra a chamada e entrega o resultado controlado.
   @override
   Future<AccountSession> verify({required String microsoftAccessToken}) async {
@@ -211,9 +212,14 @@ final class FakeIdentityGateway implements InstitutionalIdentityGateway {
 
     if (owner != null) verifiedByUid[owner] = result;
 
+    final user = userProvider?.call() ?? testInternalUser();
+
     return AccountSession(
-      user: userProvider?.call() ?? testInternalUser(),
+      user: user,
       verification: result,
+      suggestedEmail: user.status == InternalUserStatus.incomplete
+          ? suggestedEmail
+          : null,
     );
   }
 }
@@ -479,8 +485,6 @@ class FakeAccountGateway implements AccountGateway {
             currentSemester: profile.currentSemester,
             institutionEntrySemester: profile.institutionEntrySemester,
             name: profile.name,
-            institutionalEmail: profile.institutionalEmail,
-            courseName: profile.courseName,
           );
   }
 }

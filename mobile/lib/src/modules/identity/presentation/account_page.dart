@@ -5,8 +5,8 @@
 /// o destino inicial do aplicativo nem monta a navegação entre módulos; a camada
 /// app apresenta esta página somente ao selecionar a aba Conta.
 ///
-/// Os valores do Graph têm precedência sobre complementos. O aviso de vínculo
-/// não estudantil continua informativo e não é convertido em recusa de acesso.
+/// Os valores do Graph têm precedência sobre complementos de nome.
+/// A composição mantém o aviso de acesso limitado visível em todas as abas.
 /// A página não permite edição, consulta SDKs ou guarda credenciais.
 /// Os dados aparecem diretamente como rótulos e valores, sem caixas de entrada
 /// ou decoração de formulário.
@@ -116,23 +116,11 @@ class _AccountPageState extends State<AccountPage> {
                   declared: profile.name == null && user?.name != null,
                 ),
                 _detail(
-                  'E-mail institucional',
-                  profile.email ?? user?.institutionalEmail,
-                  declared:
-                      profile.email == null && user?.institutionalEmail != null,
-                ),
-                _detail(
                   'Instituição',
                   '${institution.name}${institution.acronym == null ? '' : ' (${institution.acronym})'}',
                 ),
                 if (affiliation is StudentAffiliation)
-                  _detail(
-                    'Curso',
-                    affiliation.courseName ?? user?.courseName,
-                    declared:
-                        affiliation.courseName == null &&
-                        user?.courseName != null,
-                  ),
+                  _detail('Curso', affiliation.courseName),
                 _detail(
                   'Período atual do curso',
                   user?.currentSemester?.toString(),
@@ -141,16 +129,6 @@ class _AccountPageState extends State<AccountPage> {
                   'Semestre de ingresso na instituição',
                   user?.institutionEntrySemester,
                 ),
-                if (affiliation is NonStudentAffiliation) ...[
-                  const SizedBox(height: 16),
-                  WarningBox(
-                    message:
-                        'Você não foi reconhecido como estudante da '
-                        '${institution.acronym ?? institution.name}. '
-                        'Isso significa que você não terá acesso '
-                        'a diversas funcionalidades exclusivas de estudantes.',
-                  ),
-                ],
                 const SizedBox(height: 24),
                 FilledButton.icon(
                   style: FilledButton.styleFrom(

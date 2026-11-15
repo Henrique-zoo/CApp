@@ -329,9 +329,18 @@ UID Firebase, e o backend ativa a conta após validar o perfil e a autenticaçã
 com senha. A verificação institucional devolve usuário e evidência juntos,
 dispensando outra consulta de restauração após a verificação.
 
-Dados não nulos do Microsoft Graph são preservados. Ausências podem receber
-complementos declarados pelo usuário, armazenados no perfil CApp sem substituir
-a evidência institucional.
+Nome e curso confirmados pelo Microsoft Graph são preservados. Um nome ausente
+pode receber um complemento declarado, sem alterar a evidência institucional.
+O e-mail do Graph apenas sugere o endereço editável da segunda etapa do cadastro:
+a sugestão vive em memória, não integra o perfil nem a verificação, e é descartada
+na conclusão, saída ou troca de conta. A restauração não recupera essa sugestão.
+Somente o e-mail escolhido para a credencial interna é persistido; a aba Conta
+apresenta esse endereço e as sincronizações institucionais o preservam.
+O curso vem exclusivamente da instituição e não aceita preenchimento manual.
+Quando o grupo estudantil ou o curso não é confirmado, a conta continua com acesso
+limitado, sem direitos de estudante em nenhum CA. Um aviso explícito permanece
+visível no cadastro e nas abas da área principal. Caches antigos com curso nulo
+ou em branco são restaurados com acesso limitado.
 
 A entrada permite selecionar uma conta salva, autenticar com e-mail/senha ou
 iniciar o acesso Microsoft. Cada conta salva usa um FirebaseApp nomeado do mesmo

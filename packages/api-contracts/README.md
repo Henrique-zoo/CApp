@@ -49,7 +49,7 @@ contrato contra a qual foi desenvolvida e testada.
 
 | Versão do contrato | Versão Flutter (`pubspec.yaml`) | Situação |
 | --- | --- | --- |
-| 3.0.0 | 1.0.0+1 | Contrato atual com App Check e conta interna; publicação em produção não registrada. |
+| 4.0.0 | 1.0.0+1 | Contrato atual com curso institucional validado e sugestão transitória de e-mail; publicação em produção não registrada. |
 
 A tabela deve ser atualizada ao preparar uma nova versão do aplicativo ou
 do contrato. Versões não registradas não recebem garantia de compatibilidade
@@ -115,9 +115,9 @@ Os exemplos atuais cobrem:
 | Arquivo | Comportamento representado |
 | --- | --- |
 | `institutional-auth-request.json` | Corpo da requisição de verificação institucional. |
-| `institutional-verification-student.json` | Estudante com nome, e-mail e curso informados. |
-| `institutional-verification-student-null-fields.json` | Estudante com nome, e-mail e curso nulos. |
-| `institutional-verification-non-student.json` | Pessoa sem participação no grupo estudantil. |
+| `institutional-verification-student.json` | Estudante com nome e curso informados e sugestão transitória de e-mail. |
+| `institutional-verification-student-null-fields.json` | Estudante com curso informado, nome nulo e sem sugestão de e-mail. |
+| `institutional-verification-non-student.json` | Pessoa sem confirmação estudantil; mesmo formato usado quando falta curso. |
 | `api-error-unknown-institution.json` | Erro público para instituição não cadastrada. |
 
 As três respostas de verificação contêm o envelope atual: `user` com a conta
@@ -139,11 +139,20 @@ são regras distintas do contrato:
   O backend não aplica `trim` antes de consultar o provedor.
 - `user` e `verification` são obrigatórios na resposta da verificação.
   Na restauração, `verification` pode ser nulo quando é necessário sincronizar.
-- `verification.profile.name` e `verification.profile.email` devem estar presentes, mas
-  aceitam string ou `null`.
+- `verification.profile.name` deve estar presente e aceita string ou `null`.
+- `suggestedEmail` é opcional e exclusivo da resposta de verificação para contas
+  `incomplete`, quando o Graph informa um endereço. Não integra o perfil institucional,
+  a resposta de restauração ou os caches. Contas ativas preservam o e-mail escolhido
+  para a credencial Firebase e não recebem novamente a sugestão.
+- O perfil interno não recebe `institutionalEmail`; o único e-mail persistido é o
+  endereço escolhido e confirmado pelo Firebase.
 - Quando `affiliation.type` é `student`, `courseName` deve estar presente,
-  mas aceita string ou `null`.
+  com uma string não vazia fornecida pelo Graph.
 - Quando `affiliation.type` é `nonStudent`, `courseName` não é retornado.
+  Essa variante também é usada quando o grupo estudantil é confirmado, mas o
+  Graph não informa um curso não vazio. O usuário entra com acesso limitado,
+  sem direitos de estudante em nenhum CA e com aviso explícito no aplicativo.
+  O perfil interno e seu formulário não aceitam um curso declarado.
 - `verification.institution.acronym` deve estar presente, podendo ser nulo.
 - `verification.expiresAt` é obrigatório e representa a expiração da evidência
   institucional em data e hora RFC 3339. A validade é de 120 dias e sua

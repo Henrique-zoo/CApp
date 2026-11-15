@@ -30,7 +30,8 @@ pub struct InstitutionalProfile {
     /// Nome informado pela instituição.
     pub name: Option<String>,
 
-    /// Endereço de e-mail informado pelo diretório.
+    /// Endereço do diretório usado apenas como sugestão transitória no cadastro.
+    /// Não é persistido nem comprova identidade ou vínculo estudantil.
     pub mail: Option<String>,
 
     /// Vínculo estudantil e, quando aplicável, curso informado pelo diretório.
@@ -40,14 +41,31 @@ pub struct InstitutionalProfile {
 /// Vínculo identificado durante a verificação institucional.
 #[derive(Debug, Clone)]
 pub enum InstitutionalAffiliation {
-    /// Participação confirmada no grupo institucional de estudantes.
+    /// Participação no grupo estudantil e curso não vazio confirmados pelo diretório.
     Student {
         /// Curso informado pelo diretório, ainda sem associação ao catálogo do CApp.
-        course_name: Option<String>,
+        course_name: String,
     },
 
-    /// Participação não confirmada no grupo institucional de estudantes.
+    /// Grupo estudantil ou curso não confirmado; permite somente acesso limitado.
     NonStudent,
+}
+
+impl InstitutionalAffiliation {
+    /// Interpreta a evidência externa sem permitir que um curso ausente conceda direitos.
+    ///
+    /// Nome, e-mail e outros atributos opcionais não participam desta decisão.
+    /// Um cargo só é interpretado como curso quando o grupo estudantil foi confirmado.
+    /// O texto externo válido é preservado; valores ausentes, vazios ou compostos
+    /// apenas por espaços produzem o mesmo acesso limitado de um não estudante.
+    pub fn from_directory(is_student_member: bool, course_name: Option<String>) -> Self {
+        match course_name {
+            Some(course_name) if is_student_member && !course_name.trim().is_empty() => {
+                Self::Student { course_name }
+            }
+            _ => Self::NonStudent,
+        }
+    }
 }
 
 /// Consultas necessárias à verificação institucional.
@@ -75,7 +93,8 @@ pub trait InstitutionalDirectory: Send + Sync {
     /// # Retorno
     ///
     /// Identificador externo e atributos disponíveis. Ausência de nome, e-mail ou curso
-    /// não constitui falha de autenticação. A correspondência com o Firebase cabe ao
+    /// não constitui falha de autenticação. Sem curso, o vínculo é `NonStudent`,
+    /// mesmo com grupo confirmado. A correspondência com o Firebase cabe ao
     /// serviço chamador, não ao diretório.
     ///
     /// # Erros

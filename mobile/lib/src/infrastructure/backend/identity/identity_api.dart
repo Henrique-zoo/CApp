@@ -95,16 +95,13 @@ final class IdentityApi {
   Future<AccountSessionResponse> restoreSession() async =>
       AccountSessionResponse.fromJson(await _accountRequest('/auth/session'));
 
-  /// Envia dados de perfil e complementos de ausências do Graph.
-  /// Senha e e-mail de login são tratados pelo Firebase; institutionalEmail é
-  /// um contato declarado separado, sem comprovação automática.
+  /// Envia dados de perfil e nome declarado quando ausente no Graph.
+  /// Senha e e-mail de login são tratados pelo Firebase; não envia e-mail institucional.
   Future<InternalUserResponse> completeProfile({
     required String nickname,
     required int currentSemester,
     required String institutionEntrySemester,
     String? name,
-    String? institutionalEmail,
-    String? courseName,
   }) async => InternalUserResponse.fromJson(
     await _accountRequest(
       '/users/me/profile',
@@ -113,8 +110,6 @@ final class IdentityApi {
         'currentSemester': currentSemester,
         'institutionEntrySemester': institutionEntrySemester,
         'name': ?name,
-        'institutionalEmail': ?institutionalEmail,
-        'courseName': ?courseName,
       },
     ),
   );

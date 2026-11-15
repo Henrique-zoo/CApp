@@ -49,7 +49,6 @@ pub fn evidence(confirmed: bool, validity: Duration) -> InstitutionalVerificatio
     InstitutionalVerification {
         user_id: Uuid::nil(),
         profile_name: None,
-        profile_email: None,
         course_name: None,
         microsoft_object_id: microsoft_object_id(),
         institution_id: institution_id(),
@@ -83,7 +82,7 @@ pub fn profile_with_id(id: &str, is_student: bool) -> InstitutionalProfile {
         mail: Some("estudante@instituicao.example".to_owned()),
         affiliation: if is_student {
             InstitutionalAffiliation::Student {
-                course_name: Some("Curso de Teste".to_owned()),
+                course_name: "Curso de Teste".to_owned(),
             }
         } else {
             InstitutionalAffiliation::NonStudent

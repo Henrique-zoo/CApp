@@ -39,14 +39,7 @@ final class PreferencesAccountProfileStore implements AccountProfileStore {
     }
 
     // Extensão aditiva do envelope v1: caches anteriores não têm complementos.
-    for (final key in [
-      'nickname',
-      'email',
-      'entrySemester',
-      'name',
-      'institutionalEmail',
-      'courseName',
-    ]) {
+    for (final key in ['nickname', 'email', 'entrySemester', 'name']) {
       if (data[key] != null && data[key] is! String) {
         throw const FormatException('Campo de perfil incompatível');
       }
@@ -68,8 +61,6 @@ final class PreferencesAccountProfileStore implements AccountProfileStore {
       currentSemester: semester as int?,
       institutionEntrySemester: term,
       name: data['name'] as String?,
-      institutionalEmail: data['institutionalEmail'] as String?,
-      courseName: data['courseName'] as String?,
     );
   }
 
@@ -87,8 +78,6 @@ final class PreferencesAccountProfileStore implements AccountProfileStore {
           'currentSemester': user.currentSemester,
           'entrySemester': user.institutionEntrySemester,
           'name': user.name,
-          'institutionalEmail': user.institutionalEmail,
-          'courseName': user.courseName,
         }),
       );
 

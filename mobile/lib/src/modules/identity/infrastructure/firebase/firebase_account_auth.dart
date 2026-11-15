@@ -3,6 +3,8 @@
 /// Cada conta usa um FirebaseApp nomeado do mesmo projeto. O SDK conserva seus
 /// próprios tokens; preferências guardam somente nome do contêiner, UID, rótulos
 /// e a escolha de saída. Desativar a conta atual não encerra as outras sessões.
+/// O índice só inclui e-mail depois de existir o provedor password; o endereço
+/// inicial do provedor Microsoft não vira outro contato salvo pelo aplicativo.
 ///
 /// A restauração respeita a última escolha ativa, sem selecionar automaticamente
 /// uma conta após logout. O índice legado é importado uma vez da instância padrão.
@@ -394,7 +396,12 @@ final class FirebaseAccountAuth
         account: SavedAccount(
           firebaseUid: user.uid,
           requiresPassword: false,
-          email: user.email,
+          email:
+              user.providerData.any(
+                (provider) => provider.providerId == 'password',
+              )
+              ? user.email
+              : null,
           name: user.displayName,
         ),
         authAppName: auth.app.name,

@@ -18,8 +18,6 @@ final class InternalUserResponse {
     required this.currentSemester,
     required this.institutionEntrySemester,
     this.name,
-    this.institutionalEmail,
-    this.courseName,
   });
 
   final UuidValue id;
@@ -29,11 +27,9 @@ final class InternalUserResponse {
   final int? currentSemester;
   final String? institutionEntrySemester;
   final String? name;
-  final String? institutionalEmail;
-  final String? courseName;
 
   factory InternalUserResponse.fromJson(Map<String, dynamic> json) {
-    for (final key in ['name', 'institutionalEmail', 'courseName']) {
+    for (final key in ['name']) {
       if (json[key] != null && json[key] is! String) {
         throw FormatException('Complemento de perfil incompatível: $key');
       }
@@ -65,8 +61,6 @@ final class InternalUserResponse {
       currentSemester: semester as int?,
       institutionEntrySemester: json['institutionEntrySemester'] as String?,
       name: json['name'] as String?,
-      institutionalEmail: json['institutionalEmail'] as String?,
-      courseName: json['courseName'] as String?,
     );
   }
 }
