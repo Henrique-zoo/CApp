@@ -56,6 +56,13 @@ jobs:
             -p 'test_validate_examples.py' \
             -v
 
+      - name: Validate electoral protocol and shared vectors
+        run: |
+          python -m unittest discover \
+            -s packages/api-contracts/scripts \
+            -p 'test_election_contracts.py' \
+            -v
+
       - name: Test OASDiff versioning policy
         run: |
           python -m unittest discover \

@@ -1,0 +1,255 @@
+{
+  "version": 1,
+  "purpose": "Contratos entre frentes de implementação; não declara endpoints ou DTOs Rust/Dart já implementados.",
+  "fronts": [
+    {
+      "id": "A",
+      "issues": [
+        378,
+        379,
+        139
+      ],
+      "responsibility": "Primitivas, geração local de segredos, provas das autoridades, agregação e decifração. Consome bytes e exemplos; não precisa de servidor pronto."
+    },
+    {
+      "id": "B",
+      "issues": [
+        130,
+        131,
+        132,
+        137,
+        282
+      ],
+      "responsibility": "Invariantes, calendário, autorização/eligibilidade por portas e coordenação. Recebe identidades autenticadas, não JWT no domínio."
+    },
+    {
+      "id": "C",
+      "issues": [
+        380,
+        381,
+        382
+      ],
+      "responsibility": "Codecs, assinatura, registro transacional, recibos e adaptação ao aplicativo. Integra o Firebase existente; cliente CLI independente não é pré-requisito."
+    },
+    {
+      "id": "D",
+      "issues": [
+        284,
+        383,
+        143,
+        144
+      ],
+      "responsibility": "Auditor independente e testes adversariais. Usa formatos/vetores e referências públicas; não reutiliza um veredito booleano do servidor."
+    }
+  ],
+  "ports": [
+    {
+      "name": "AuthenticatedElector",
+      "owner": "B",
+      "implementedBy": "Adaptador Firebase/identidade na integração #386",
+      "input": [
+        "principal autenticado",
+        "electionId"
+      ],
+      "output": [
+        "userId interno",
+        "voterId opaco por conta/eleição",
+        "decisão de elegibilidade e validade institucional"
+      ],
+      "contract": [
+        "UID vem do token validado, nunca do corpo do voto.",
+        "Curso vem da evidência institucional vigente, sem declaração manual.",
+        "A consulta de contexto não reserva voto; nova participação reavalia elegibilidade.",
+        "Consulta de recibo aceito não exige nova chave ou permanência no curso."
+      ]
+    },
+    {
+      "name": "CryptographicCodec",
+      "owner": "C",
+      "implementedBy": "Adaptadores puro Rust/Dart e implementação independente do auditor",
+      "input": [
+        "payload tipado e validado",
+        "profile v1"
+      ],
+      "output": [
+        "bytes JCS prefixados",
+        "digest SHA-256",
+        "assinatura/verificação RSA-PSS"
+      ],
+      "contract": [
+        "Rejeitar duplicatas antes de formar mapas.",
+        "Inteiros criptográficos são strings decimais canônicas.",
+        "Não assinar o JSON incidental do serializador.",
+        "Chaves privadas pertencem somente ao processo responsável."
+      ]
+    },
+    {
+      "name": "ElectionCryptography",
+      "owner": "A",
+      "implementedBy": "Eleitor, autoridade e apurador nos seus respectivos contextos",
+      "input": [
+        "grupo fixado",
+        "vetor ordenado de opções",
+        "material público ou identificador de segredo local"
+      ],
+      "output": [
+        "cifras",
+        "prova de conhecimento",
+        "agregado",
+        "contribuições e provas de correção",
+        "totais no intervalo conhecido"
+      ],
+      "contract": [
+        "Servidor não recebe x das demais autoridades nem r ou RSA privada do eleitor.",
+        "Cada nonce é novo e vem de CSPRNG.",
+        "Todas as autoridades contribuem para o mesmo agregado final.",
+        "Prova de autoridade não comprova validade 0/1 do conteúdo de voto."
+      ]
+    },
+    {
+      "name": "ElectionStore",
+      "owner": "B/C",
+      "implementedBy": "Repositório transacional #381",
+      "operations": [
+        {
+          "name": "recordBallot",
+          "input": [
+            "userId autenticado",
+            "SignedBallot",
+            "manifesto/calendário esperados"
+          ],
+          "output": [
+            "aceite com BoardEntry e Receipt persistidos",
+            "recuperação idempotente",
+            "recusa ou conflito para repetir com nova leitura"
+          ],
+          "invariants": [
+            "UNIQUE(electionId,userId).",
+            "Mesmo submissionId com payload diferente é recusado.",
+            "Mesmo voto/operação recupera recibo existente inclusive depois do encerramento.",
+            "Outro submissionId depois de um voto aceito não registra voto novo.",
+            "Índice, encadeamento, voto, participação e recibo são confirmados juntos.",
+            "Sem recibo para gravação abortada.",
+            "Novo voto revalida estado e prazo vigente na operação atômica."
+          ]
+        },
+        {
+          "name": "changeSchedule",
+          "input": [
+            "comissão autorizada",
+            "novas datas",
+            "motivo",
+            "revisão esperada"
+          ],
+          "output": [
+            "ScheduleChange assinado e nova revisão",
+            "recusa ou conflito"
+          ],
+          "invariants": [
+            "Novo fim é estritamente posterior ao anterior.",
+            "Abertura já ocorrida não muda.",
+            "Prorrogação precisa ser aceita antes do prazo vigente.",
+            "Com voto concorrente, ambos usam uma ordem transacional consistente."
+          ]
+        },
+        {
+          "name": "closeElection",
+          "input": [
+            "electionId",
+            "relógio confiável",
+            "revisão vigente"
+          ],
+          "output": [
+            "Closure com cabeça e número final de participantes"
+          ],
+          "invariants": [
+            "Não fechar antes do fim vigente.",
+            "Fechamento, último voto, prorrogação e cancelamento são serializados.",
+            "Não admitir novos votos após a fotografia fechada.",
+            "Repetição recupera o mesmo encerramento."
+          ]
+        },
+        {
+          "name": "cancelElection",
+          "input": [
+            "comissão autorizada",
+            "electionId",
+            "motivo"
+          ],
+          "output": [
+            "Cancellation assinado e resultado cancelled"
+          ],
+          "invariants": [
+            "Somente eleição não terminal.",
+            "Preservar registros e atribuir ator/instante no servidor.",
+            "Sem apuração antecipada e sem vencedor.",
+            "Repetição idempotente não cria efeitos adicionais."
+          ]
+        },
+        {
+          "name": "publishTally",
+          "input": [
+            "encerramento",
+            "agregado",
+            "contribuições verificadas de todas as autoridades"
+          ],
+          "output": [
+            "Result valid, annulled ou incomplete"
+          ],
+          "invariants": [
+            "Ausência/erro de autoridade mantém incomplete.",
+            "Total irrecuperável em [0,N] anula.",
+            "Soma diferente de N anula.",
+            "Não concluir posse ou desempate dentro deste contrato."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ClockAndRandomness",
+      "owner": "A/B",
+      "implementedBy": "Infraestrutura de cada participante",
+      "input": [
+        "pedido de instante ou bytes aleatórios"
+      ],
+      "output": [
+        "UTC do backend para prazos",
+        "bytes CSPRNG locais para segredos/nonces"
+      ],
+      "contract": [
+        "Não confiar em relógio do cliente para aceitar voto ou prorrogação.",
+        "Fixtures usam material sintético público; nunca o reutilizar em produção."
+      ]
+    },
+    {
+      "name": "PublicElectionReader",
+      "owner": "C/D",
+      "implementedBy": "Exportação pública do backend e leitor do auditor",
+      "input": [
+        "identificador da eleição ou arquivo exportado"
+      ],
+      "output": [
+        "envelopes dos mesmos schemas publicados"
+      ],
+      "contract": [
+        "Exportação pode ser JSON Lines, com um envelope por linha.",
+        "Não exportar tokens, Firebase UID, e-mail, segredos ou aleatoriedades.",
+        "Auditor recebe chave pública confiável do servidor, não uma chave privada.",
+        "Elegibilidade pública depende da associação feita pelo backend no modelo aprovado."
+      ]
+    }
+  ],
+  "messageSchemas": {
+    "Manifest": "schemas.json#/$defs/Manifest",
+    "Ballot": "schemas.json#/$defs/Ballot",
+    "BoardEntry": "schemas.json#/$defs/BoardEntry",
+    "Receipt": "schemas.json#/$defs/Receipt",
+    "ScheduleChange": "schemas.json#/$defs/ScheduleChange",
+    "Cancellation": "schemas.json#/$defs/Cancellation",
+    "Closure": "schemas.json#/$defs/Closure",
+    "Aggregate": "schemas.json#/$defs/Aggregate",
+    "DecryptionShare": "schemas.json#/$defs/DecryptionShare",
+    "Result": "schemas.json#/$defs/Result",
+    "CalendarOrigin": "schemas.json#/$defs/CalendarOrigin"
+  }
+}
