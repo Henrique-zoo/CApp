@@ -4,7 +4,9 @@
 # fictícias e especificam o comportamento quando forem cadastradas e integradas.
 # Cada instituição possui seu próprio diretório e grupo de estudantes configurados.
 # A origem da conta e a participação nesse grupo devem ser confirmadas pelo serviço;
-# o domínio do e-mail e o curso informado não comprovam o vínculo estudantil.
+# o domínio do e-mail e um curso isolado não comprovam o vínculo estudantil.
+# Sem grupo estudantil ou curso institucional não vazio, a entrada é limitada
+# e não concede direitos de estudante em nenhum CA. Curso não é declarado no app.
 # O status do catálogo institucional não é uma regra de bloqueio de autenticação.
 # Os e-mails abaixo são fictícios. Tokens, tenant IDs e group IDs pertencem à
 # preparação dos testes, não à linguagem funcional dos cenários compartilhados.
@@ -94,7 +96,9 @@ Funcionalidade: Autenticação de estudantes de instituições cadastradas
       E a instituição "Universidade de Brasília" não reconhece essa conta como estudante
       Quando ele realiza a autenticação com suas credenciais institucionais
       Então o aplicativo informa que o usuário não foi reconhecido como aluno da instituição "Universidade de Brasília"
-      E o acesso à plataforma permanece bloqueado
+      E o acesso à plataforma é concedido com limitações
+      E o usuário não recebe direitos de estudante em nenhum CA
+      E o aplicativo apresenta um aviso explícito de acesso limitado
 
     @sad @backend @mobile
     Cenário: Reconhecimento por outra instituição não comprova vínculo com a instituição da conta
@@ -105,7 +109,28 @@ Funcionalidade: Autenticação de estudantes de instituições cadastradas
       E a instituição "Universidade Exemplo" não reconhece essa conta como estudante
       Quando ele realiza a autenticação com suas credenciais institucionais
       Então o aplicativo informa que o usuário não foi reconhecido como aluno da instituição "Universidade Exemplo"
-      E o acesso à plataforma permanece bloqueado
+      E o acesso à plataforma é concedido com limitações
+      E o usuário não recebe direitos de estudante em nenhum CA
+      E o aplicativo apresenta um aviso explícito de acesso limitado
+
+    @sad @backend @mobile
+    Esquema do Cenário: Grupo estudantil confirmado sem curso institucional permite apenas acesso limitado
+      Dado que a instituição "Universidade de Brasília" está cadastrada no CApp
+      E que o estudante possui uma conta institucional válida da instituição "Universidade de Brasília" com o e-mail "232012345@aluno.unb.br"
+      E a instituição "Universidade de Brasília" reconhece essa conta como estudante
+      E o curso retornado pela instituição está "<situacao>"
+      Quando ele realiza a autenticação com suas credenciais institucionais
+      Então o acesso à plataforma é concedido com limitações
+      E o usuário não recebe direitos de estudante em nenhum CA
+      E o aplicativo apresenta um aviso explícito de acesso limitado
+      E o aplicativo não permite informar o curso manualmente
+
+      Exemplos:
+        | situacao           |
+        | ausente            |
+        | nulo               |
+        | vazio              |
+        | somente em branco  |
 
   Regra: Um login não concluído mantém o usuário sem sessão e permite nova tentativa
 
