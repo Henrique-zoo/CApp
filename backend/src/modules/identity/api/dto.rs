@@ -15,7 +15,10 @@ use crate::modules::identity::{
         ports::{InstitutionalAffiliation, InstitutionalProfile},
         services::authentication::{InstitutionalAuthResult, InstitutionalVerificationResult},
     },
-    domain::entities::institution::Institution,
+    domain::{
+        UserStatus,
+        entities::{institution::Institution, user::User},
+    },
 };
 
 /// Corpo de `POST /auth/institutional/verify`.
@@ -213,10 +216,8 @@ pub(super) struct UserResponse {
     status: &'static str,
 }
 
-impl From<crate::modules::identity::domain::entities::user::User> for UserResponse {
-    fn from(user: crate::modules::identity::domain::entities::user::User) -> Self {
-        use crate::modules::identity::domain::UserStatus;
-
+impl From<User> for UserResponse {
+    fn from(user: User) -> Self {
         Self {
             id: user.id(),
             name: user.name().map(str::to_owned),

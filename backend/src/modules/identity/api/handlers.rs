@@ -21,10 +21,14 @@ use crate::{
     },
     modules::identity::{
         api::{
-            dto::{InstitutionalAuthRequest, InstitutionalAuthResponse},
+            dto::{
+                AccountSessionResponse, CompleteProfileRequest, InstitutionalAuthRequest,
+                InstitutionalAuthResponse,
+            },
             extractors,
         },
-        application::services::authentication,
+        application::services::{accounts, authentication},
+        domain::entities::user::ProfileCompletion,
     },
 };
 
@@ -90,16 +94,12 @@ pub(super) async fn restore_session(
     let token = extractors::firebase_bearer_token(&headers)?;
     let result = timeout(
         Duration::from_secs(15),
-        crate::modules::identity::application::services::accounts::restore(
-            &state.clients.firebase,
-            &state.pg_database,
-            token,
-        ),
+        accounts::restore(&state.clients.firebase, &state.pg_database, token),
     )
     .await
     .map_err(|_| ApiError::service_unavailable())??;
 
-    Ok(Json(super::dto::AccountSessionResponse {
+    Ok(Json(AccountSessionResponse {
         user: result.user.into(),
         verification: result.verification.map(Into::into),
     }))
@@ -109,11 +109,11 @@ pub(super) async fn restore_session(
 pub(super) async fn complete_profile(
     State(state): State<AppState>,
     headers: HeaderMap,
-    body: Result<Json<super::dto::CompleteProfileRequest>, JsonRejection>,
+    body: Result<Json<CompleteProfileRequest>, JsonRejection>,
 ) -> ApiResult<impl IntoResponse> {
     let token = extractors::firebase_bearer_token(&headers)?;
     let Json(body) = body.map_err(|_| ApiError::bad_request())?;
-    let data = crate::modules::identity::domain::entities::user::ProfileCompletion {
+    let data = ProfileCompletion {
         name: body.name,
         nickname: body.nickname,
         current_semester: body.current_semester,
@@ -121,12 +121,7 @@ pub(super) async fn complete_profile(
     };
     let user = timeout(
         Duration::from_secs(15),
-        crate::modules::identity::application::services::accounts::complete_profile(
-            &state.clients.firebase,
-            &state.pg_database,
-            token,
-            data,
-        ),
+        accounts::complete_profile(&state.clients.firebase, &state.pg_database, token, data),
     )
     .await
     .map_err(|_| ApiError::service_unavailable())??;

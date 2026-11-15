@@ -14,7 +14,10 @@ use crate::{
             services::authentication::InstitutionalVerificationResult,
         },
         domain::{CatalogStatus, entities::institution::Institution},
-        infrastructure::{firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient},
+        infrastructure::{
+            firebase::{AppCheckVerifier, FirebaseTokenVerifier},
+            microsoft::MicrosoftGraphClient,
+        },
     },
 };
 use axum::{
@@ -50,7 +53,7 @@ async fn state() -> AppState {
         Clients::new(
             FirebaseTokenVerifier::new("test-project".into(), http.clone()).unwrap(),
             MicrosoftGraphClient::new(http.clone()),
-            crate::modules::identity::infrastructure::firebase::AppCheckVerifier::new(
+            AppCheckVerifier::new(
                 "1234567890".into(),
                 vec!["1:1234567890:android:capp".into()],
                 http,
