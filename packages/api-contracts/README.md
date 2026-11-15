@@ -11,6 +11,36 @@ A especificação atual usa OpenAPI 3.1.0. Os caminhos são servidos sem prefixo
 de versão `/v1`. A propriedade `info.version` representa a versão do contrato,
 não uma versão de URL nem a versão do pacote Rust do backend.
 
+## Contrato eleitoral em definição
+
+`elections/` contém o protocolo v1 da issue #377: perfil de parâmetros,
+schemas dos objetos compartilhados, interfaces entre implementações,
+matriz de segurança e vetores públicos. Chapa única é permitida; o fluxo
+usa as contas Firebase do CApp. O diretório não declara endpoints já
+implementados e não altera a versão atual do OpenAPI.
+
+A especificação do fluxo, responsabilidades, codificação e limites está no
+[Rustdoc do módulo eleitoral](../../backend/src/modules/elections/mod.rs).
+Os vetores usam parâmetros de grupo reais e material sintético de teste;
+nenhuma chave privada é versionada. O validador de fixtures não substitui
+o servidor de votação ou o auditor independente do produto.
+
+Instale `requirements-ci.txt` em um ambiente virtual e mantenha OpenSSL no
+PATH. Da raiz do repositório, execute:
+
+```bash
+python -m unittest discover \
+  -s packages/api-contracts/scripts \
+  -p 'test_election_contracts.py' -v
+
+python packages/api-contracts/scripts/validate_election_contracts.py
+```
+
+A CI executa os mesmos testes. Consumidores Rust/Dart devem usar os vetores
+versionados para conferir seus próprios bytes e verificações. Alterar o
+protocolo exige revisar perfil, schemas, vetores e consumidores afetados;
+não regenerar expectativas automaticamente durante a validação.
+
 ## Versionamento
 
 A versão do contrato segue Semantic Versioning (`MAJOR.MINOR.PATCH`).
