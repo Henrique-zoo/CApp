@@ -1,6 +1,7 @@
 /// Configuração e calendário eleitoral ligados ao contrato compartilhado.
 ///
-/// Os cenários especificam chapa única, adiamento e cancelamento. As expressões
+/// Os cenários especificam a escolha entre votação secreta e identificada,
+/// chapa única na modalidade secreta, adiamento e cancelamento. As expressões
 /// ficam registradas para futura automação real do aplicativo; pendingStep falha
 /// quando executado e não prepara resultados fictícios. Vocabulário comum à
 /// votação permanece no registro compartilhado.
@@ -12,6 +13,11 @@ import '../../support/step_registry.dart';
 final electionManagementSteps = <StepDefinition>[
   pendingStep(r'^que a comissão eleitoral foi indicada pela gestão do CA$'),
   pendingStep(r'^estou autenticado como integrante autorizado dessa comissão$'),
+  pendingStep(r'^que estou preenchendo os dados de uma nova eleição do CA$'),
+  pendingStep(
+    r'^seleciono votação "(secreta|identificada)" e concluo a criação da eleição$',
+  ),
+  pendingStep(r'^a eleição é criada com votação "(secreta|identificada)"$'),
   pendingStep(r'^que existe uma única chapa aprovada pela comissão$'),
   pendingStep(r'^a configuração eleitoral é concluída$'),
   pendingStep(r'^o manifesto contém a chapa e a opção Nulo$'),

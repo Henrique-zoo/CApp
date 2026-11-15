@@ -192,8 +192,8 @@
     }
   ],
   "bddChanges": {
-    "features/votacao.feature": "Remover inscrição/chave anteriores à abertura; cobrir primeiro voto, Nulo, soma, dispositivo e vínculos. Automação funcional permanece pendente.",
-    "features/eleicoes.feature": "Cobrir chapa única, autoridades, adiamento, prorrogação e cancelamento sem apuração antecipada."
+    "features/eleicoes/votacao.feature": "Remover inscrição/chave anteriores à abertura; cobrir primeiro voto, Nulo, soma, dispositivo e vínculos. Automação funcional permanece pendente.",
+    "features/eleicoes/configuracao.feature": "Cobrir escolha entre votação secreta e identificada; chapa única e autoridades na modalidade secreta; adiamento, prorrogação e cancelamento sem apuração antecipada."
   },
   "academicDeviations": [
     "Confiança no backend.",
