@@ -13,8 +13,18 @@ import '../../../presentation/presentation.dart';
 
 /// Torna explícito que a entrada não equivale à confirmação de direitos estudantis.
 class LimitedStudentAccessNotice extends StatelessWidget {
+  /// Cria o aviso usado após uma confirmação institucional não estudantil.
+  ///
+  /// O chamador deve selecionar essa apresentação com base na evidência da
+  /// sessão. Não recebe conta, calcula validade ou concede acesso por conta própria.
+  /// Pode ser reutilizado no cadastro e na área principal sem guardar estado.
   const LimitedStudentAccessNotice({super.key});
 
+  /// Apresenta o texto público com anúncio acessível e estilo de [WarningBox].
+  ///
+  /// [context] participa da composição Flutter; tema e largura vêm dos ancestrais.
+  /// A região permanece visível enquanto o chamador mantiver o widget na árvore.
+  /// Não há descarte automático, ação de autenticação ou efeito sobre a sessão.
   @override
   Widget build(BuildContext context) => Semantics(
     liveRegion: true,
