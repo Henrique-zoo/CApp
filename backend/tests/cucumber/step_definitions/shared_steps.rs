@@ -327,3 +327,9 @@ fn when_o_gestor_valor_tenta_vincular_valor_ao_cargo_valor_em_valor(
 fn when_solicito_minha_inscricao_no_evento_valor(_world: &mut AppWorld, _value_1: String) {
     pending_step("solicito minha inscrição no evento {string}");
 }
+
+/// Pendente: nenhum vencedor ou posse é produzido.
+#[then(regex = r#"^nenhum vencedor ou posse é produzido$"#)]
+fn then_nenhum_vencedor_ou_posse_e_produzido(_world: &mut AppWorld) {
+    pending_step("nenhum vencedor ou posse é produzido");
+}
