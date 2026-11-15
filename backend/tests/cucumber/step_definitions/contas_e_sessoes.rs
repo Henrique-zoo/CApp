@@ -80,16 +80,16 @@ fn then_a_primeira_etapa_pede_apelido_periodo_atual_do_curso_e_semestre_de_ingre
     );
 }
 
-/// Pendente: apresenta os dados do Graph em campos de texto.
-#[then(regex = r#"^apresenta os dados do Graph em campos de texto$"#)]
+/// Pendente: apresenta nome e curso confirmados pelo Graph em campos de texto.
+#[then(regex = r#"^apresenta nome e curso confirmados pelo Graph em campos de texto$"#)]
 fn then_apresenta_os_dados_do_graph_em_campos_de_texto(_world: &mut AppWorld) {
-    pending_step("apresenta os dados do Graph em campos de texto");
+    pending_step("apresenta nome e curso confirmados pelo Graph em campos de texto");
 }
 
-/// Pendente: só permite completar os campos cujo valor no Graph é nulo.
-#[then(regex = r#"^só permite completar os campos cujo valor no Graph é nulo$"#)]
+/// Pendente: só permite completar o nome quando o Graph não o informou.
+#[then(regex = r#"^só permite completar o nome quando o Graph não o informou$"#)]
 fn then_so_permite_completar_os_campos_cujo_valor_no_graph_e_nulo(_world: &mut AppWorld) {
-    pending_step("só permite completar os campos cujo valor no Graph é nulo");
+    pending_step("só permite completar o nome quando o Graph não o informou");
 }
 
 /// Pendente: não pede as credenciais internas.
@@ -158,20 +158,18 @@ fn then_o_usuario_pode_entrar_na_area_principal(_world: &mut AppWorld) {
     pending_step("o usuário pode entrar na área principal");
 }
 
-/// Pendente: que o Graph retornou nome, e-mail e curso nulos para um estudante confirmado.
-#[given(
-    regex = r#"^que o Graph retornou nome, e-mail e curso nulos para um estudante confirmado$"#
-)]
+/// Pendente: que o Graph retornou nome nulo e curso válido para um estudante confirmado.
+#[given(regex = r#"^que o Graph retornou nome nulo e curso válido para um estudante confirmado$"#)]
 fn given_que_o_graph_retornou_nome_e_mail_e_curso_nulos_para_um_estudante_confirmado(
     _world: &mut AppWorld,
 ) {
-    pending_step("que o Graph retornou nome, e-mail e curso nulos para um estudante confirmado");
+    pending_step("que o Graph retornou nome nulo e curso válido para um estudante confirmado");
 }
 
-/// Pendente: ele completa esses dados e conclui seu cadastro.
-#[when(regex = r#"^ele completa esses dados e conclui seu cadastro$"#)]
+/// Pendente: ele informa seu nome e conclui seu cadastro.
+#[when(regex = r#"^ele informa seu nome e conclui seu cadastro$"#)]
 fn when_ele_completa_esses_dados_e_conclui_seu_cadastro(_world: &mut AppWorld) {
-    pending_step("ele completa esses dados e conclui seu cadastro");
+    pending_step("ele informa seu nome e conclui seu cadastro");
 }
 
 /// Pendente: os complementos são guardados em seu perfil CApp.
@@ -192,10 +190,10 @@ fn then_os_complementos_sao_apresentados_como_informados_pelo_usuario(_world: &m
     pending_step("os complementos são apresentados como informados pelo usuário");
 }
 
-/// Pendente: que o Graph retornou nome, e-mail e curso não nulos.
-#[given(regex = r#"^que o Graph retornou nome, e-mail e curso não nulos$"#)]
+/// Pendente: que o Graph retornou nome e curso não nulos.
+#[given(regex = r#"^que o Graph retornou nome e curso não nulos$"#)]
 fn given_que_o_graph_retornou_nome_e_mail_e_curso_nao_nulos(_world: &mut AppWorld) {
-    pending_step("que o Graph retornou nome, e-mail e curso não nulos");
+    pending_step("que o Graph retornou nome e curso não nulos");
 }
 
 /// Pendente: uma requisição tenta substituir esses dados por complementos.
@@ -396,4 +394,31 @@ fn then_uma_falha_de_rede_nao_e_interpretada_como_conta_ainda_nao_provisionada(
     _world: &mut AppWorld,
 ) {
     pending_step("uma falha de rede não é interpretada como conta ainda não provisionada");
+}
+
+/// Pendente: mudança de endereço no diretório, independente da credencial interna.
+#[given("a instituição passou a informar outro e-mail para essa identidade")]
+fn graph_email_changes(_world: &mut AppWorld) {
+    pending_step("a instituição passou a informar outro e-mail para essa identidade");
+}
+
+/// Pendente: sincronização atualiza o vínculo sem escolher outra credencial.
+#[when("uma nova sincronização institucional é concluída")]
+fn institutional_sync_finishes(_world: &mut AppWorld) {
+    pending_step("uma nova sincronização institucional é concluída");
+}
+
+/// Pendente: sugestão institucional não vira outro e-mail persistido no perfil.
+#[then("o e-mail de entrada escolhido pelo usuário é preservado")]
+#[then("o perfil da conta contém somente o e-mail de entrada escolhido")]
+fn chosen_email_is_preserved(_world: &mut AppWorld) {
+    pending_step("o perfil da conta contém somente o e-mail de entrada escolhido");
+}
+
+/// Pendente: conta ativa usa a credencial escolhida e já tem confirmação vigente.
+#[given("que o usuário concluiu a entrada com perfil ativo e confirmação institucional vigente")]
+fn active_account_has_current_verification(_world: &mut AppWorld) {
+    pending_step(
+        "que o usuário concluiu a entrada com perfil ativo e confirmação institucional vigente",
+    );
 }
