@@ -47,6 +47,11 @@ Funcionalidade: Gerenciamento de eleições de Centros Acadêmicos
       Quando a comissão adia a abertura mas mantém o encerramento anterior
       Então a alteração do calendário é recusada
 
+    Cenário: Recusar alteração com encerramento anterior ao anterior
+      Dado que a eleição ainda está em preparação
+      Quando a comissão adia a abertura e escolhe um fim anterior ao anterior
+      Então a alteração do calendário é recusada
+
     Cenário: Prorrogar uma eleição aberta
       Dado que a eleição está aberta e o prazo vigente ainda não venceu
       Quando a comissão escolhe um encerramento posterior ao vigente
@@ -81,3 +86,59 @@ Funcionalidade: Gerenciamento de eleições de Centros Acadêmicos
       E nenhuma contagem antecipada por opção é publicada
       E as cédulas e o histórico são preservados
       E nenhum novo voto é aceito
+
+  @seguranca_computacional
+  Regra: O período inicial deve delimitar um intervalo válido
+
+    Cenário: Criar eleição com período de votação válido
+      Dado que estou preenchendo os dados de uma nova eleição do CA
+      Quando informo um período de votação válido e concluo a criação da eleição
+      Então o calendário inicial registra o início e o encerramento informados
+
+    Cenário: Recusar período de votação com encerramento anterior ao início
+      Dado que estou preenchendo os dados de uma nova eleição do CA
+      Quando informo um período cujo encerramento é anterior ao início e tento criar a eleição
+      Então a criação da eleição é recusada por período inválido
+
+    Cenário: Recusar período de votação com encerramento igual ao início
+      Dado que estou preenchendo os dados de uma nova eleição do CA
+      Quando informo um período cujo encerramento é igual ao início e tento criar a eleição
+      Então a criação da eleição é recusada por período inválido
+
+  @seguranca_computacional
+  Regra: A abertura exige configuração e autoridades completas
+
+    Cenário: Recusar abertura quando falta uma autoridade
+      Dado que a eleição está em preparação sem todas as autoridades definidas
+      Quando a comissão solicita a abertura da votação
+      Então a abertura é recusada por falta de autoridades
+
+    Cenário: Abrir eleição com duas chapas e autoridades independentes
+      Dado que a eleição está em preparação com duas chapas aprovadas
+      E cada chapa possui uma autoridade independente
+      E o servidor e a comissão possuem autoridades independentes
+      Quando a comissão solicita a abertura da votação
+      Então a abertura é aceita após a validação de todas as autoridades
+      E o manifesto publicado contém as duas chapas na ordem definida
+      E o manifesto publicado contém a opção Nulo uma única vez na última posição
+      E o manifesto contém uma autoridade do servidor, uma da comissão e uma para cada chapa
+      E o manifesto é assinado pelo servidor e permanece imutável após a abertura
+
+  @seguranca_computacional
+  Regra: A configuração publicada não pode ser alterada depois da abertura
+
+    Cenário: Recusar alteração das opções após a abertura
+      Dado que a eleição foi aberta e possui manifesto publicado
+      Quando a comissão tenta alterar as chapas ou a ordem das opções
+      Então a alteração da configuração eleitoral é recusada
+      E o manifesto publicado permanece inalterado
+
+  Regra: O encerramento normal respeita o prazo vigente
+
+    Cenário: Encerrar a votação ao atingir o prazo vigente
+      Dado que a eleição está aberta e o prazo vigente foi atingido
+      Quando o processo eleitoral é encerrado
+      Então a eleição passa ao estado encerrado
+      E nenhum novo voto é aceito
+      E o registro final das cédulas é preservado
+      E a apuração aguarda as contribuições válidas de todas as autoridades
