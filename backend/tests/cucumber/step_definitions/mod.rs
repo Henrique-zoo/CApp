@@ -9,6 +9,7 @@
 mod apadrinhamento;
 mod associacao_dados_academicos;
 mod autenticacao_institucional;
+mod cadastro_participantes;
 mod cargos_padrao_ca;
 mod consulta_faq;
 mod consulta_governanca;
