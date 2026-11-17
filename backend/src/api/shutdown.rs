@@ -130,6 +130,45 @@ pub async fn wait_for_shutdown_signal() {
     }
 }
 
+#[derive(Clone)]
+struct DrainTracker {
+    cancel_rx: tokio::sync::watch::Receiver<bool>,
+    active_tx: tokio::sync::watch::Sender<usize>,
+}
+
+async fn drain_middleware(
+    axum::extract::State(tracker): axum::extract::State<DrainTracker>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    if *tracker.cancel_rx.borrow() {
+        return reqwest::StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+
+    struct DrainGuard(tokio::sync::watch::Sender<usize>);
+    impl Drop for DrainGuard {
+        fn drop(&mut self) {
+            self.0.send_modify(|c| *c = c.saturating_sub(1));
+        }
+    }
+
+    tracker.active_tx.send_modify(|c| *c += 1);
+    let _guard = DrainGuard(tracker.active_tx.clone());
+
+    let mut cancel_rx = tracker.cancel_rx.clone();
+
+    tokio::select! {
+        biased;
+        _ = cancel_rx.wait_for(|cancelled| *cancelled) => {
+            tracing::warn!("Requisição HTTP em andamento cancelada por expiração do timeout de encerramento.");
+            reqwest::StatusCode::SERVICE_UNAVAILABLE.into_response()
+        }
+        response = next.run(request) => response,
+    }
+}
+
 /// Executa o servidor HTTP Axum com protocolo de encerramento controlado (*graceful shutdown*).
 ///
 /// O servidor aceita requisições normalmente até que o futuro `signal` seja concluído.
@@ -140,9 +179,9 @@ pub async fn wait_for_shutdown_signal() {
 ///    a `/ready` retornem `503 Service Unavailable`.
 /// 3. Inicia o período de drenagem de requisições ativas com duração máxima de `shutdown_timeout`.
 /// 4. Caso requisições continuem em andamento após o `shutdown_timeout`, força o cancelamento
-///    e registra aviso em `tracing`.
+///    efetivo de todos os handlers e tarefas em voo, aguardando sua finalização antes de seguir.
 /// 5. Fecha de maneira ordenada o pool de conexões do banco de dados ([`sqlx::PgPool`]) caso
-///    um [`AppState`] tenha sido associado.
+///    um [`AppState`] tenha sido associado, garantindo que o pool permaneça ativo durante a drenagem.
 ///
 /// # Parâmetros
 ///
@@ -171,6 +210,18 @@ where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+    let (active_tx, mut active_rx) = tokio::sync::watch::channel(0usize);
+
+    let tracker = DrainTracker {
+        cancel_rx,
+        active_tx,
+    };
+
+    let router = router.layer(axum::middleware::from_fn_with_state(
+        tracker,
+        drain_middleware,
+    ));
 
     let server_future = axum::serve(listener, router)
         .with_graceful_shutdown(async move {
@@ -218,8 +269,23 @@ where
         Err(_) => {
             tracing::warn!(
                 timeout_secs = shutdown_timeout.as_secs(),
-                "Prazo limite de drenagem de requisições HTTP expirou. Forçando encerramento do servidor."
+                "Prazo limite de drenagem de requisições HTTP expirou. Forçando cancelamento das conexões ativas."
             );
+            let _ = cancel_tx.send(true);
+
+            let verify_drain = active_rx.wait_for(|count| *count == 0);
+            if tokio::time::timeout(Duration::from_secs(2), verify_drain)
+                .await
+                .is_err()
+            {
+                tracing::error!("Timeout ao aguardar finalização dos handlers cancelados.");
+            } else {
+                tracing::info!(
+                    "Todos os handlers de requisições em andamento foram cancelados e finalizados."
+                );
+            }
+
+            let _ = tokio::time::timeout(Duration::from_millis(500), &mut server_future).await;
         }
     }
 
@@ -237,7 +303,10 @@ mod tests {
     use super::*;
     use axum::{Router, routing::get};
     use sqlx::postgres::PgPoolOptions;
-    use std::sync::Arc;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
     use tokio::net::TcpListener;
     use tokio::sync::{Mutex, oneshot};
     use tokio::time::sleep;
@@ -310,7 +379,8 @@ mod tests {
             .build()
             .expect("deve construir client HTTP sem proxy");
         let slow_url = format!("http://{addr}/slow");
-        let request_task = tokio::spawn(async move { client.get(slow_url).send().await });
+        let client_for_req = client.clone();
+        let request_task = tokio::spawn(async move { client_for_req.get(slow_url).send().await });
 
         // Aguarda a requisição chegar ao handler e ser aceita
         started_rx.await.expect("handler deve ter iniciado");
@@ -321,7 +391,21 @@ mod tests {
         // Aguarda a parada do listener propagar no Axum
         sleep(Duration::from_millis(20)).await;
 
-        // A requisição original deve ser concluída com sucesso (drenada)
+        // Comprova recusa efetiva de novas conexões TCP durante o encerramento
+        let new_tcp_res = tokio::net::TcpStream::connect(addr).await;
+        assert!(
+            new_tcp_res.is_err(),
+            "novas conexões TCP devem ser rejeitadas durante o shutdown"
+        );
+
+        // Comprova recusa efetiva de novas requisições HTTP durante o encerramento
+        let new_http_res = client.get(format!("http://{addr}/slow")).send().await;
+        assert!(
+            new_http_res.is_err(),
+            "novas requisições HTTP devem falhar na camada de transporte durante o shutdown"
+        );
+
+        // A requisição original em voo deve ser concluída com sucesso (drenada)
         let response = request_task
             .await
             .expect("join deve ter sucesso")
@@ -344,18 +428,35 @@ mod tests {
         let (started_tx, started_rx) = oneshot::channel();
         let started_tx = Arc::new(Mutex::new(Some(started_tx)));
 
+        let handler_dropped = Arc::new(AtomicBool::new(false));
+        let handler_completed_normally = Arc::new(AtomicBool::new(false));
+
+        let handler_dropped_clone = Arc::clone(&handler_dropped);
+        let handler_completed_clone = Arc::clone(&handler_completed_normally);
+
+        struct HandlerDropCheck(Arc<AtomicBool>);
+        impl Drop for HandlerDropCheck {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
         let app = Router::new().route(
             "/hang",
             get({
                 let started_tx = Arc::clone(&started_tx);
                 move || {
                     let started_tx = Arc::clone(&started_tx);
+                    let handler_dropped_clone = Arc::clone(&handler_dropped_clone);
+                    let handler_completed_clone = Arc::clone(&handler_completed_clone);
                     async move {
+                        let _drop_check = HandlerDropCheck(handler_dropped_clone);
                         if let Some(tx) = started_tx.lock().await.take() {
                             let _ = tx.send(());
                         }
                         // Simula uma requisição excessivamente longa (5 segundos)
                         sleep(Duration::from_millis(5000)).await;
+                        handler_completed_clone.store(true, Ordering::SeqCst);
                         "concluído"
                     }
                 }
@@ -398,12 +499,126 @@ mod tests {
         let elapsed = start_shutdown.elapsed();
         assert!(server_res.is_ok());
         assert!(
-            elapsed < Duration::from_millis(1000),
+            elapsed < Duration::from_millis(1500),
             "o servidor deve encerrar forçadamente dentro do deadline configurado (demorou {elapsed:?})"
         );
 
-        // Aborta a requisição longa pendente após comprovação do término forçado do servidor
-        request_task.abort();
+        // Comprova o cancelamento e descarte efetivo do handler lento após timeout
+        assert!(
+            handler_dropped.load(Ordering::SeqCst),
+            "o handler lento deve ser cancelado e descartado ao expirar o timeout"
+        );
+        assert!(
+            !handler_completed_normally.load(Ordering::SeqCst),
+            "o handler não deve ter completado normalmente sua execução"
+        );
+
+        // A requisição do cliente deve finalizar com 503 ou erro de conexão decorrente do cancelamento
+        let req_res = request_task.await.expect("join deve ter sucesso");
+        if let Ok(resp) = req_res {
+            assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_orderly_resource_release_order_on_shutdown() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://capp:capp@localhost:5432/capp")
+            .expect("cria pool lazy");
+
+        let state = test_state(pool);
+        let pool_handle = state.pg_database.pool.clone();
+        assert!(!pool_handle.is_closed());
+
+        let events = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+
+        let (started_tx, started_rx) = oneshot::channel();
+        let started_tx = Arc::new(Mutex::new(Some(started_tx)));
+
+        let events_handler = Arc::clone(&events);
+        struct HandlerOrderGuard(Arc<Mutex<Vec<&'static str>>>);
+        impl Drop for HandlerOrderGuard {
+            fn drop(&mut self) {
+                if let Ok(mut evts) = self.0.try_lock() {
+                    evts.push("handler_finished");
+                }
+            }
+        }
+
+        let app = Router::new().route(
+            "/work",
+            get({
+                let started_tx = Arc::clone(&started_tx);
+                let events_handler = Arc::clone(&events_handler);
+                move || {
+                    let started_tx = Arc::clone(&started_tx);
+                    let events_handler = Arc::clone(&events_handler);
+                    async move {
+                        let _guard = HandlerOrderGuard(events_handler);
+                        if let Some(tx) = started_tx.lock().await.take() {
+                            let _ = tx.send(());
+                        }
+                        sleep(Duration::from_millis(50)).await;
+                        "ok"
+                    }
+                }
+            }),
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("deve criar listener");
+        let addr = listener.local_addr().expect("deve obter endereço");
+
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let events_server = Arc::clone(&events);
+        let server_state = state.clone();
+
+        let server_task = tokio::spawn(async move {
+            let res = serve_with_graceful_shutdown(
+                listener,
+                app,
+                async move {
+                    let _ = shutdown_rx.await;
+                },
+                Duration::from_secs(2),
+                Some(server_state),
+            )
+            .await;
+            events_server.lock().await.push("server_stopped");
+            res
+        });
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("client sem proxy");
+        let request_task =
+            tokio::spawn(async move { client.get(format!("http://{addr}/work")).send().await });
+
+        started_rx.await.expect("handler deve ter iniciado");
+        shutdown_tx.send(()).expect("envia sinal de shutdown");
+
+        let req_res = request_task
+            .await
+            .expect("join req deve ter sucesso")
+            .expect("requisição deve ter resposta");
+        assert_eq!(req_res.status(), reqwest::StatusCode::OK);
+
+        let server_res = server_task.await.expect("join server deve ter sucesso");
+        assert!(server_res.is_ok());
+
+        assert!(
+            pool_handle.is_closed(),
+            "o pool de banco deve estar fechado ao término do shutdown"
+        );
+
+        let recorded_events = events.lock().await.clone();
+        assert_eq!(
+            recorded_events,
+            vec!["handler_finished", "server_stopped"],
+            "a execução HTTP deve ser finalizada antes do fechamento dos recursos de banco"
+        );
     }
 
     #[tokio::test]
@@ -500,6 +715,99 @@ mod tests {
         assert!(
             state.pg_database.pool.is_closed(),
             "o pool PostgreSQL deve ser fechado ordenadamente no encerramento"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_orderly_resource_release_order_on_forced_shutdown() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://capp:capp@localhost:5432/capp")
+            .expect("cria pool lazy");
+
+        let state = test_state(pool);
+        let pool_handle = state.pg_database.pool.clone();
+        assert!(!pool_handle.is_closed());
+
+        let events = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+
+        let (started_tx, started_rx) = oneshot::channel();
+        let started_tx = Arc::new(Mutex::new(Some(started_tx)));
+
+        let events_handler = Arc::clone(&events);
+        struct ForcedHandlerGuard(Arc<Mutex<Vec<&'static str>>>);
+        impl Drop for ForcedHandlerGuard {
+            fn drop(&mut self) {
+                if let Ok(mut evts) = self.0.try_lock() {
+                    evts.push("handler_cancelled");
+                }
+            }
+        }
+
+        let app = Router::new().route(
+            "/hang",
+            get({
+                let started_tx = Arc::clone(&started_tx);
+                let events_handler = Arc::clone(&events_handler);
+                move || {
+                    let started_tx = Arc::clone(&started_tx);
+                    let events_handler = Arc::clone(&events_handler);
+                    async move {
+                        let _guard = ForcedHandlerGuard(events_handler);
+                        if let Some(tx) = started_tx.lock().await.take() {
+                            let _ = tx.send(());
+                        }
+                        sleep(Duration::from_millis(5000)).await;
+                        "ok"
+                    }
+                }
+            }),
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("deve criar listener");
+        let addr = listener.local_addr().expect("obter endereço");
+
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let events_server = Arc::clone(&events);
+        let server_state = state.clone();
+
+        let server_task = tokio::spawn(async move {
+            let res = serve_with_graceful_shutdown(
+                listener,
+                app,
+                async move {
+                    let _ = shutdown_rx.await;
+                },
+                Duration::from_millis(100),
+                Some(server_state),
+            )
+            .await;
+            events_server.lock().await.push("server_stopped");
+            res
+        });
+
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let request_task =
+            tokio::spawn(async move { client.get(format!("http://{addr}/hang")).send().await });
+
+        started_rx.await.expect("handler deve ter iniciado");
+        shutdown_tx.send(()).expect("envia sinal de shutdown");
+
+        let _ = request_task.await;
+        let server_res = server_task.await.expect("join server deve ter sucesso");
+        assert!(server_res.is_ok());
+
+        assert!(
+            pool_handle.is_closed(),
+            "o pool de banco deve estar fechado ao término do shutdown forçado"
+        );
+
+        let recorded_events = events.lock().await.clone();
+        assert_eq!(
+            recorded_events,
+            vec!["handler_cancelled", "server_stopped"],
+            "o handler lento deve ser cancelado e finalizado antes do encerramento do pool"
         );
     }
 }

@@ -27,6 +27,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    stop_grace_period: 30s
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-capp}:${POSTGRES_PASSWORD:-capp}@postgres:5432/${POSTGRES_DB:-capp}
       RUST_LOG: ${RUST_LOG:-info}

@@ -517,8 +517,11 @@ usuário, senha e banco configurados, usando o endereço `postgres:5432`.
 Ao executar com Cargo no host, forneça a URL explicitamente, usando
 `localhost` e a porta publicada em `POSTGRES_PORT`.
 
-`BACKEND_PORT` altera somente o mapeamento do Compose. O processo Rust escuta em
-`0.0.0.0:3000`, tanto no container quanto na execução direta com Cargo.
+`BACKEND_PORT` define a porta publicada no host pelo Compose (`${BACKEND_PORT:-3000}:3000`).
+O processo Rust vincula-se ao endereço definido por `BACKEND_BIND_ADDRESS` (padrão `0.0.0.0:3000`).
+No Compose, o serviço do backend está configurado com `stop_grace_period: 30s` para garantir
+que o Docker conceda tempo superior ao prazo de drenagem (`SHUTDOWN_TIMEOUT_SECS`, padrão 15s)
+antes de emitir qualquer sinal de término forçado (`SIGKILL`).
 
 ---
 
@@ -701,8 +704,11 @@ curl -i http://localhost:3000/health
 curl -i http://localhost:3000/ready
 ```
 
-`/health` retorna HTTP 200 quando a API responde. `/ready` executa uma consulta
-no PostgreSQL e retorna HTTP 200 no sucesso ou HTTP 503 em erro ou timeout.
+`/health` retorna HTTP 200 quando a API responde. `/ready` verifica se o servidor
+está pronto para receber tráfego: retorna HTTP 503 Service Unavailable imediatamente
+se o backend estiver em processo de encerramento controlado (drenagem) ou se o sinal
+de shutdown for recebido durante a consulta. Caso contrário, executa `SELECT 1 AS ok`
+no PostgreSQL, retornando HTTP 200 no sucesso ou HTTP 503 em caso de erro ou timeout (2 segundos).
 
 Para consultar o banco diretamente, na raiz do monorepo:
 

@@ -47,17 +47,21 @@ paths:
     get:
       operationId: getReadiness
       tags: [Infraestrutura]
-      summary: Verificar a comunicação com PostgreSQL
+      summary: Verificar a prontidão do servidor e a comunicação com PostgreSQL
       description: |
-        Executa SELECT 1 AS ok, com limite total de dois segundos para aquisição
-        da conexão e execução. Não verifica tabelas, versão do esquema ou
-        disponibilidade dos provedores de autenticação. As respostas não têm corpo.
+        Verifica se o servidor está pronto para atender requisições externas.
+        Retorna HTTP 503 imediatamente se o servidor estiver em processo de
+        encerramento controlado (drenagem) ou se o encerramento for iniciado
+        durante a consulta. Caso contrário, executa SELECT 1 AS ok com limite
+        total de dois segundos para aquisição da conexão e execução. Não verifica
+        tabelas, versão do esquema ou disponibilidade dos provedores de
+        autenticação. As respostas não têm corpo.
       security: []
       responses:
         "200":
-          description: Consulta ao PostgreSQL concluída.
+          description: O servidor está pronto e a comunicação com o PostgreSQL foi confirmada.
         "503":
-          description: Erro de comunicação com PostgreSQL ou tempo limite excedido.
+          description: O servidor está em drenagem de encerramento ou ocorreu erro/timeout na consulta ao PostgreSQL.
 
   /auth/institutional/verify:
     post:

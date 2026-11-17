@@ -105,11 +105,51 @@ impl ServerConfig {
     /// assert!(!config.bind_address.is_empty());
     /// ```
     pub fn from_env() -> Result<Self, ConfigError> {
-        let bind_address =
-            env::var("BACKEND_BIND_ADDRESS").unwrap_or_else(|_| DEFAULT_BIND_ADDRESS.to_string());
+        Self::from_lookup(|key| env::var(key).ok())
+    }
 
-        let shutdown_timeout = match env::var("SHUTDOWN_TIMEOUT_SECS") {
-            Ok(val) => {
+    /// Carrega e valida as configurações a partir de uma função arbitrária de busca de variáveis.
+    ///
+    /// Permite testar o carregamento de configurações de forma determinística e isolada,
+    /// sem mutação concorrente de variáveis globais de ambiente no processo.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `lookup`: função ou fechamento que consulta o valor opcional de uma variável.
+    ///
+    /// # Retorno
+    ///
+    /// Retorna [`ServerConfig`] com as propriedades resolvidas ou seus padrões.
+    ///
+    /// # Erros
+    ///
+    /// Retorna [`ConfigError::InvalidValue`] se `SHUTDOWN_TIMEOUT_SECS` contiver um valor não numérico,
+    /// zero ou superior a 300 segundos.
+    ///
+    /// # Exemplos
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use backend::config::ServerConfig;
+    ///
+    /// let config = ServerConfig::from_lookup(|key| match key {
+    ///     "SHUTDOWN_TIMEOUT_SECS" => Some("20".to_string()),
+    ///     "BACKEND_BIND_ADDRESS" => Some("127.0.0.1:8080".to_string()),
+    ///     _ => None,
+    /// }).expect("configuração válida");
+    /// assert_eq!(config.shutdown_timeout, Duration::from_secs(20));
+    /// assert_eq!(config.bind_address, "127.0.0.1:8080");
+    /// ```
+    pub fn from_lookup<F>(lookup: F) -> Result<Self, ConfigError>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        let bind_address = lookup("BACKEND_BIND_ADDRESS")
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_BIND_ADDRESS.to_string());
+
+        let shutdown_timeout = match lookup("SHUTDOWN_TIMEOUT_SECS") {
+            Some(val) => {
                 let secs: u64 = val.parse().map_err(|_| ConfigError::InvalidValue {
                     var: "SHUTDOWN_TIMEOUT_SECS",
                     details: format!(
@@ -128,7 +168,7 @@ impl ServerConfig {
 
                 Duration::from_secs(secs)
             }
-            Err(_) => DEFAULT_SHUTDOWN_TIMEOUT,
+            None => DEFAULT_SHUTDOWN_TIMEOUT,
         };
 
         Ok(Self {
@@ -157,79 +197,121 @@ mod tests {
     }
 
     #[test]
-    fn test_server_config_from_env_defaults_when_unset() {
-        unsafe {
-            env::remove_var("SHUTDOWN_TIMEOUT_SECS");
-            env::remove_var("BACKEND_BIND_ADDRESS");
-        }
-        let config = ServerConfig::from_env().expect("configuração padrão deve ser válida");
+    fn test_server_config_from_lookup_defaults_when_unset() {
+        let config =
+            ServerConfig::from_lookup(|_| None).expect("configuração padrão deve ser válida");
         assert_eq!(config.bind_address, DEFAULT_BIND_ADDRESS);
         assert_eq!(config.shutdown_timeout, DEFAULT_SHUTDOWN_TIMEOUT);
     }
 
     #[test]
-    fn test_server_config_from_env_custom_valid() {
-        unsafe {
-            env::set_var("SHUTDOWN_TIMEOUT_SECS", "25");
-            env::set_var("BACKEND_BIND_ADDRESS", "127.0.0.1:4500");
-        }
-        let config = ServerConfig::from_env().expect("deve carregar variáveis personalizadas");
+    fn test_server_config_from_lookup_custom_valid() {
+        let config = ServerConfig::from_lookup(|key| match key {
+            "SHUTDOWN_TIMEOUT_SECS" => Some("25".to_string()),
+            "BACKEND_BIND_ADDRESS" => Some("127.0.0.1:4500".to_string()),
+            _ => None,
+        })
+        .expect("deve carregar variáveis personalizadas");
         assert_eq!(config.bind_address, "127.0.0.1:4500");
         assert_eq!(config.shutdown_timeout, Duration::from_secs(25));
-        unsafe {
-            env::remove_var("SHUTDOWN_TIMEOUT_SECS");
-            env::remove_var("BACKEND_BIND_ADDRESS");
-        }
     }
 
     #[test]
-    fn test_server_config_from_env_invalid_string() {
-        unsafe {
-            env::set_var("SHUTDOWN_TIMEOUT_SECS", "texto_invalido");
-        }
-        let err = ServerConfig::from_env().expect_err("deve falhar com string não numérica");
+    fn test_server_config_from_lookup_boundary_values() {
+        let min_config = ServerConfig::from_lookup(|key| match key {
+            "SHUTDOWN_TIMEOUT_SECS" => Some(MIN_SHUTDOWN_TIMEOUT_SECS.to_string()),
+            _ => None,
+        })
+        .expect("limite inferior deve ser aceito");
+        assert_eq!(
+            min_config.shutdown_timeout,
+            Duration::from_secs(MIN_SHUTDOWN_TIMEOUT_SECS)
+        );
+
+        let max_config = ServerConfig::from_lookup(|key| match key {
+            "SHUTDOWN_TIMEOUT_SECS" => Some(MAX_SHUTDOWN_TIMEOUT_SECS.to_string()),
+            _ => None,
+        })
+        .expect("limite superior deve ser aceito");
+        assert_eq!(
+            max_config.shutdown_timeout,
+            Duration::from_secs(MAX_SHUTDOWN_TIMEOUT_SECS)
+        );
+    }
+
+    #[test]
+    fn test_server_config_from_lookup_invalid_string() {
+        let err = ServerConfig::from_lookup(|key| match key {
+            "SHUTDOWN_TIMEOUT_SECS" => Some("texto_invalido".to_string()),
+            _ => None,
+        })
+        .expect_err("deve falhar com string não numérica");
+
         match err {
             ConfigError::InvalidValue { var, details } => {
                 assert_eq!(var, "SHUTDOWN_TIMEOUT_SECS");
                 assert!(details.contains("esperado número inteiro"));
             }
         }
-        unsafe {
-            env::remove_var("SHUTDOWN_TIMEOUT_SECS");
-        }
     }
 
     #[test]
-    fn test_server_config_from_env_zero_is_invalid() {
-        unsafe {
-            env::set_var("SHUTDOWN_TIMEOUT_SECS", "0");
-        }
-        let err = ServerConfig::from_env().expect_err("deve falhar com zero");
+    fn test_server_config_from_lookup_zero_is_invalid() {
+        let err = ServerConfig::from_lookup(|key| match key {
+            "SHUTDOWN_TIMEOUT_SECS" => Some("0".to_string()),
+            _ => None,
+        })
+        .expect_err("deve falhar com zero");
+
         match err {
             ConfigError::InvalidValue { var, details } => {
                 assert_eq!(var, "SHUTDOWN_TIMEOUT_SECS");
                 assert!(details.contains("o prazo deve estar entre"));
             }
         }
-        unsafe {
-            env::remove_var("SHUTDOWN_TIMEOUT_SECS");
-        }
     }
 
     #[test]
-    fn test_server_config_from_env_exceeds_max() {
-        unsafe {
-            env::set_var("SHUTDOWN_TIMEOUT_SECS", "301");
-        }
-        let err = ServerConfig::from_env().expect_err("deve falhar acima do limite máximo");
+    fn test_server_config_from_lookup_exceeds_max() {
+        let err = ServerConfig::from_lookup(|key| match key {
+            "SHUTDOWN_TIMEOUT_SECS" => Some("301".to_string()),
+            _ => None,
+        })
+        .expect_err("deve falhar acima do limite máximo");
+
         match err {
             ConfigError::InvalidValue { var, details } => {
                 assert_eq!(var, "SHUTDOWN_TIMEOUT_SECS");
                 assert!(details.contains("o prazo deve estar entre"));
             }
         }
-        unsafe {
-            env::remove_var("SHUTDOWN_TIMEOUT_SECS");
+    }
+
+    #[test]
+    fn helper_subprocess_env() {
+        if std::env::var("__CAPP_SUBPROCESS_CONFIG_TEST").as_deref() == Ok("1") {
+            let config =
+                ServerConfig::from_env().expect("deve carregar do ambiente do subprocesso");
+            assert_eq!(config.bind_address, "127.0.0.1:4500");
+            assert_eq!(config.shutdown_timeout, Duration::from_secs(25));
         }
+    }
+
+    #[test]
+    fn test_server_config_from_env_in_isolated_subprocess() {
+        let exe = match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(_) => return,
+        };
+        let status = std::process::Command::new(exe)
+            .arg("--exact")
+            .arg("config::tests::helper_subprocess_env")
+            .arg("--nocapture")
+            .env("__CAPP_SUBPROCESS_CONFIG_TEST", "1")
+            .env("BACKEND_BIND_ADDRESS", "127.0.0.1:4500")
+            .env("SHUTDOWN_TIMEOUT_SECS", "25")
+            .status()
+            .expect("deve executar subprocesso de teste");
+        assert!(status.success(), "subprocesso de teste falhou");
     }
 }
