@@ -23,6 +23,8 @@ A tabela a seguir consolida todas as configurações e credenciais do ecossistem
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Backend** | `DATABASE_URL` / `POSTGRES_*` | Conexão autenticada ao PostgreSQL | **Crítica (Segredo Privado)** | **Ativo (Consumido Hoje)** | Variáveis de runtime / Secrets Manager | **NUNCA** |
 | **Backend** | `FIREBASE_PROJECT_ID` | Identificador do projeto Firebase para validação de `aud` nos ID tokens | **Pública / Restrita (Configuração)** | **Ativo (Consumido Hoje)** | Variáveis de runtime / Compose | **NUNCA** |
+| **Backend** | `FIREBASE_PROJECT_NUMBER` | Número do projeto Firebase para emissor e audiência do App Check | **Pública (Configuração)** | **Ativo (Consumido Hoje)** | Variáveis de runtime / Compose | **Sim (Público no app)** |
+| **Backend** | `FIREBASE_APP_CHECK_APP_IDS` | App IDs Firebase autorizados no App Check | **Pública (Configuração)** | **Ativo (Consumido Hoje)** | Variáveis de runtime / Compose | **Sim (Público no app)** |
 | **Backend** | `SERVER_HOST` / `BACKEND_PORT` | Endereço e porta do listener HTTP (porta no intervalo 1..=65535) | **Pública (Configuração)** | **Ativo (Consumido Hoje)** | Variáveis de runtime / Compose | Não aplicável |
 | **Backend** | `RUST_LOG` / `APP_ENV` | Nível de telemetria e identificador de ambiente | **Pública (Configuração)** | **Ativo (Consumido Hoje)** | Variáveis de runtime / Compose | Não aplicável |
 | **Backend** | `FIREBASE_SERVICE_ACCOUNT_KEY` | Autenticação administrativa e revogação de tokens via Firebase Admin SDK | **Crítica (Segredo Privado)** | *Integração Futura* | Secrets Manager / Arquivo restrito (chmod 600) | **NUNCA** |

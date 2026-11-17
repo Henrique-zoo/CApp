@@ -126,7 +126,9 @@ Exemplo:
     ├── autenticacao.feature
     ├── noticias.feature
     ├── eventos.feature
-    └── eleicoes.feature
+    └── eleicoes/
+        ├── configuracao.feature
+        └── votacao.feature
 
 Esses arquivos representam o comportamento esperado do sistema,
 independentemente da implementação.

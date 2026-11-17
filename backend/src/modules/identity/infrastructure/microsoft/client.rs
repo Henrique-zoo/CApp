@@ -140,8 +140,8 @@ impl InstitutionalDirectory for MicrosoftGraphClient {
     /// Consulta `/me` selecionando ID, nome, e-mail e `jobTitle`.
     ///
     /// Converte os campos para `InstitutionalProfile` sem persistência. Para estudantes,
-    /// `jobTitle` vazio ou composto apenas por espaços resulta em `course_name = None`; outros
-    /// valores são preservados, sem normalização ou associação a um curso local.
+    /// `jobTitle` ausente, nulo, vazio ou composto apenas por espaços resulta em acesso
+    /// não estudantil; outros valores são preservados, sem associação a um curso local.
     /// Não estudantes recebem `NonStudent`, sem interpretar cargos como cursos.
     /// A comparação do ID com o vínculo Firebase cabe ao serviço.
     ///
@@ -165,13 +165,7 @@ impl InstitutionalDirectory for MicrosoftGraphClient {
             id: user.id,
             name: user.display_name,
             mail: user.mail,
-            affiliation: if is_student {
-                InstitutionalAffiliation::Student {
-                    course_name: user.job_title.filter(|value| !value.trim().is_empty()),
-                }
-            } else {
-                InstitutionalAffiliation::NonStudent
-            },
+            affiliation: InstitutionalAffiliation::from_directory(is_student, user.job_title),
         })
     }
 

@@ -6,6 +6,8 @@
 //! - `DATABASE_URL`: obrigatória; URL confidencial de conexão PostgreSQL aceita pelo SQLx.
 //! - `FIREBASE_PROJECT_ID`: obrigatória; projeto esperado nos ID tokens, não vazio
 //!   e sem espaços em branco. Não é verificada a existência externa do projeto.
+//! - `FIREBASE_PROJECT_NUMBER`: número do projeto usado no emissor/audiência App Check.
+//! - `FIREBASE_APP_CHECK_APP_IDS`: App IDs permitidos, separados por vírgula.
 //! - `RUST_LOG`: filtro opcional do `tracing`; ausente ou inválido usa `info`.
 //! - `SERVER_HOST`: endereço de escuta do listener HTTP (padrão: `0.0.0.0`).
 //! - `BACKEND_PORT` ou `SERVER_PORT`: porta TCP do listener HTTP (padrão: `3000`).
@@ -13,8 +15,9 @@
 //!
 //! As variáveis são lidas do ambiente do processo com diagnóstico seguro: credenciais
 //! e segredos nunca são expostos em mensagens de erro ou logs de inicialização.
-//! As migrations embutidas são aplicadas após conectar ao banco e antes da abertura
-//! da porta HTTP; uma falha impede a inicialização da API.
+//! O ambiente do processo tem precedência; dotenvy também procura um `.env`
+//! no diretório de execução e nos ancestrais. As migrations embutidas são aplicadas após conectar ao banco
+//! e antes da abertura da porta HTTP; uma falha impede a inicialização da API.
 //!
 //! O subscriber encaminha os eventos de diagnóstico para a saída padrão.
 //! Após inicializá-lo, o processo configura um cliente HTTP compartilhado, com
@@ -35,7 +38,8 @@ use backend::{
     config::AppConfig,
     infrastructure::database::{MIGRATOR, PgDatabase},
     modules::identity::infrastructure::{
-        firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
+        firebase::{AppCheckVerifier, FirebaseTokenVerifier},
+        microsoft::MicrosoftGraphClient,
     },
 };
 use sqlx::postgres::PgPoolOptions;
@@ -90,7 +94,17 @@ async fn main() -> anyhow::Result<()> {
 
     let microsoft = MicrosoftGraphClient::new(http.clone());
 
-    let clients = Clients::new(firebase, microsoft);
+    let app_check = AppCheckVerifier::new(
+        env::var("FIREBASE_PROJECT_NUMBER")
+            .context("FIREBASE_PROJECT_NUMBER não está definida ou é inválida")?,
+        env::var("FIREBASE_APP_CHECK_APP_IDS")
+            .context("FIREBASE_APP_CHECK_APP_IDS não está definida ou é inválida")?
+            .split(',')
+            .map(|id| id.trim().to_owned())
+            .collect(),
+        http.clone(),
+    )?;
+    let clients = Clients::new(firebase, microsoft, app_check);
 
     let pool = PgPoolOptions::new()
         .connect(config.database_url().expose_secret())
@@ -108,6 +122,7 @@ async fn main() -> anyhow::Result<()> {
         .run(&pool)
         .await
         .context("Não foi possível aplicar as migrations do banco de dados")?;
+
     tracing::info!("Migrations do banco de dados atualizadas");
 
     let pg_database = PgDatabase::new(pool);
@@ -119,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Servidor HTTP ouvindo em {}", bind_addr);
 
-    let service = api::router::create_router().with_state(AppState::new(pg_database, clients));
+    let service = api::router::create_router(AppState::new(pg_database, clients));
 
     axum::serve(listener, service).await?;
 

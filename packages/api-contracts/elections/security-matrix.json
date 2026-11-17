@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "properties": [
+    {
+      "name": "Sigilo da escolha",
+      "mechanisms": [
+        "ElGamal no dispositivo",
+        "chave conjunta",
+        "decifração apenas dos agregados"
+      ],
+      "premises": [
+        "Pelo menos uma autoridade conserva o segredo e só coopera com a apuração final."
+      ],
+      "limits": [
+        "Conluio de todas as autoridades permite decifrar cédulas individuais.",
+        "Resultados unânimes ou eleitorados mínimos podem permitir inferências."
+      ],
+      "tests": [
+        "test_complete_tally_vectors",
+        "test_authority_proof_rejects_changed_share"
+      ]
+    },
+    {
+      "name": "Elegibilidade",
+      "mechanisms": [
+        "Firebase Auth",
+        "vínculo institucional vigente no momento do novo voto",
+        "voterId opaco vinculado à conta pelo backend"
+      ],
+      "premises": [
+        "Backend confiável; curso obtido exclusivamente do Graph."
+      ],
+      "limits": [
+        "Arquivos públicos não comprovam sozinhos a correspondência com matrícula real."
+      ],
+      "tests": [
+        "test_public_messages_exclude_credentials"
+      ],
+      "implementationIssues": [
+        137,
+        386
+      ]
+    },
+    {
+      "name": "Participação única",
+      "mechanisms": [
+        "restrição transacional por conta/eleição",
+        "idempotência do mesmo envio"
+      ],
+      "premises": [
+        "Backend resolve corretamente userId e voterId."
+      ],
+      "limits": [
+        "Trocar chave ou dispositivo não muda a identidade da conta."
+      ],
+      "tests": [
+        "test_snapshot_rejects_duplicate_voter"
+      ],
+      "implementationIssues": [
+        381,
+        282
+      ]
+    },
+    {
+      "name": "Integridade e verificabilidade",
+      "mechanisms": [
+        "RSA-PSS",
+        "hashes de objetos",
+        "quadro encadeado",
+        "recibo confirmado"
+      ],
+      "premises": [
+        "Chave do servidor conhecida e backend confiável."
+      ],
+      "limits": [
+        "Não se promete detectar uma reescrita integral assinada pelo próprio backend malicioso."
+      ],
+      "tests": [
+        "test_signature_rejects_mutation",
+        "test_snapshot_rejects_broken_chain",
+        "test_receipt_matches_record"
+      ]
+    },
+    {
+      "name": "Justiça temporal",
+      "mechanisms": [
+        "intervalo [startsAt,endsAt)",
+        "prorrogação versionada",
+        "proibição de encerramento antecipado",
+        "contribuições somente após encerramento"
+      ],
+      "premises": [
+        "Relógio e execução do backend confiáveis."
+      ],
+      "limits": [
+        "Cancelamento não autoriza obter contagens antecipadas."
+      ],
+      "tests": [
+        "test_schedule_rejects_unchanged_or_earlier_end",
+        "test_schedule_preserves_occurred_start",
+        "test_closure_rejects_early_end"
+      ],
+      "implementationIssues": [
+        132,
+        379
+      ]
+    },
+    {
+      "name": "Validade individual da cédula",
+      "mechanisms": [
+        "interface produz uma única escolha, incluindo Nulo",
+        "App Check como proteção assumida suficiente nesta entrega"
+      ],
+      "premises": [
+        "Cliente executa corretamente a geração; não há prova criptográfica 0/1 e soma=1."
+      ],
+      "limits": [
+        "App Check não comprova matematicamente o conteúdo cifrado.",
+        "Irregularidades compensadas podem passar no guardrail."
+      ],
+      "tests": [
+        "test_compensated_irregularity_is_an_explicit_limitation"
+      ]
+    },
+    {
+      "name": "Consistência do agregado",
+      "mechanisms": [
+        "mesma fotografia para agregado e contagem",
+        "totais em [0,N]",
+        "soma das opções incluindo Nulo igual a N"
+      ],
+      "premises": [
+        "N representa eleitores distintos com cédula aceita."
+      ],
+      "limits": [
+        "Condição necessária, não prova de validade de cada cédula."
+      ],
+      "tests": [
+        "test_complete_tally_vectors",
+        "test_count_mismatch_annuls",
+        "test_out_of_range_annuls"
+      ]
+    },
+    {
+      "name": "Disponibilidade da apuração",
+      "mechanisms": [
+        "estado incomplete explícito"
+      ],
+      "premises": [
+        "Todas as autoridades cooperam e conservam seus segredos."
+      ],
+      "limits": [
+        "Não há recuperação por limiar nesta versão.",
+        "Punição administrativa não recupera a contribuição ausente."
+      ],
+      "tests": [
+        "test_incomplete_has_no_totals"
+      ],
+      "implementationIssues": [
+        379
+      ]
+    },
+    {
+      "name": "Transporte",
+      "mechanisms": [
+        "HTTPS com terminação TLS no Caddy",
+        "Validação de confiança, validade e nome do servidor no app",
+        "Firebase Auth e App Check para requisições de negócio"
+      ],
+      "premises": [
+        "Cliente confia explicitamente na CA/certificado correto; não aceita certificados arbitrários.",
+        "HTTP entre proxy e backend permanece restrito à rede privada do Compose no mesmo host; a porta do backend não é exposta externamente.",
+        "Chamadas com credenciais começam diretamente em HTTPS."
+      ],
+      "limits": [
+        "TLS não protege dispositivos comprometidos nem comprova validade individual das cédulas.",
+        "Os testes do corpus são offline e não comprovam o transporte; a configuração TLS será implementada e testada na entrega integrada #385 e preservada na integração de produto #386."
+      ],
+      "tests": [],
+      "implementationIssues": [
+        385,
+        386
+      ]
+    },
+    {
+      "name": "Publicidade e coerção",
+      "mechanisms": [
+        "identificador eleitoral opaco",
+        "dados de escolha publicados apenas cifrados"
+      ],
+      "premises": [
+        "Participação é pública; não se promete anonimato de participação."
+      ],
+      "limits": [
+        "Eleitor que revela aleatoriedade pode demonstrar sua escolha.",
+        "Não se promete resistência à coerção ou impossibilidade de compra de votos."
+      ],
+      "tests": [
+        "test_public_messages_exclude_credentials"
+      ]
+    }
+  ],
+  "bddChanges": {
+    "features/eleicoes/votacao.feature": "Remover inscrição/chave anteriores à abertura; cobrir primeiro voto, Nulo, soma, dispositivo e vínculos. Automação funcional permanece pendente.",
+    "features/eleicoes/configuracao.feature": "Cobrir escolha entre votação secreta e identificada; chapa única e autoridades na modalidade secreta; adiamento, prorrogação e cancelamento sem apuração antecipada."
+  },
+  "academicDeviations": [
+    "Confiança no backend.",
+    "Cadastro e chave do eleitor durante a primeira votação.",
+    "App Check/cliente assumidos para validade individual, com guardrail agregado.",
+    "Chapa única permitida.",
+    "Cliente integrado ao CApp/Firebase em vez de CLI independente."
+  ]
+}

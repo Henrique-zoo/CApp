@@ -8,7 +8,10 @@
 ///
 /// O widget registra um WidgetsBindingObserver ao entrar na árvore. Ao receber
 /// AppLifecycleState.resumed, chama refresh no controlador atualmente associado.
-/// O controlador pode publicar outro destino, que será apresentado pelo gate.
+/// O controlador pode recuperar evidência ausente ou renovar evidência próxima
+/// do vencimento ou expirada, sem autorização interativa. A retomada respeita
+/// a espera progressiva de tentativas após falhas temporárias; o observador
+/// não reinicia essa agenda. O destino publicado continua sendo apresentado pelo gate.
 ///
 /// Pausas e estados intermediários não são interpretados como logout. Ao sair
 /// da árvore, o widget remove apenas seu registro de observação e mantém o child
@@ -18,8 +21,9 @@
 ///
 /// O observador pertence à camada app por conhecer eventos Flutter e a API pública
 /// do módulo de identidade. A aplicação permanece independente do framework.
-/// A biblioteca não possui o controlador, não abre login, não consulta o backend
-/// e não calcula datas de expiração por conta própria.
+/// A biblioteca não possui o controlador nem decide quando acessar a rede.
+/// Encaminha a retomada pela API da aplicação, que aplica sua política de
+/// renovação e expiração; o widget não calcula datas nem acessa SDKs de serviços.
 library;
 
 import 'package:flutter/widgets.dart';

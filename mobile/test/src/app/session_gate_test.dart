@@ -6,6 +6,8 @@ library;
 
 import 'dart:async';
 
+import 'package:capp/src/modules/identity/application/errors/microsoft_interaction_required_exception.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:capp/src/app/app.dart';
@@ -23,9 +25,11 @@ Widget _branch(String marker) =>
 Widget _gateHost(IdentityHarness h) => SessionGate(
   controller: h.controller,
   restoringBuilder: (_) => _branch('restoring'),
+  signingOutBuilder: (_, _) => _branch('signing-out'),
   entryBuilder: (_, _) => _branch('entry'),
   signedInBuilder: (_, state) {
     final uid = state.firebaseUid;
+
     return _branch('ready: $uid');
   },
   restorationFailedBuilder: (_, _) => _branch('restoration-failed'),
@@ -38,18 +42,27 @@ void main() {
     (tester) async {
       final h = IdentityHarness(uid: 'user-a');
       final read = Completer<SessionCacheLoadResult>();
+
+      h.store.results['user-a'] = SessionCacheFound(testVerification());
       h.store.onLoad = (_) => read.future;
+
       addTearDown(() {
         if (!read.isCompleted) read.complete(const SessionCacheMissing());
       });
+
       try {
         await tester.pumpWidget(_gateHost(h));
+
         expect(find.text('restoring'), findsOneWidget);
+
         h.controller.start();
         await tester.pump();
+
         expect(find.text('restoring'), findsOneWidget);
+
         read.complete(SessionCacheFound(testVerification()));
         await tester.pumpAndSettle();
+
         expect(find.text('ready: user-a'), findsOneWidget);
         expect(h.gateway.calls, 0);
         expect(h.microsoft.signInCalls, 0);
@@ -64,11 +77,14 @@ void main() {
     tester,
   ) async {
     final h = IdentityHarness();
+
     try {
       h.store.results['user-a'] = SessionCacheFound(testVerification());
+
       h.controller.start();
       await tester.pumpWidget(_gateHost(h));
       await tester.pump();
+
       expect(find.text('entry'), findsOneWidget);
       expect(find.text('ready: user-a'), findsNothing);
       expect(h.store.loadedUids, isEmpty);
@@ -82,13 +98,22 @@ void main() {
     tester,
   ) async {
     final h = IdentityHarness(uid: 'user-a');
+
+    h.microsoft.onGetAccessTokenForCurrentUser = () async =>
+        throw MicrosoftInteractionRequiredException(
+          cause: Exception('MFA required'),
+          stackTrace: StackTrace.current,
+        );
+
     try {
       h.store.results['user-a'] = SessionCacheFound(
         testVerification(expiresAt: h.instant),
       );
+
       h.controller.start();
       await tester.pumpWidget(_gateHost(h));
       await tester.pump();
+
       expect(h.controller.state, isA<SessionSignedIn>());
       expect(find.text('entry'), findsOneWidget);
       expect(find.text('ready: user-a'), findsNothing);
@@ -100,13 +125,17 @@ void main() {
 
   testWidgets('falha de acompanhamento possui ramo próprio', (tester) async {
     final h = IdentityHarness(uid: 'user-a');
+
     try {
       h.controller.start();
       await tester.pumpWidget(_gateHost(h));
       await tester.pump();
+
       final cause = Exception('observação indisponível');
+
       h.auth.fail(cause, StackTrace.current);
       await tester.pumpAndSettle();
+
       expect(find.text('restoration-failed'), findsOneWidget);
       expect(find.text('entry'), findsNothing);
       expect(
@@ -124,17 +153,22 @@ void main() {
   ) async {
     final first = IdentityHarness(uid: 'user-a');
     final second = IdentityHarness(uid: 'user-b');
+
     try {
       first.store.results['user-a'] = SessionCacheFound(testVerification());
+
       first.controller.start();
       await tester.pumpWidget(_gateHost(first));
       await tester.pump();
+
       expect(find.text('ready: user-a'), findsOneWidget);
+
       second.controller.start();
       await tester.pumpWidget(_gateHost(second));
       await tester.pump();
+
       expect(find.text('ready: user-a'), findsNothing);
-      expect(find.text('entry'), findsOneWidget);
+      expect(find.text('ready: user-b'), findsOneWidget);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.runAsync(first.dispose);
@@ -147,8 +181,10 @@ void main() {
   ) async {
     final h = IdentityHarness(uid: 'user-a');
     final readiness = BackendReadinessController(checkReadiness: () async {});
+
     try {
       h.store.results['user-a'] = SessionCacheFound(testVerification());
+
       h.controller.start();
       await tester.pumpWidget(
         SessionLifecycleObserver(
@@ -159,8 +195,11 @@ void main() {
           ),
         ),
       );
+
       await tester.pump();
-      final context = tester.element(find.text('Pessoa Exemplo'));
+
+      final context = tester.element(find.byType(MainPage));
+
       unawaited(
         Navigator.of(context).push(
           MaterialPageRoute<void>(
@@ -168,17 +207,27 @@ void main() {
           ),
         ),
       );
+
       await tester.pumpAndSettle();
+
       expect(find.text('Tela interna anterior'), findsOneWidget);
+
+      h.microsoft.onGetAccessTokenForCurrentUser = () async =>
+          throw MicrosoftInteractionRequiredException(
+            cause: Exception('MFA required'),
+            stackTrace: StackTrace.current,
+          );
       h.instant = h.instant.add(const Duration(hours: 2));
+
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump();
+
       expect(find.text('Tela interna anterior'), findsNothing);
-      expect(find.text('Entrar com Microsoft'), findsOneWidget);
+      expect(find.text('Continuar com Microsoft'), findsOneWidget);
       expect(h.gateway.calls, 0);
       expect(
-        Navigator.of(tester.element(find.text('Entrar com Microsoft')))
+        Navigator.of(tester.element(find.text('Continuar com Microsoft')))
             .canPop(),
         isFalse,
       );

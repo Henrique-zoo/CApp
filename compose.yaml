@@ -32,6 +32,8 @@ services:
       RUST_LOG: ${RUST_LOG:-info}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       APP_ENV: ${APP_ENV:-development}
+      FIREBASE_PROJECT_NUMBER: ${FIREBASE_PROJECT_NUMBER:-}
+      FIREBASE_APP_CHECK_APP_IDS: ${FIREBASE_APP_CHECK_APP_IDS:-}
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     depends_on:
