@@ -1,0 +1,3 @@
+fail-on: MISSING-VERSION-BUMP
+deprecation-days-stable: 180
+err-ignore: .oasdiff-err-ignore.txt

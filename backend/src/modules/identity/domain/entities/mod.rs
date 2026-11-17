@@ -1,4 +1,14 @@
-//! Entidades do domínio de identidade institucional e ciclo de vida de dados discentes.
+//! Entidades usadas na verificação institucional e ciclo de vida de dados discentes.
+//!
+//! [`institution`] configura o tenant e o grupo de estudantes.
+//! [`institutional_verification`] registra evidência por UID Firebase, independente
+//! de provisionamento de usuário interno. Os derives SQLx mapeiam linhas para esses
+//! tipos; não aplicam migrations nem consultam o banco.
+//! [`user`] modela o usuário interno provisionado na plataforma.
+
+pub mod institution;
+pub mod institutional_verification;
+pub mod user;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

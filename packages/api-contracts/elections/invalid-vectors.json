@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "duplicate-property",
+      "stage": "json",
+      "raw": "{\"version\":1,\"version\":1}"
+    },
+    {
+      "name": "fractional-version",
+      "stage": "json",
+      "raw": "{\"version\":1.0}"
+    },
+    {
+      "name": "crypto-number-instead-of-string",
+      "stage": "schema",
+      "base": "valid/ballot-0",
+      "path": [
+        "ciphertexts",
+        0,
+        "a"
+      ],
+      "value": 2
+    },
+    {
+      "name": "crypto-leading-zero",
+      "stage": "schema",
+      "base": "valid/ballot-0",
+      "path": [
+        "ciphertexts",
+        0,
+        "a"
+      ],
+      "value": "02"
+    },
+    {
+      "name": "unknown-field",
+      "stage": "schema",
+      "base": "valid/ballot-0",
+      "path": [
+        "extra"
+      ],
+      "value": true
+    },
+    {
+      "name": "wrong-election-signature",
+      "stage": "signature",
+      "base": "valid/ballot-0",
+      "path": [
+        "electionId"
+      ],
+      "value": "99999999-1111-4111-8111-111111111111"
+    },
+    {
+      "name": "duplicate-option",
+      "stage": "relations",
+      "base": "valid/ballot-0",
+      "path": [
+        "ciphertexts",
+        0,
+        "optionId"
+      ],
+      "value": "00000200-1111-4111-8111-111111111111"
+    },
+    {
+      "name": "broken-board-chain",
+      "stage": "relations",
+      "base": "valid/entry-1",
+      "path": [
+        "previousHash"
+      ],
+      "value": "b1fd68da6292b82466f2d77eaabb6ae563aa52c086209025022ad5bb372d2407"
+    },
+    {
+      "name": "unchanged-end",
+      "stage": "relations",
+      "base": "valid/delay",
+      "path": [
+        "endsAt"
+      ],
+      "value": "2026-11-22T12:00:00Z"
+    },
+    {
+      "name": "early-close",
+      "stage": "relations",
+      "base": "valid/closure",
+      "path": [
+        "closedAt"
+      ],
+      "value": "2026-11-24T12:00:00Z"
+    },
+    {
+      "name": "invalid-authority-proof",
+      "stage": "relations",
+      "base": "valid/share-0",
+      "path": [
+        "shares",
+        0,
+        "value"
+      ],
+      "value": "1"
+    },
+    {
+      "name": "wrong-receipt-index",
+      "stage": "relations",
+      "base": "valid/receipt-0",
+      "path": [
+        "index"
+      ],
+      "value": 2
+    }
+  ]
+}

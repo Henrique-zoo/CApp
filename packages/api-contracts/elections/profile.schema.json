@@ -1,0 +1,427 @@
+{
+  "type": "object",
+  "required": [
+    "protocol",
+    "version",
+    "canonicalization",
+    "encoding",
+    "signedPrefixHex",
+    "digest",
+    "digestEncoding",
+    "signature",
+    "group",
+    "limits",
+    "nullOptionId",
+    "nullOptionPosition",
+    "timestamps",
+    "votingInterval",
+    "premises",
+    "signatureInput",
+    "objectDigest",
+    "keyFingerprint",
+    "signers",
+    "rules",
+    "proofChallenges"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "capp-elections"
+    },
+    "version": {
+      "const": 1
+    },
+    "canonicalization": {
+      "const": "RFC8785"
+    },
+    "encoding": {
+      "const": "UTF-8"
+    },
+    "signedPrefixHex": {
+      "const": "434150502d454c454354494f4e532f310a"
+    },
+    "digest": {
+      "const": "SHA-256"
+    },
+    "digestEncoding": {
+      "const": "lowercase-hex"
+    },
+    "signature": {
+      "type": "object",
+      "required": [
+        "algorithm",
+        "hash",
+        "mgf",
+        "modulusBits",
+        "publicExponent",
+        "publicKeyEncoding",
+        "binaryEncoding",
+        "saltLengthBytes"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "RSA-PSS"
+        },
+        "hash": {
+          "const": "SHA-256"
+        },
+        "mgf": {
+          "const": "MGF1-SHA-256"
+        },
+        "modulusBits": {
+          "const": [
+            2048,
+            3072,
+            4096
+          ]
+        },
+        "publicExponent": {
+          "const": 65537
+        },
+        "publicKeyEncoding": {
+          "const": "DER-SubjectPublicKeyInfo-rsaEncryption"
+        },
+        "binaryEncoding": {
+          "const": "base64url-no-padding"
+        },
+        "saltLengthBytes": {
+          "const": 32
+        }
+      },
+      "additionalProperties": false
+    },
+    "group": {
+      "type": "object",
+      "required": [
+        "id",
+        "primeHex",
+        "order",
+        "generator",
+        "integerEncoding"
+      ],
+      "properties": {
+        "id": {
+          "const": "rfc3526-modp14"
+        },
+        "primeHex": {
+          "const": "ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a163bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed529077096966d670c354e4abc9804f1746c08ca18217c32905e462e36ce3be39e772c180e86039b2783a2ec07a28fb5c55df06f4c52c9de2bcbf6955817183995497cea956ae515d2261898fa051015728e5a8aacaa68ffffffffffffffff"
+        },
+        "order": {
+          "const": "(p-1)/2"
+        },
+        "generator": {
+          "const": "2"
+        },
+        "integerEncoding": {
+          "const": "unsigned-decimal-string-no-leading-zero"
+        }
+      },
+      "additionalProperties": false
+    },
+    "limits": {
+      "type": "object",
+      "required": [
+        "minSlates",
+        "maxSlates",
+        "maxVoters",
+        "maxAuthorities",
+        "maxSignedMessageBytes"
+      ],
+      "properties": {
+        "minSlates": {
+          "const": 1
+        },
+        "maxSlates": {
+          "const": 50
+        },
+        "maxVoters": {
+          "const": 100000
+        },
+        "maxAuthorities": {
+          "const": 52
+        },
+        "maxSignedMessageBytes": {
+          "const": 262144
+        }
+      },
+      "additionalProperties": false
+    },
+    "nullOptionId": {
+      "const": "00000000-0000-0000-0000-000000000000"
+    },
+    "nullOptionPosition": {
+      "const": "last"
+    },
+    "timestamps": {
+      "const": "UTC RFC3339 YYYY-MM-DDTHH:mm:ssZ without fractional seconds"
+    },
+    "votingInterval": {
+      "const": "[startsAt, endsAt)"
+    },
+    "premises": {
+      "type": "object",
+      "required": [
+        "backendTrusted",
+        "clientBallotValidityAssumed",
+        "firebaseAuthRequired",
+        "firebaseAppCheckRequired",
+        "httpsRequiredInThisDelivery",
+        "individualBallotValidityProofs",
+        "allAuthoritiesRequired"
+      ],
+      "properties": {
+        "backendTrusted": {
+          "const": true
+        },
+        "clientBallotValidityAssumed": {
+          "const": true
+        },
+        "firebaseAuthRequired": {
+          "const": true
+        },
+        "firebaseAppCheckRequired": {
+          "const": true
+        },
+        "httpsRequiredInThisDelivery": {
+          "const": true
+        },
+        "individualBallotValidityProofs": {
+          "const": false
+        },
+        "allAuthoritiesRequired": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "signatureInput": {
+      "const": "prefix || UTF8(JCS(payload))"
+    },
+    "objectDigest": {
+      "const": "SHA256(signatureInput), excluding the outer signature"
+    },
+    "keyFingerprint": {
+      "const": "SHA256(public key DER), lowercase hex"
+    },
+    "signers": {
+      "type": "object",
+      "required": [
+        "ballot",
+        "decryption-share",
+        "otherKinds"
+      ],
+      "properties": {
+        "ballot": {
+          "const": "payload.publicKey, bound by backend to the authenticated voter"
+        },
+        "decryption-share": {
+          "const": "signingKey of authorityId in the manifest"
+        },
+        "otherKinds": {
+          "const": "server signing key; manifest contains its public copy"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rules": {
+      "type": "object",
+      "required": [
+        "options",
+        "authorities",
+        "groupElements",
+        "calendar",
+        "cancellation",
+        "scheduleChain",
+        "boardChain",
+        "receipt",
+        "counting",
+        "outcomes",
+        "privacy",
+        "transport",
+        "binary",
+        "serverKey",
+        "eligibility",
+        "retries",
+        "ordering",
+        "terminalStates",
+        "authorityCustody",
+        "keyProof",
+        "numericLiterals"
+      ],
+      "properties": {
+        "options": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authorities": {
+          "type": "string",
+          "minLength": 1
+        },
+        "groupElements": {
+          "type": "string",
+          "minLength": 1
+        },
+        "calendar": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cancellation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scheduleChain": {
+          "type": "string",
+          "minLength": 1
+        },
+        "boardChain": {
+          "type": "string",
+          "minLength": 1
+        },
+        "receipt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "counting": {
+          "type": "string",
+          "minLength": 1
+        },
+        "outcomes": {
+          "type": "string",
+          "minLength": 1
+        },
+        "privacy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transport": {
+          "type": "string",
+          "minLength": 1
+        },
+        "binary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "serverKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "eligibility": {
+          "type": "string",
+          "minLength": 1
+        },
+        "retries": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ordering": {
+          "type": "string",
+          "minLength": 1
+        },
+        "terminalStates": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authorityCustody": {
+          "type": "string",
+          "minLength": 1
+        },
+        "keyProof": {
+          "type": "string",
+          "minLength": 1
+        },
+        "numericLiterals": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "proofChallenges": {
+      "type": "object",
+      "required": [
+        "hash",
+        "authorityKey",
+        "decryption"
+      ],
+      "properties": {
+        "hash": {
+          "const": "c = integer_big_endian(SHA256(prefix || UTF8(JCS(challengePayload)))) mod q"
+        },
+        "authorityKey": {
+          "type": "object",
+          "required": [
+            "kind",
+            "fields",
+            "verification"
+          ],
+          "properties": {
+            "kind": {
+              "const": "authority-key-proof"
+            },
+            "fields": {
+              "const": [
+                "version",
+                "kind",
+                "electionId",
+                "groupId",
+                "authorityId",
+                "role",
+                "slateId",
+                "signingKey",
+                "publicValue",
+                "commitment"
+              ]
+            },
+            "verification": {
+              "const": "g^response = commitment * publicValue^c mod p"
+            }
+          },
+          "additionalProperties": false
+        },
+        "decryption": {
+          "type": "object",
+          "required": [
+            "kind",
+            "fields",
+            "verification"
+          ],
+          "properties": {
+            "kind": {
+              "const": "decryption-proof"
+            },
+            "fields": {
+              "const": [
+                "version",
+                "kind",
+                "electionId",
+                "groupId",
+                "manifestHash",
+                "closureHash",
+                "aggregateHash",
+                "authorityId",
+                "optionId",
+                "publicValue",
+                "a",
+                "b",
+                "value",
+                "commitmentG",
+                "commitmentA"
+              ]
+            },
+            "verification": {
+              "const": [
+                "g^response = commitmentG * publicValue^c mod p",
+                "a^response = commitmentA * value^c mod p"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:capp:elections:profile:1",
+  "title": "Perfil normativo v1"
+}
