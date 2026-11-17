@@ -111,7 +111,7 @@ jobs:
         run: docker build -t capp-backend:audit -f backend/Dockerfile backend
 
       - name: Scan backend Docker image with Trivy
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@master
         with:
           image-ref: "capp-backend:audit"
           format: "table"
@@ -121,7 +121,7 @@ jobs:
           severity: "CRITICAL,HIGH"
 
       - name: Scan PostgreSQL Docker image with Trivy
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@master
         with:
           image-ref: "postgres:17-alpine"
           format: "table"
