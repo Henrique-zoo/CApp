@@ -9,12 +9,14 @@
 //! - [`api`]: estado, contrato de erros e composição HTTP.
 //! - [`modules::identity`]: verificação institucional e evidência de elegibilidade.
 //! - [`infrastructure::database`]: adaptador PostgreSQL e migrations compartilhadas.
-//! - [`config`] e [`shared`]: espaços reservados para configuração e tipos comuns.
+//! - [`config`]: parâmetros operacionais e prazos de encerramento do servidor.
+//! - [`shared`]: espaço reservado para tipos comuns.
 //!
 //! Estão registradas as rotas `/health`, `/ready` e
 //! `POST /auth/institutional/verify`. A infraestrutura de extração de identidade
 //! para handlers protegidos está implementada no módulo de identidade, mas nenhuma
 //! rota atual a utiliza. Os demais módulos mantêm sua estrutura prevista.
+//! [`api::shutdown`] executa o encerramento controlado do servidor HTTP.
 //! Provisionamento, login no mobile e encerramento de sessão não são implementados
 //! por esta biblioteca.
 //!

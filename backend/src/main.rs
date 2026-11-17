@@ -8,7 +8,8 @@
 //! - `FIREBASE_PROJECT_NUMBER`: número do projeto usado no emissor/audiência App Check.
 //! - `FIREBASE_APP_CHECK_APP_IDS`: App IDs permitidos, separados por vírgula.
 //! - `RUST_LOG`: filtro opcional do `tracing`; ausente ou inválido usa `info`.
-//! - Endereço HTTP: `0.0.0.0:3000`, fixo nesta implementação.
+//! - `BACKEND_BIND_ADDRESS`: endereço e porta HTTP, com padrão `0.0.0.0:3000`.
+//! - `SHUTDOWN_TIMEOUT_SECS`: prazo de drenagem, com padrão de 15 segundos.
 //!
 //! O ambiente do processo tem precedência; dotenvy também procura um `.env`
 //! no diretório de execução e nos ancestrais. As migrations embutidas são aplicadas após conectar ao banco
@@ -19,8 +20,8 @@
 //! timeout de conexão de três segundos, total de dez e sem redirecionamentos.
 //! Os adaptadores Firebase e Graph não executam I/O nessa construção. Depois,
 //! o processo conecta ao banco, aplica migrations e serve o
-//! router da biblioteca. Não há tratamento próprio de sinais ou configuração
-//! de encerramento gracioso nesta inicialização.
+//! router da biblioteca com tratamento de sinais, drenagem com prazo configurável
+//! e fechamento ordenado do pool PostgreSQL.
 
 use std::{
     env::{self, VarError},
@@ -33,6 +34,7 @@ use backend::{
         self,
         state::{AppState, Clients},
     },
+    config::ServerConfig,
     infrastructure::database::{MIGRATOR, PgDatabase},
     modules::identity::infrastructure::{
         firebase::{AppCheckVerifier, FirebaseTokenVerifier},
@@ -47,13 +49,15 @@ use tracing_subscriber::EnvFilter;
 /// O pool usa as opções padrão de [`PgPoolOptions`]. A conexão inicial precisa
 /// funcionar e as migrations devem concluir antes da abertura da porta HTTP,
 /// inclusive para servir `/health`. O banco deve ter sido criado previamente.
-/// O servidor permanece aguardando requisições enquanto a operação `serve`
-/// estiver ativa.
+/// O servidor trata sinais do sistema operacional, interrompe novos aceites,
+/// sinaliza indisponibilidade em `/ready` e drena requisições em andamento com
+/// o prazo configurado antes de fechar o pool PostgreSQL.
 ///
 /// # Erros
 ///
 /// Propaga a ausência ou invalidade de `DATABASE_URL` ou `FIREBASE_PROJECT_ID`,
-/// falhas ao construir o cliente HTTP e o verificador Firebase, erros ao conectar ao
+/// configuração inválida de `SHUTDOWN_TIMEOUT_SECS`, falhas ao construir o cliente
+/// HTTP e o verificador Firebase, erros ao conectar ao
 /// PostgreSQL, ao validar ou aplicar migrations, ao abrir o socket TCP e os
 /// erros retornados por `axum::serve`.
 ///
@@ -70,6 +74,8 @@ async fn main() -> anyhow::Result<()> {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
+
+    let server_config = ServerConfig::from_env().context("Configuração do servidor inválida")?;
 
     let db_url = env::var("DATABASE_URL").map_err(|e| match e {
         VarError::NotPresent => anyhow::anyhow!(e).context(
@@ -122,13 +128,30 @@ async fn main() -> anyhow::Result<()> {
 
     let pg_database = PgDatabase::new(pool);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+    let listener = tokio::net::TcpListener::bind(&server_config.bind_address)
         .await
         .context("Não foi possível criar o socket TCP")?;
 
-    let service = api::router::create_router(AppState::new(pg_database, clients));
+    let state = AppState::new(pg_database, clients);
+    let service = api::router::create_router(state.clone());
 
-    axum::serve(listener, service).await?;
+    tracing::info!(
+        address = %server_config.bind_address,
+        shutdown_timeout_secs = server_config.shutdown_timeout.as_secs(),
+        "Servidor HTTP iniciado e pronto para receber requisições"
+    );
+
+    api::shutdown::serve_with_graceful_shutdown(
+        listener,
+        service,
+        api::shutdown::wait_for_shutdown_signal(),
+        server_config.shutdown_timeout,
+        Some(state),
+    )
+    .await
+    .context("Falha durante a execução ou encerramento do servidor HTTP")?;
+
+    tracing::info!("Processo backend finalizado com sucesso.");
 
     Ok(())
 }

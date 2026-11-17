@@ -519,9 +519,10 @@ ela não substitui este middleware do backend personalizado. Veja a
 
 O executável lê `DATABASE_URL`, `FIREBASE_PROJECT_ID`, `FIREBASE_PROJECT_NUMBER`,
 `FIREBASE_APP_CHECK_APP_IDS` e `RUST_LOG` do ambiente.
-O módulo `src/config/` está reservado para centralizar essa configuração no futuro.
+O módulo `src/config/` ([`ServerConfig`](src/config/mod.rs)) gerencia os parâmetros
+`BACKEND_BIND_ADDRESS` e `SHUTDOWN_TIMEOUT_SECS`.
 O backend também procura um `.env` no diretório de execução e seus ancestrais
-por dotenvy, preservando variáveis já exportadas.
+por dotenvy, preservando variáveis já exportadas no ambiente.
 
 O [Compose](../compose.yaml) utiliza os valores abaixo e permite personalizá-los
 no arquivo `.env` da raiz do monorepo. As variáveis já definidas no terminal têm
@@ -534,6 +535,8 @@ precedência sobre esse arquivo.
 | `POSTGRES_PASSWORD` | `capp` | Senha local do usuário inicial. |
 | `POSTGRES_PORT` | `5432` | Porta do PostgreSQL publicada no host. |
 | `BACKEND_PORT` | `3000` | Porta da API publicada no host pelo Compose. |
+| `BACKEND_BIND_ADDRESS` | `0.0.0.0:3000` | Endereço e porta para escuta HTTP do executável. |
+| `SHUTDOWN_TIMEOUT_SECS` | `15` | Prazo máximo em segundos para drenagem de conexões durante encerramento gracioso. |
 | `RUST_LOG` | `info` | Filtro dos eventos de diagnóstico do backend. |
 | `FIREBASE_PROJECT_NUMBER` | Obrigatória no servidor | Número público do projeto, usado no emissor e audiência do App Check; não é o project ID. |
 | `FIREBASE_APP_CHECK_APP_IDS` | Obrigatória no servidor | App IDs Firebase permitidos, separados por vírgula e pertencentes ao número do projeto. O exemplo contém o app Android deste checkout. |
@@ -556,8 +559,11 @@ usuário, senha e banco configurados, usando o endereço `postgres:5432`.
 Ao executar com Cargo no host, forneça a URL explicitamente, usando
 `localhost` e a porta publicada em `POSTGRES_PORT`.
 
-`BACKEND_PORT` altera somente o mapeamento do Compose. O processo Rust escuta em
-`0.0.0.0:3000`, tanto no container quanto na execução direta com Cargo.
+`BACKEND_PORT` define a porta publicada no host pelo Compose (`${BACKEND_PORT:-3000}:3000`).
+O processo Rust vincula-se ao endereço definido por `BACKEND_BIND_ADDRESS` (padrão `0.0.0.0:3000`).
+No Compose, o serviço do backend está configurado com `stop_grace_period: 30s` para garantir
+que o Docker conceda tempo superior ao prazo de drenagem (`SHUTDOWN_TIMEOUT_SECS`, padrão 15s)
+antes de emitir qualquer sinal de término forçado (`SIGKILL`).
 
 ---
 
@@ -724,8 +730,14 @@ RUST_LOG=info cargo run --locked
 
 Substitua `seu-project-id` pelo projeto Firebase usado pelo aplicativo. Se personalizou usuário, senha, banco ou porta, ajuste a URL desse comando.
 O binário procura o `.env` da raiz por dotenvy; valores explicitamente exportados
-continuam tendo precedência. Ajuste número do projeto e App IDs se usar outro projeto. Mantenha esse terminal aberto enquanto usar a API e utilize `Ctrl+C` para
-encerrar o backend.
+continuam tendo precedência. Ajuste número do projeto e App IDs se usar outro projeto.
+Mantenha esse terminal aberto enquanto usar a API e utilize `Ctrl+C` para
+encerrar o backend de forma controlada. O processo captura `SIGINT` (Ctrl+C) e
+`SIGTERM`, interrompe o aceite de novas conexões, marca prontidão como indisponível
+(`503` em `/ready`), drena as requisições em voo com o deadline de `SHUTDOWN_TIMEOUT_SECS`
+(padrão 15s) e fecha ordenadamente o pool PostgreSQL antes de sair. Consulte
+[`docs/operacao/politica_de_encerramento_e_recuperacao.md`](../docs/operacao/politica_de_encerramento_e_recuperacao.md)
+para detalhes do protocolo.
 
 ## Verificar a comunicação
 
@@ -737,8 +749,11 @@ curl -i http://localhost:3000/health
 curl -i http://localhost:3000/ready
 ```
 
-`/health` retorna HTTP 200 quando a API responde. `/ready` executa uma consulta
-no PostgreSQL e retorna HTTP 200 no sucesso ou HTTP 503 em erro ou timeout.
+`/health` retorna HTTP 200 quando a API responde. `/ready` verifica se o servidor
+está pronto para receber tráfego: retorna HTTP 503 Service Unavailable imediatamente
+se o backend estiver em processo de encerramento controlado (drenagem) ou se o sinal
+de shutdown for recebido durante a consulta. Caso contrário, executa `SELECT 1 AS ok`
+no PostgreSQL, retornando HTTP 200 no sucesso ou HTTP 503 em caso de erro ou timeout (2 segundos).
 
 Para consultar o banco diretamente, na raiz do monorepo:
 
