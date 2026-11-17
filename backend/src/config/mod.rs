@@ -19,6 +19,123 @@ use std::env::VarError;
 use std::fmt;
 use std::str::FromStr;
 
+/// Parâmetros de consulta permitidos para URLs de conexão PostgreSQL.
+const ALLOWED_DATABASE_QUERY_PARAMS: &[&str] = &[
+    "sslmode",
+    "sslrootcert",
+    "sslcert",
+    "sslkey",
+    "application_name",
+    "statement_cache_capacity",
+    "channel_binding",
+    "connect_timeout",
+    "options",
+    "search_path",
+];
+
+/// Modos de SSL aceitos pelo driver PostgreSQL.
+const VALID_SSL_MODES: &[&str] = &[
+    "disable",
+    "allow",
+    "prefer",
+    "require",
+    "verify-ca",
+    "verify-full",
+];
+
+/// Valida a estrutura da URL confidencial de conexão PostgreSQL.
+///
+/// Garante que:
+/// - O esquema seja estritamente `postgres://` ou `postgresql://`.
+/// - A estrutura geral da URL seja válida e contenha host.
+/// - Parâmetros de consulta pertençam exclusivamente à lista de parâmetros permitidos,
+///   rejeitando parâmetros desconhecidos ou malformados sem ecoar nomes ou valores de parâmetros.
+/// - O valor de `sslmode`, se informado, seja um dos modos válidos do PostgreSQL, sem ecoar o valor informado.
+/// - Quando em ambiente de produção (`is_production == true`), exige explicitamente `sslmode=verify-full`.
+fn validate_database_url(raw_url: &str, is_production: bool) -> Result<(), ConfigError> {
+    if !raw_url.starts_with("postgres://") && !raw_url.starts_with("postgresql://") {
+        return Err(ConfigError::InvalidSecretFormat {
+            name: "DATABASE_URL",
+            message: "deve iniciar com o esquema 'postgres://' ou 'postgresql://'",
+        });
+    }
+
+    let parsed = url::Url::parse(raw_url).map_err(|_| ConfigError::InvalidSecretFormat {
+        name: "DATABASE_URL",
+        message: "estrutura da URL de conexão inválida ou malformada",
+    })?;
+
+    let host = parsed.host_str().unwrap_or("").trim();
+    if host.is_empty() {
+        return Err(ConfigError::InvalidSecretFormat {
+            name: "DATABASE_URL",
+            message: "a URL de conexão deve conter um host válido",
+        });
+    }
+
+    let mut found_sslmode: Option<String> = None;
+
+    if let Some(query) = parsed.query().filter(|q| !q.is_empty()) {
+        for pair in query.split('&') {
+            if pair.is_empty() {
+                continue;
+            }
+            let mut parts = pair.splitn(2, '=');
+            let key = parts.next().unwrap_or("").trim();
+            let value = parts.next().unwrap_or("").trim();
+
+            if key.is_empty() || !ALLOWED_DATABASE_QUERY_PARAMS.contains(&key) {
+                return Err(ConfigError::InvalidSecretFormat {
+                    name: "DATABASE_URL",
+                    message: "a URL de conexão contém parâmetros de consulta não permitidos ou desconhecidos",
+                });
+            }
+
+            if key == "sslmode" {
+                if !VALID_SSL_MODES.contains(&value) {
+                    return Err(ConfigError::InvalidSecretFormat {
+                        name: "DATABASE_URL",
+                        message: "o parâmetro 'sslmode' na DATABASE_URL contém valor inválido (esperado: disable, allow, prefer, require, verify-ca ou verify-full)",
+                    });
+                }
+                found_sslmode = Some(value.to_string());
+            }
+        }
+    }
+
+    if is_production && found_sslmode.as_deref() != Some("verify-full") {
+        return Err(ConfigError::InvalidSecretFormat {
+            name: "DATABASE_URL",
+            message: "o ambiente de produção ('production') exige que a DATABASE_URL configure explicitamente 'sslmode=verify-full'",
+        });
+    }
+
+    Ok(())
+}
+
+/// Sanitiza diagnósticos e erros de conexão para evitar vazamento de credenciais nos logs ou mensagens.
+pub fn sanitize_connection_error(err: &sqlx::Error) -> String {
+    match err {
+        sqlx::Error::Configuration(_) => {
+            "erro de configuração nos parâmetros de conexão".to_string()
+        }
+        sqlx::Error::Database(db_err) => {
+            format!(
+                "erro retornado pelo banco de dados (código: {:?}): {}",
+                db_err.code(),
+                db_err.message()
+            )
+        }
+        sqlx::Error::Io(io_err) => {
+            format!("erro de rede/E-S ao conectar ao banco de dados: {}", io_err)
+        }
+        sqlx::Error::Tls(tls_err) => {
+            format!("erro de negociação TLS com o banco de dados: {}", tls_err)
+        }
+        _ => "falha de conexão com o banco de dados".to_string(),
+    }
+}
+
 /// Envoltório seguro para sequências de caracteres sensíveis (senhas, chaves, URLs).
 ///
 /// Impede que o conteúdo do segredo seja acidentalmente registrado em logs ou
@@ -202,6 +319,25 @@ impl AppConfig {
     where
         F: FnMut(&str) -> Result<String, VarError>,
     {
+        let env_candidate = match lookup("APP_ENV") {
+            Ok(v) if !v.trim().is_empty() => Some(("APP_ENV", v)),
+            Ok(_) | Err(VarError::NotPresent) => match lookup("ENVIRONMENT") {
+                Ok(v) if !v.trim().is_empty() => Some(("ENVIRONMENT", v)),
+                Ok(_) | Err(VarError::NotPresent) => None,
+                Err(VarError::NotUnicode(_)) => {
+                    return Err(ConfigError::InvalidUtf8("ENVIRONMENT"));
+                }
+            },
+            Err(VarError::NotUnicode(_)) => {
+                return Err(ConfigError::InvalidUtf8("APP_ENV"));
+            }
+        };
+
+        let environment = match env_candidate {
+            Some((_, val)) => val.parse::<Environment>()?,
+            None => Environment::Development,
+        };
+
         let raw_db_url = match lookup("DATABASE_URL") {
             Ok(val) => {
                 let trimmed = val.trim();
@@ -218,56 +354,53 @@ impl AppConfig {
             }
         };
 
-        if !raw_db_url.starts_with("postgres://") && !raw_db_url.starts_with("postgresql://") {
-            return Err(ConfigError::InvalidSecretFormat {
-                name: "DATABASE_URL",
-                message: "deve iniciar com o esquema 'postgres://' ou 'postgresql://'",
-            });
-        }
-
+        validate_database_url(&raw_db_url, environment.is_production())?;
         let database_url = SecretString::new(raw_db_url);
 
         let rust_log = match lookup("RUST_LOG") {
             Ok(v) if !v.trim().is_empty() => v.trim().to_string(),
-            _ => "info".to_string(),
+            Ok(_) | Err(VarError::NotPresent) => "info".to_string(),
+            Err(VarError::NotUnicode(_)) => return Err(ConfigError::InvalidUtf8("RUST_LOG")),
         };
 
         let server_host = match lookup("SERVER_HOST") {
             Ok(v) if !v.trim().is_empty() => v.trim().to_string(),
-            _ => "0.0.0.0".to_string(),
+            Ok(_) | Err(VarError::NotPresent) => "0.0.0.0".to_string(),
+            Err(VarError::NotUnicode(_)) => return Err(ConfigError::InvalidUtf8("SERVER_HOST")),
         };
 
         let port_candidate = match lookup("BACKEND_PORT") {
             Ok(v) if !v.trim().is_empty() => Some(("BACKEND_PORT", v)),
-            _ => match lookup("SERVER_PORT") {
+            Ok(_) | Err(VarError::NotPresent) => match lookup("SERVER_PORT") {
                 Ok(v) if !v.trim().is_empty() => Some(("SERVER_PORT", v)),
-                _ => None,
+                Ok(_) | Err(VarError::NotPresent) => None,
+                Err(VarError::NotUnicode(_)) => {
+                    return Err(ConfigError::InvalidUtf8("SERVER_PORT"));
+                }
             },
+            Err(VarError::NotUnicode(_)) => {
+                return Err(ConfigError::InvalidUtf8("BACKEND_PORT"));
+            }
         };
 
         let server_port = match port_candidate {
             Some((var_name, val)) => {
-                val.trim()
+                let parsed = val
+                    .trim()
                     .parse::<u16>()
                     .map_err(|_| ConfigError::InvalidValue {
                         name: var_name,
                         reason: "deve ser um número inteiro positivo entre 1 e 65535".to_string(),
-                    })?
+                    })?;
+                if parsed == 0 {
+                    return Err(ConfigError::InvalidValue {
+                        name: var_name,
+                        reason: "deve ser um número inteiro positivo entre 1 e 65535 (porta 0 é inválida)".to_string(),
+                    });
+                }
+                parsed
             }
             None => 3000,
-        };
-
-        let env_candidate = match lookup("APP_ENV") {
-            Ok(v) if !v.trim().is_empty() => Some(("APP_ENV", v)),
-            _ => match lookup("ENVIRONMENT") {
-                Ok(v) if !v.trim().is_empty() => Some(("ENVIRONMENT", v)),
-                _ => None,
-            },
-        };
-
-        let environment = match env_candidate {
-            Some((_, val)) => val.parse::<Environment>()?,
-            None => Environment::Development,
         };
 
         Ok(Self {
@@ -464,7 +597,7 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert(
             "DATABASE_URL",
-            "postgres://capp_prod:secret@db:5432/capp_prod".to_string(),
+            "postgres://capp_prod:secret@db:5432/capp_prod?sslmode=verify-full".to_string(),
         );
         vars.insert("APP_ENV", "production".to_string());
 
@@ -472,6 +605,173 @@ mod tests {
 
         assert_eq!(config.environment(), &Environment::Production);
         assert!(config.environment().is_production());
+    }
+
+    #[test]
+    fn test_production_rejects_missing_or_inadequate_sslmode() {
+        let modes = [
+            None,
+            Some("disable"),
+            Some("allow"),
+            Some("prefer"),
+            Some("require"),
+            Some("verify-ca"),
+        ];
+
+        for mode in modes {
+            let mut vars = HashMap::new();
+            let url = match mode {
+                Some(m) => format!("postgres://capp_prod:secret@db:5432/capp_prod?sslmode={m}"),
+                None => "postgres://capp_prod:secret@db:5432/capp_prod".to_string(),
+            };
+            vars.insert("DATABASE_URL", url);
+            vars.insert("APP_ENV", "production".to_string());
+
+            let result = AppConfig::from_lookup(make_lookup(vars));
+            assert_eq!(
+                result,
+                Err(ConfigError::InvalidSecretFormat {
+                    name: "DATABASE_URL",
+                    message: "o ambiente de produção ('production') exige que a DATABASE_URL configure explicitamente 'sslmode=verify-full'",
+                })
+            );
+        }
+
+        // Aceite explícito de verify-full em produção
+        let mut valid_vars = HashMap::new();
+        valid_vars.insert(
+            "DATABASE_URL",
+            "postgres://capp_prod:secret@db:5432/capp_prod?sslmode=verify-full".to_string(),
+        );
+        valid_vars.insert("APP_ENV", "production".to_string());
+        assert!(AppConfig::from_lookup(make_lookup(valid_vars)).is_ok());
+    }
+
+    #[test]
+    fn test_port_boundaries() {
+        // Porta 0 rejeitada explicitamente
+        let mut vars_zero = HashMap::new();
+        vars_zero.insert(
+            "DATABASE_URL",
+            "postgres://capp:capp@localhost:5432/capp".to_string(),
+        );
+        vars_zero.insert("BACKEND_PORT", "0".to_string());
+        assert_eq!(
+            AppConfig::from_lookup(make_lookup(vars_zero)),
+            Err(ConfigError::InvalidValue {
+                name: "BACKEND_PORT",
+                reason: "deve ser um número inteiro positivo entre 1 e 65535 (porta 0 é inválida)"
+                    .to_string(),
+            })
+        );
+
+        // Limite inferior válido: 1
+        let mut vars_one = HashMap::new();
+        vars_one.insert(
+            "DATABASE_URL",
+            "postgres://capp:capp@localhost:5432/capp".to_string(),
+        );
+        vars_one.insert("BACKEND_PORT", "1".to_string());
+        let config_one = AppConfig::from_lookup(make_lookup(vars_one)).expect("Porta 1 é válida");
+        assert_eq!(config_one.server_port(), 1);
+
+        // Limite superior válido: 65535
+        let mut vars_max = HashMap::new();
+        vars_max.insert(
+            "DATABASE_URL",
+            "postgres://capp:capp@localhost:5432/capp".to_string(),
+        );
+        vars_max.insert("BACKEND_PORT", "65535".to_string());
+        let config_max =
+            AppConfig::from_lookup(make_lookup(vars_max)).expect("Porta 65535 é válida");
+        assert_eq!(config_max.server_port(), 65535);
+
+        // Limite estourado: 65536
+        let mut vars_overflow = HashMap::new();
+        vars_overflow.insert(
+            "DATABASE_URL",
+            "postgres://capp:capp@localhost:5432/capp".to_string(),
+        );
+        vars_overflow.insert("BACKEND_PORT", "65536".to_string());
+        assert_eq!(
+            AppConfig::from_lookup(make_lookup(vars_overflow)),
+            Err(ConfigError::InvalidValue {
+                name: "BACKEND_PORT",
+                reason: "deve ser um número inteiro positivo entre 1 e 65535".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_app_env_not_unicode_fails_explicitly() {
+        let result = AppConfig::from_lookup(|key| {
+            if key == "APP_ENV" {
+                Err(VarError::NotUnicode(std::ffi::OsString::from(
+                    "invalid_env_utf8",
+                )))
+            } else if key == "DATABASE_URL" {
+                Ok("postgres://capp:capp@localhost:5432/capp".to_string())
+            } else {
+                Err(VarError::NotPresent)
+            }
+        });
+
+        assert_eq!(result, Err(ConfigError::InvalidUtf8("APP_ENV")));
+    }
+
+    #[test]
+    fn test_database_url_unknown_query_param_does_not_leak() {
+        let mut vars = HashMap::new();
+        vars.insert(
+            "DATABASE_URL",
+            "postgres://user:senhasecreta@localhost:5432/capp?passwrod=SENHA_FICTICIA_999"
+                .to_string(),
+        );
+
+        let result = AppConfig::from_lookup(make_lookup(vars));
+        assert_eq!(
+            result,
+            Err(ConfigError::InvalidSecretFormat {
+                name: "DATABASE_URL",
+                message: "a URL de conexão contém parâmetros de consulta não permitidos ou desconhecidos",
+            })
+        );
+
+        let err_msg = result.unwrap_err().to_string();
+        assert!(!err_msg.contains("SENHA_FICTICIA_999"));
+        assert!(!err_msg.contains("senhasecreta"));
+        assert!(!err_msg.contains("passwrod"));
+    }
+
+    #[test]
+    fn test_database_url_invalid_sslmode_does_not_leak() {
+        let mut vars = HashMap::new();
+        vars.insert(
+            "DATABASE_URL",
+            "postgres://user:senhasecreta@localhost:5432/capp?sslmode=SENHA_FICTICIA_888"
+                .to_string(),
+        );
+
+        let result = AppConfig::from_lookup(make_lookup(vars));
+        assert_eq!(
+            result,
+            Err(ConfigError::InvalidSecretFormat {
+                name: "DATABASE_URL",
+                message: "o parâmetro 'sslmode' na DATABASE_URL contém valor inválido (esperado: disable, allow, prefer, require, verify-ca ou verify-full)",
+            })
+        );
+
+        let err_msg = result.unwrap_err().to_string();
+        assert!(!err_msg.contains("SENHA_FICTICIA_888"));
+        assert!(!err_msg.contains("senhasecreta"));
+    }
+
+    #[test]
+    fn test_sanitize_connection_error_avoids_leaks() {
+        let config_err = sqlx::Error::Configuration("parametro_secreto_123".into());
+        let sanitized = sanitize_connection_error(&config_err);
+        assert!(!sanitized.contains("parametro_secreto_123"));
+        assert_eq!(sanitized, "erro de configuração nos parâmetros de conexão");
     }
 
     #[test]

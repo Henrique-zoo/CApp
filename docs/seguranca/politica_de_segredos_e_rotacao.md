@@ -17,21 +17,21 @@ O objetivo é mitigar riscos de vazamento, uso indevido de credenciais e exposi�
 
 ## 2. Inventário e Classificação de Credenciais
 
-A tabela a seguir consolida todas as configurações e credenciais do ecossistema CApp, categorizando-as por finalidade, sensibilidade e política de embarque:
+A tabela a seguir consolida todas as configurações e credenciais do ecossistema CApp, categorizando-as por finalidade, sensibilidade, status de consumo e política de embarque:
 
-| Componente | Variável / Arquivo | Finalidade | Sensibilidade | Onde Reside | Pode Ser Embarcado no App Mobile? |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Backend** | `DATABASE_URL` / `POSTGRES_*` | Conexão autenticada ao PostgreSQL | **Crítica (Segredo Privado)** | Variáveis de runtime / Secrets Manager | **NUNCA** |
-| **Backend** | `FIREBASE_SERVICE_ACCOUNT_KEY` | Autenticação administrativa no Firebase Admin SDK | **Crítica (Segredo Privado)** | Secrets Manager / Arquivo restrito (chmod 600) | **NUNCA** |
-| **Backend** | `JWT_SECRET` | Chave de assinatura e verificação de tokens de sessão | **Crítica (Segredo Privado)** | Secrets Manager / Variável de runtime | **NUNCA** |
-| **Backend** | `MICROSOFT_CLIENT_SECRET` | Segredo OAuth para autenticação institucional UnB | **Crítica (Segredo Privado)** | Secrets Manager / Variável de runtime | **NUNCA** |
-| **Backend** | `SERVER_HOST` / `BACKEND_PORT` | Endereço e porta do listener HTTP | **Pública (Configuração)** | Variável de runtime / Compose | Não aplicável |
-| **Backend** | `RUST_LOG` / `APP_ENV` | Nível de telemetria e identificador de ambiente | **Pública (Configuração)** | Variável de runtime / Compose | Não aplicável |
-| **Mobile** | `google-services.json` | Identificadores do projeto Firebase para Android | **Pública (Configuração de Cliente)** | `mobile/android/app/` | **Sim (Público)** |
-| **Mobile** | `GoogleService-Info.plist` | Identificadores do projeto Firebase para iOS | **Pública (Configuração de Cliente)** | `mobile/ios/Runner/` | **Sim (Público)** |
-| **Mobile** | `firebase_options.dart` | Configurações do Firebase SDK (Dart) | **Pública (Configuração de Cliente)** | `mobile/lib/` | **Sim (Público)** |
-| **Mobile** | `API_BASE_URL` | Endpoint da API backend CApp | **Pública (Configuração de Cliente)** | Variável de build / Arquivo de ambiente cliente | **Sim (Público)** |
-| **CI/CD** | `GITHUB_TOKEN` / Deploy Keys | Automação de pipelines e publicação de imagens | **Crítica (Segredo de Automação)** | GitHub Actions Encrypted Secrets | **NUNCA** |
+| Componente | Variável / Arquivo | Finalidade | Sensibilidade | Status de Consumo | Onde Reside | Pode Ser Embarcado no App Mobile? |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Backend** | `DATABASE_URL` / `POSTGRES_*` | Conexão autenticada ao PostgreSQL | **Crítica (Segredo Privado)** | **Ativo (Consumido Hoje)** | Variáveis de runtime / Secrets Manager | **NUNCA** |
+| **Backend** | `FIREBASE_PROJECT_ID` | Identificador do projeto Firebase para validação de `aud` nos ID tokens | **Pública / Restrita (Configuração)** | **Ativo (Consumido Hoje)** | Variáveis de runtime / Compose | **NUNCA** |
+| **Backend** | `SERVER_HOST` / `BACKEND_PORT` | Endereço e porta do listener HTTP (porta no intervalo 1..=65535) | **Pública (Configuração)** | **Ativo (Consumido Hoje)** | Variáveis de runtime / Compose | Não aplicável |
+| **Backend** | `RUST_LOG` / `APP_ENV` | Nível de telemetria e identificador de ambiente | **Pública (Configuração)** | **Ativo (Consumido Hoje)** | Variáveis de runtime / Compose | Não aplicável |
+| **Backend** | `FIREBASE_SERVICE_ACCOUNT_KEY` | Autenticação administrativa e revogação de tokens via Firebase Admin SDK | **Crítica (Segredo Privado)** | *Integração Futura* | Secrets Manager / Arquivo restrito (chmod 600) | **NUNCA** |
+| **Backend** | `MICROSOFT_CLIENT_SECRET` | Segredo OAuth confidencial para integração institucional | **Crítica (Segredo Privado)** | *Integração Futura* | Secrets Manager / Variável de runtime | **NUNCA** |
+| **Mobile** | `google-services.json` | Identificadores do projeto Firebase para Android | **Pública (Configuração de Cliente)** | **Ativo (Consumido Hoje)** | `mobile/android/app/` | **Sim (Público)** |
+| **Mobile** | `GoogleService-Info.plist` | Identificadores do projeto Firebase para iOS | **Pública (Configuração de Cliente)** | **Ativo (Consumido Hoje)** | `mobile/ios/Runner/` | **Sim (Público)** |
+| **Mobile** | `firebase_options.dart` | Configurações do Firebase SDK (Dart) | **Pública (Configuração de Cliente)** | **Ativo (Consumido Hoje)** | `mobile/lib/` | **Sim (Público)** |
+| **Mobile** | `API_BASE_URL` | Endpoint da API backend CApp | **Pública (Configuração de Cliente)** | **Ativo (Consumido Hoje)** | Variável de build / Arquivo de ambiente cliente | **Sim (Público)** |
+| **CI/CD** | `GITHUB_TOKEN` / Deploy Keys | Automação de pipelines e publicação de imagens | **Crítica (Segredo de Automação)** | **Ativo (Consumido Hoje)** | GitHub Actions Encrypted Secrets | **NUNCA** |
 
 ---
 
@@ -48,7 +48,7 @@ Os arquivos `google-services.json`, `GoogleService-Info.plist` e `firebase_optio
   3. Restrições de chave de API configuradas no Google Cloud Console (restringindo o uso ao *package name* `br.com.capp` e assinaturas SHA-1).
 
 ### 3.2. Segredos Privados do Backend (Chaves que NUNCA Podem Ser Embarcadas)
-Segredos como chaves de conta de serviço (`service_account.json`), strings de conexão a banco de dados (`DATABASE_URL`), chaves de assinatura HMAC/RSA (`JWT_SECRET`) e client secrets de provedores OAuth **possuem autoridade administrativa plena**:
+Segredos como chaves de conta de serviço (`FIREBASE_SERVICE_ACCOUNT_KEY`), strings de conexão a banco de dados (`DATABASE_URL`) e client secrets de provedores OAuth (`MICROSOFT_CLIENT_SECRET`) **possuem autoridade administrativa**:
 - Se uma chave de service account for embarcada no APK ou IPA, qualquer usuário pode extraí-la via descompilação (por exemplo, usando `apktool` ou `jadx`) e obter controle administrativo sobre o projeto na nuvem.
 - **Invariante Rígida:** O aplicativo móvel comunica-se exclusivamente com a API REST do backend CApp. O backend é o único componente autorizado a possuir e utilizar credenciais privadas de banco de dados, provedores de identidade e APIs administrativas.
 
@@ -185,42 +185,74 @@ Caso a senha do banco tenha sido exposta:
 
 ### 6.2. Procedimento 2: Rotação de Conta de Serviço do Firebase (`FIREBASE_SERVICE_ACCOUNT_KEY`)
 
+> **Nota de Arquitetura:** A variável `FIREBASE_SERVICE_ACCOUNT_KEY` corresponde a uma credencial administrativa para integrações futuras com o Firebase Admin SDK (como revogação remota de tokens e envio de notificações). Atualmente, o backend consome ativamente a variável pública/restrita `FIREBASE_PROJECT_ID` para validação criptográfica de ID tokens via chaves públicas (JWKS).
+
 #### A. Rotação Programada
 1. **Emissão de Nova Chave Privada:**
    - Acesse o Console Google Cloud -> **IAM e administração** -> **Contas de serviço**.
    - Selecione a conta de serviço do backend CApp.
    - Na aba **Chaves**, clique em **Adicionar chave** -> **Criar nova chave** -> formato **JSON**.
-   - Salve o JSON de forma segura em ambiente restrito.
+   - Salve o JSON de forma segura em cofre de segredos restrito (chmod 600).
 2. **Atualização do Segredo no Backend:**
    - Atualize o segredo `FIREBASE_SERVICE_ACCOUNT_KEY` no cofre de segredos do ambiente de execução.
 3. **Reinicialização e Validação:**
    - Reinicie as instâncias da API backend.
-   - Execute um teste de validação de token ou emissão de credencial para comprovar a aceitação da nova chave.
+   - Execute um teste de operação administrativa para comprovar a aceitação da nova chave.
 4. **Revogação da Chave Antiga:**
    - No console do Google Cloud, na aba **Chaves**, localize a chave privada anterior (identificada pelo Key ID antigo) e selecione **Excluir**.
-   - A revogação no IAM do Google Cloud tem efeito imediato.
+   - **Limitação de Revogação no GCP IAM:** A exclusão da chave no IAM encerra imediatamente a capacidade de assinar novas asserções ou solicitar novos tokens OAuth2. Contudo, **NÃO revoga de forma automática ou imediata credenciais ou tokens de curta duração (como access tokens OAuth2) já emitidos** previamente com essa chave, os quais continuam válidos até a expiração de seu tempo de vida (TTL, tipicamente de até 1 hora / 3600 segundos).
 
-#### B. Revogação de Emergência
-1. Acesse imediatamente o Google Cloud Console e **exclua** a chave comprometida. Isso encerra instantaneamente a capacidade de gerar ou validar asserções com aquela chave privada.
-2. Emita uma nova chave para o backend e atualize a configuração do serviço.
-3. Consulte o **Cloud Audit Logs** com filtro para a conta de serviço afetada, identificando se houve chamadas não autorizadas.
+#### B. Revogação de Emergência (Em Caso de Vazamento da Chave)
+Caso a chave privada da conta de serviço seja exposta:
+1. **Exclusão Imediata da Chave:** Acesse o Google Cloud Console e exclua a chave comprometida na aba **Chaves** da conta de serviço.
+2. **Ações Obrigatórias de Contenção Ativa:**
+   Como tokens de curta duração já emitidos permanecem ativos no Google Cloud até seu TTL expirar, deve-se aplicar contenção imediata:
+   - **Desativação Temporária da Conta de Serviço:**
+     ```bash
+     gcloud iam service-accounts disable <SERVICE_ACCOUNT_EMAIL> --project=<PROJECT_ID>
+     ```
+     A desativação da conta de serviço rejeita imediatamente qualquer requisição autenticada, inclusive tokens de acesso previamente emitidos.
+   - **Restrição de Permissões no IAM:** Revogue temporariamente os papéis (roles) sensíveis atribuídos à conta de serviço no nível do projeto.
+3. **Emissão de Nova Chave e Reativação:**
+   - Emita uma nova chave privada para a conta de serviço.
+   - Atualize `FIREBASE_SERVICE_ACCOUNT_KEY` no cofre de segredos e reinicie os serviços backend.
+   - Reative a conta de serviço:
+     ```bash
+     gcloud iam service-accounts enable <SERVICE_ACCOUNT_EMAIL> --project=<PROJECT_ID>
+     ```
+4. **Auditoria Forense:**
+   - Consulte o **Cloud Audit Logs** com filtro pelo e-mail da conta de serviço (`protoPayload.authenticationInfo.principalEmail="<SERVICE_ACCOUNT_EMAIL>"`) para auditar todas as chamadas e acessos realizados durante a janela de exposição.
 
 ---
 
-### 6.3. Procedimento 3: Rotação de JWT e Tokens de Sessão (`JWT_SECRET`)
+### 6.3. Procedimento 3: Fluxo de Validação de ID Tokens do Firebase e Revogação de Sessões
 
-#### A. Rotação Programada (Com Transição Suave)
-1. **Suporte a Múltiplas Chaves Ativas (`kid`):**
-   - O validador do backend é configurado com a chave atual e a nova chave.
-   - O emissor de tokens passa a assinar novos JWTs utilizando a nova chave.
-   - A chave anterior permanece aceita para validação durante o tempo de vida máximo de um token existente (TTL, por exemplo, 24 horas).
-2. **Depreciação da Chave Antiga:**
-   - Decorrido o período de TTL de todos os tokens anteriores, remova a chave antiga da lista de chaves de validação aceitas.
+#### A. Fluxo Real de Autenticação e Sessão no CApp
+Diferente de sistemas que emitem e assinam sessões com chaves estáticas locais (`JWT_SECRET`), o backend CApp adota o padrão de identidade federada do **Firebase Authentication**:
+1. **Emissão pelo Provedor:** O aplicativo móvel autentica o discente contra o Firebase Authentication (integrado à autenticação institucional) e recebe um **Firebase ID Token** (JWT assinado com algoritmo assimétrico RS256).
+2. **Envio ao Backend:** O cliente inclui o token no cabeçalho HTTP de cada requisição: `Authorization: Bearer <ID_TOKEN>`.
+3. **Validação Offline com Chaves Públicas (JWKS):** O componente `FirebaseTokenVerifier` do backend valida o token utilizando o conjunto de chaves públicas oficiais do Google obtidas via JWKS (`https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com`).
+   - Verifica assinatura digital RS256 baseada no `kid` (Key ID) do cabeçalho;
+   - Valida emissor (`iss: https://securetoken.google.com/<FIREBASE_PROJECT_ID>`);
+   - Valida audiência (`aud: <FIREBASE_PROJECT_ID>`);
+   - Valida integridade e prazos temporais (`exp`, `iat`, `auth_time`).
+4. **Limitação do Verificador Atual:**
+   - O `FirebaseTokenVerifier` atual mantém cache local em memória das chaves públicas do Google (com respeito a `max-age` e backoff seguro).
+   - O verificador atual opera de forma *stateless* e **não consulta a revogação individual de tokens a cada chamada**. Logo, um ID token válido permanece aceito pela API até expirar naturalmente (validade de 1 hora).
 
-#### B. Revogação de Emergência (Em Caso de Vazamento da Chave de Assinatura)
-1. Substitua imediatamente o valor de `JWT_SECRET` por uma nova sequência aleatória com pelo menos 32 bytes (256 bits) de entropia.
-2. Reinicie as instâncias do backend.
-3. **Efeito:** Todos os tokens de sessão emitidos anteriormente se tornam instantaneamente inválidos, exigindo que os usuários realizem novo login através do fluxo institucional. Isso bloqueia qualquer atacante que tenha gerado tokens forjados com a chave vazada.
+#### B. Procedimento de Revogação de Sessões e Tokens de Usuário
+1. **Revogação Administrativa de Tokens de Usuário (Integração Futura via Firebase Admin SDK):**
+   - Para revogar as sessões de um usuário comprometido, utiliza-se a API do Firebase Admin SDK:
+     ```javascript
+     // Invalida todos os refresh tokens e atualiza valid_since do usuário
+     await admin.auth().revokeRefreshTokens(uid);
+     ```
+   - Quando a integração futura com o Firebase Admin SDK (via `FIREBASE_SERVICE_ACCOUNT_KEY`) habilitar o parâmetro de checagem remota de revogação (`check_revoked: true`), qualquer ID token emitido antes da revogação será recusado imediatamente pelo backend.
+2. **Procedimento Operacional de Emergência Atual (Sem Verificação Remota de Revogação):**
+   - **Bloqueio do Usuário no Firebase:** Acesse o Console do Firebase Authentication -> **Users** -> Localize o usuário -> **Desativar conta** (Disable account).
+   - **Revogação de Refresh Tokens:** Clique em **Revogar sessões** (Revoke sessions) no console.
+   - **Janela de Contenção:** Os *refresh tokens* deixam de funcionar imediatamente. O ID token ativo deixará de ser aceito no backend assim que seu TTL expirar (máximo de 60 minutos a partir da emissão).
+   - **Bloqueio Imediato no Banco de Dados (quando necessário):** Para corte instantâneo de acesso sem aguardar o término do TTL residual, o backend pode marcar o usuário como inativo na tabela `app_user` (`is_active = false`), bloqueando transações de domínio.
 
 ---
 
@@ -235,7 +267,9 @@ Caso a senha do banco tenha sido exposta:
 
 ## 7. Roteiro Prático de Ensaio de Rotação em Homologação
 
-Para cumprir com o critério de conclusão da Issue #255 (*"Uma rotação foi ensaiada em homologação e a credencial anterior deixou de funcionar"*), este é o roteiro prático e auditável:
+> **Status do Critério Operacional (Issue #255):**
+> Este roteiro documenta formalmente o procedimento auditável para validação da rotação de credenciais de banco de dados.
+> **Importante:** A aprovação desta política e das configurações seguras de código **mantém o critério de aceitação da Issue #255 (*"Uma rotação foi ensaiada em homologação e a credencial anterior deixou de funcionar"*) ABERTO**. O fechamento formal do critério requer a efetiva execução prática na infraestrutura de homologação (*staging*) e a anexação das evidências de logs sanitizados (testes positivo e negativo) no quadro abaixo.
 
 ```
 [Etapa 1] Testar conexão com Credencial A (Sucesso)
@@ -249,17 +283,20 @@ Para cumprir com o critério de conclusão da Issue #255 (*"Uma rotação foi en
 [Etapa 5] Teste Negativo: Tentar conexão com Credencial A (FALHA CONFIRMADA)
 ```
 
-### Comandos de Execução do Ensaio
+### 7.1. Comandos de Execução do Ensaio
 
 1. **Estado Inicial:** O backend conecta utilizando a `DATABASE_URL` da Credencial A (`capp_app_v1`). O endpoint `/ready` retorna HTTP 200.
 2. **Provisionar Nova Credencial:**
    ```sql
-   CREATE USER capp_app_v2 WITH PASSWORD 'senha_homologacao_rotacionada_456';
+   CREATE USER capp_app_v2 WITH PASSWORD '<SENHA_HOMOLOGACAO_ROTACIONADA_B>';
    GRANT capp_app_role TO capp_app_v2;
    ```
 3. **Atualizar Backend e Reiniciar:**
    Atualizar `DATABASE_URL` para apontar para `capp_app_v2` e reiniciar o container do backend.
-   Confirmar retorno 200 em `/ready`.
+   Confirmar retorno 200 em `/ready`:
+   ```bash
+   curl -i http://localhost:3000/ready
+   ```
 4. **Revogar Credencial Anterior:**
    ```sql
    DROP USER capp_app_v1;
@@ -267,9 +304,18 @@ Para cumprir com o critério de conclusão da Issue #255 (*"Uma rotação foi en
 5. **Verificação Negativa Obrigatória:**
    Executar tentativa de conexão utilizando a credencial antiga:
    ```bash
-   psql "postgres://capp_app_v1:senha_antiga_123@localhost:5432/capp" -c "SELECT 1;"
+   psql "postgres://capp_app_v1:<SENHA_ANTIGA_A>@localhost:5432/capp" -c "SELECT 1;"
    ```
    **Resultado Esperado:** O comando deve falhar com `FATAL: role "capp_app_v1" does not exist` ou `FATAL: password authentication failed`, comprovando de forma conclusiva que a credencial anterior deixou de funcionar.
+
+### 7.2. Registro de Evidências Operacionais Sanitizadas
+
+*O quadro a seguir deve ser preenchido e comitado assim que a infraestrutura de homologação for acionada:*
+
+| Item de Ensaio | Critério de Aceitação | Status Atual | Evidência Sanitizada / Log de Execução |
+| :--- | :--- | :--- | :--- |
+| **Teste Positivo (Credencial B)** | Backend inicializa com nova credencial e responde HTTP 200 em `/ready` | **Pendente de Execução em Staging** | *(Aguardando execução operacional na infraestrutura de staging)* |
+| **Teste Negativo (Credencial A)** | Tentativa de conexão com credencial antiga é rejeitada com erro fatal | **Pendente de Execução em Staging** | *(Aguardando execução operacional na infraestrutura de staging)* |
 
 ---
 
@@ -277,10 +323,14 @@ Para cumprir com o critério de conclusão da Issue #255 (*"Uma rotação foi en
 
 Antes de aprovar qualquer entrega ou alteração de infraestrutura relacionada a segredos:
 
-- [x] O inventário de segredos está atualizado com componente, sensibilidade e finalidade.
+- [x] O inventário de segredos está atualizado com componente, sensibilidade, finalidade e distinção entre variáveis ativas e integrações futuras.
 - [x] Credenciais privadas não constam no código-fonte, nos artefatos móveis (APK/IPA) ou nos logs.
 - [x] Variáveis de ambiente possuem templates seguros (`.env.example`) sem senhas de produção.
-- [x] O backend falha com diagnóstico seguro (*fail-fast*) sem ecoar valores de segredos em mensagens de erro.
+- [x] O backend falha com diagnóstico seguro (*fail-fast*) sem ecoar valores de segredos em mensagens de erro ou logs de inicialização.
 - [x] Tipos sensíveis em memória utilizam mascaramento (`SecretString`).
-- [x] Procedimentos de rotação programada e de emergência estão documentados para Postgres, Firebase e JWT.
-- [x] O ensaio de rotação em homologação foi planejado e inclui o teste de invalidação da credencial anterior.
+- [x] A estrutura de `DATABASE_URL` é validada antes de ser entregue ao SQLx (parâmetros de query permitidos e `sslmode=verify-full` em produção).
+- [x] Porta do listener HTTP (`BACKEND_PORT`) rejeita o valor 0 e exige faixa estrita entre 1 e 65535.
+- [x] Valores não-UTF8 (`VarError::NotUnicode`) falham explicitamente em vez de assumir valores padrão silenciosamente.
+- [x] Procedimentos de rotação programada e de emergência estão documentados para Postgres, Firebase e OAuth.
+- [x] As limitações de revogação imediata no GCP IAM e no verificador de ID tokens do Firebase estão formalmente documentadas.
+- [ ] Ensaio operacional de rotação executado em homologação com evidências sanitizadas anexadas (critério da Issue #255 mantido aberto até a execução na infraestrutura de staging).

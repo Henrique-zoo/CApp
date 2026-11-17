@@ -95,7 +95,13 @@ async fn main() -> anyhow::Result<()> {
     let pool = PgPoolOptions::new()
         .connect(config.database_url().expose_secret())
         .await
-        .context("Failed to connect to DB.")?;
+        .map_err(|err| {
+            tracing::error!("Falha ao conectar ao banco de dados PostgreSQL");
+            anyhow::anyhow!(
+                "Falha ao conectar ao banco de dados: {}",
+                backend::config::sanitize_connection_error(&err)
+            )
+        })?;
 
     tracing::info!("Aplicando migrations do banco de dados");
     MIGRATOR
