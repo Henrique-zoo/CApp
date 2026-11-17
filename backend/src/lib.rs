@@ -9,7 +9,8 @@
 //! - [`api`]: estado, contrato de erros e composição HTTP.
 //! - [`modules::identity`]: verificação institucional e evidência de elegibilidade.
 //! - [`infrastructure::database`]: adaptador PostgreSQL e migrations compartilhadas.
-//! - [`config`] e [`shared`]: espaços reservados para configuração e tipos comuns.
+//! - [`config`]: carregamento e validação de configurações e proteção de segredos.
+//! - [`shared`]: espaço reservado para tipos comuns.
 //!
 //! Estão registradas as rotas `/health`, `/ready` e
 //! `POST /auth/institutional/verify`. A infraestrutura de extração de identidade

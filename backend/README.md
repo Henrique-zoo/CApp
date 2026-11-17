@@ -517,11 +517,18 @@ ela não substitui este middleware do backend personalizado. Veja a
 
 # Configuração
 
+A configuração do backend é centralizada pelo módulo `src/config/` (`AppConfig`),
+responsável por validar variáveis obrigatórias, detectar o ambiente de execução e
+proteger segredos contra exposição em logs e mensagens de erro através do tipo
+`SecretString`. Para detalhes completos sobre governança, segregação de ambientes e
+rotação de credenciais, consulte a
+[Política de Segredos e Rotação](../docs/seguranca/politica_de_segredos_e_rotacao.md).
+
 O executável lê `DATABASE_URL`, `FIREBASE_PROJECT_ID`, `FIREBASE_PROJECT_NUMBER`,
-`FIREBASE_APP_CHECK_APP_IDS` e `RUST_LOG` do ambiente.
-O módulo `src/config/` está reservado para centralizar essa configuração no futuro.
-O backend também procura um `.env` no diretório de execução e seus ancestrais
-por dotenvy, preservando variáveis já exportadas.
+`FIREBASE_APP_CHECK_APP_IDS`, `RUST_LOG`, `SERVER_HOST`, `BACKEND_PORT` e `APP_ENV` do ambiente.
+Em desenvolvimento local, o backend também procura um `.env` no diretório de execução e seus ancestrais
+por dotenvy, preservando variáveis já exportadas. Em produção, arquivos `.env` não são carregados
+automaticamente.
 
 O [Compose](../compose.yaml) utiliza os valores abaixo e permite personalizá-los
 no arquivo `.env` da raiz do monorepo. As variáveis já definidas no terminal têm
@@ -529,10 +536,13 @@ precedência sobre esse arquivo.
 
 | Variável | Padrão local | Uso |
 |---|---|---|
+| `APP_ENV` | `development` | Ambiente de execução (`development`, `staging`, `production`). |
 | `POSTGRES_DB` | `capp` | Nome do banco criado na inicialização do PostgreSQL. |
 | `POSTGRES_USER` | `capp` | Usuário inicial do PostgreSQL. |
 | `POSTGRES_PASSWORD` | `capp` | Senha local do usuário inicial. |
 | `POSTGRES_PORT` | `5432` | Porta do PostgreSQL publicada no host. |
+| `DATABASE_URL` | - | URL de conexão PostgreSQL utilizada pelo backend. |
+| `SERVER_HOST` | `0.0.0.0` | Endereço de escuta do servidor HTTP. |
 | `BACKEND_PORT` | `3000` | Porta da API publicada no host pelo Compose. |
 | `RUST_LOG` | `info` | Filtro dos eventos de diagnóstico do backend. |
 | `FIREBASE_PROJECT_NUMBER` | Obrigatória no servidor | Número público do projeto, usado no emissor e audiência do App Check; não é o project ID. |
