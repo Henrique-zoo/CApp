@@ -15,6 +15,8 @@
 /// O identificador Microsoft não é o UID Firebase. A associação à conta que
 /// solicitou a operação pertence ao resultado do caso de uso e ao envelope
 /// do armazenamento.
+/// O UUID é representado por UuidValue. A validação do texto externo pertence
+/// aos adaptadores HTTP e de cache, sem introduzir serialização neste modelo.
 ///
 /// ## Responsabilidade do modelo
 ///
@@ -22,6 +24,8 @@
 /// conteúdo ou provisiona um usuário interno. Campos nulos não devem ser
 /// substituídos por dados inferidos, e o vínculo não define permissões gerais.
 library;
+
+import 'package:uuid/uuid.dart';
 
 import 'institutional_affiliation.dart';
 
@@ -38,7 +42,8 @@ final class InstitutionalProfile {
   /// [microsoftObjectId] identifica a pessoa no diretório Microsoft.
   /// É diferente do UID Firebase.
   ///
-  /// [name] e [email] preservam a ausência de dados com valores nulos.
+  /// [name] preserva a ausência de dado com valor nulo.
+  /// E-mail de pré-preenchimento pertence ao resultado transitório do cadastro.
   /// [affiliation] representa o resultado da consulta ao vínculo estudantil.
   ///
   /// A construção não realiza validação de UUID, normalização de textos,
@@ -46,18 +51,14 @@ final class InstitutionalProfile {
   const InstitutionalProfile({
     required this.microsoftObjectId,
     required this.name,
-    required this.email,
     required this.affiliation,
   });
 
-  /// Identificador da pessoa no diretório Microsoft.
-  final String microsoftObjectId;
+  /// UUID da pessoa no diretório Microsoft, distinto do ID interno da instituição.
+  final UuidValue microsoftObjectId;
 
   /// Nome fornecido pela instituição, ou nulo quando ausente.
   final String? name;
-
-  /// E-mail fornecido pela instituição, ou nulo quando ausente.
-  final String? email;
 
   /// Resultado institucional do vínculo estudantil.
   final InstitutionalAffiliation affiliation;
@@ -69,11 +70,10 @@ final class InstitutionalProfile {
         other is InstitutionalProfile &&
             other.microsoftObjectId == microsoftObjectId &&
             other.name == name &&
-            other.email == email &&
             other.affiliation == affiliation;
   }
 
   /// Hash dos atributos utilizados pela igualdade.
   @override
-  int get hashCode => Object.hash(microsoftObjectId, name, email, affiliation);
+  int get hashCode => Object.hash(microsoftObjectId, name, affiliation);
 }

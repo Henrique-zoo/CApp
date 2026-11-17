@@ -317,7 +317,8 @@ mod tests {
             api::state::Clients,
             infrastructure::database::PgDatabase,
             modules::identity::infrastructure::{
-                firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
+                firebase::{AppCheckVerifier, FirebaseTokenVerifier},
+                microsoft::MicrosoftGraphClient,
             },
         };
         let http = reqwest::Client::builder()
@@ -326,9 +327,15 @@ mod tests {
             .expect("cliente HTTP de teste");
         let firebase = FirebaseTokenVerifier::new("capp-shutdown-test".into(), http.clone())
             .expect("configuração Firebase de teste");
+        let app_check = AppCheckVerifier::new(
+            "1234567890".into(),
+            vec!["1:1234567890:android:capp".into()],
+            http.clone(),
+        )
+        .expect("verificador App Check de teste");
         AppState::new(
             PgDatabase::new(pool),
-            Clients::new(firebase, MicrosoftGraphClient::new(http)),
+            Clients::new(firebase, MicrosoftGraphClient::new(http), app_check),
         )
     }
 
@@ -636,7 +643,7 @@ mod tests {
             .await
             .expect("deve criar listener");
 
-        let app = crate::api::router::create_router().with_state(state.clone());
+        let app = crate::api::router::create_router(state.clone());
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let state_for_server = state.clone();
@@ -662,7 +669,7 @@ mod tests {
         assert!(state.is_shutting_down());
 
         // Comprova que uma nova requisição a /ready é rejeitada com 503 SERVICE_UNAVAILABLE
-        let test_router = crate::api::router::create_router().with_state(state.clone());
+        let test_router = crate::api::router::create_router(state.clone());
         let res = test_router
             .oneshot(
                 axum::http::Request::builder()

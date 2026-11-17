@@ -1,6 +1,6 @@
 /// Apresentação da operação única de entrada institucional.
 ///
-/// Esta biblioteca traduz o estado de aplicação em uma experiência de login.
+/// Esta biblioteca apresenta conexão, recuperação e confirmação de conta.
 /// Ela recebe um controlador e sua fotografia atual, sem criar adaptadores,
 /// observar Firebase diretamente ou montar requisições HTTP.
 ///
@@ -8,12 +8,17 @@
 ///
 /// Durante a restauração ou uma operação em andamento, a tela informa atividade
 /// e impede uma nova tentativa. Quando a entrada está pendente, oferece uma única
-/// ação: entrar com Microsoft. Essa ação solicita signIn ao controlador, que
-/// escolhe login ou reautenticação e também realiza a verificação no backend.
+/// ação: entrar com Microsoft quando não há conta; continuar com Microsoft
+/// quando a obtenção silenciosa exige interação; ou tentar novamente após uma
+/// falha operacional. Todas solicitam signIn ao controlador, que determina se
+/// a operação admite autorização interativa. A verificação fica nos bastidores.
 ///
-/// Não há etapa manual de verificação posterior ao login. O gate mantém esta
-/// tela enquanto a operação está pendente e a substitui quando o controlador
-/// publica o destino pronto.
+/// Uma tentativa automática pode precisar de consentimento ou falhar na rede.
+/// A tela permite nova tentativa por ação explícita, além das tentativas
+/// silenciosas agendadas pela aplicação. Falha de rede não pede novo login.
+/// Não inicia renovação durante build nem mantém relógio próprio de repetição.
+/// O gate mantém esta tela enquanto a entrada depende de uma verificação válida
+/// e a substitui quando o controlador publica o destino pronto.
 ///
 /// ## Estado, falhas e concorrência
 ///
@@ -42,7 +47,7 @@ import 'session_failure_message.dart';
 /// Apresenta entrada pendente, operação em andamento e eventuais falhas.
 ///
 /// Uma autenticação Firebase sem perfil válido usa a mesma ação de entrada.
-/// O controlador escolhe entre login e reautenticação Microsoft.
+/// O controlador escolhe entre login e renovação da verificação institucional.
 ///
 /// O chamador fornece as atualizações e substitui a tela quando a sessão
 /// está pronta. Não navega, mantém assinatura própria ou encerra o controlador.
@@ -75,7 +80,9 @@ class InstitutionalLoginPage extends StatelessWidget {
   /// Error continuam propagando com sua pilha.
   Future<void> _signIn() async {
     final current = controller.state;
+
     if (current.access != SessionAccess.entryRequired || current.isBusy) return;
+
     try {
       await controller.signIn();
     } on SessionIdentityChangedException {
@@ -98,8 +105,8 @@ class InstitutionalLoginPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final message = sessionFailureMessage(state);
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Entrar no CApp')),
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.all(24),
         child: Align(
@@ -113,8 +120,15 @@ class InstitutionalLoginPage extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text(
-                    'Entre com sua conta institucional da Microsoft para acessar o CApp.',
+                  Text(
+                    state is SessionSignedIn
+                        ? state.isBusy
+                              ? 'Estamos conectando sua conta ao CApp.'
+                              : state.requiresMicrosoftInteraction
+                              ? 'Continue com sua conta institucional da Microsoft.'
+                              : 'Sua conta continua conectada.'
+                        : 'Entre com sua conta institucional da Microsoft '
+                              'para acessar o CApp.',
                   ),
                   const SizedBox(height: 24),
                   _buildSignInButton(),
@@ -139,7 +153,7 @@ class InstitutionalLoginPage extends StatelessWidget {
     );
   }
 
-  /// Constrói o botão de entrada com identificação visual da Microsoft.
+  /// Apresenta ação Microsoft ou repetição de conexão conforme o estado.
   ///
   /// O estado ocupado desabilita novas interações e altera o texto.
   /// A ação utiliza [_signIn], que mantém as verificações da sessão.
@@ -150,21 +164,33 @@ class InstitutionalLoginPage extends StatelessWidget {
   /// O arquivo deve existir e estar declarado no pubspec.yaml para que
   /// o Flutter consiga carregá-lo.
   Widget _buildSignInButton() {
+    final microsoftAction =
+        state is! SessionSignedIn || state.requiresMicrosoftInteraction;
+
     return FilledButton.icon(
       onPressed: state.isBusy ? null : _signIn,
-      icon: SvgPicture.asset(
-        'assets/branding/microsoft.svg',
-        width: 20,
-        height: 20,
-        excludeFromSemantics: true,
-      ),
-      label: Text(
-        state.operation == SessionOperation.signingOut
-            ? 'Saindo...'
-            : state.isBusy
-            ? 'Entrando...'
-            : 'Entrar com Microsoft',
-      ),
+      icon: microsoftAction
+          ? SvgPicture.asset(
+              'assets/branding/microsoft.svg',
+              width: 20,
+              height: 20,
+              excludeFromSemantics: true,
+            )
+          : const Icon(Icons.refresh),
+      label: Text(switch (state.operation) {
+        SessionOperation.signingOut => 'Saindo...',
+        SessionOperation.signingIn => 'Entrando...',
+        SessionOperation.verifyingInstitution => 'Conectando...',
+        SessionOperation.completingProfile => 'Concluindo perfil...',
+        SessionOperation.restoringAuthentication ||
+        SessionOperation.restoringCache => 'Restaurando...',
+        SessionOperation.idle =>
+          state is! SessionSignedIn
+              ? 'Entrar com Microsoft'
+              : state.requiresMicrosoftInteraction
+              ? 'Continuar com Microsoft'
+              : 'Tentar novamente',
+      }),
       style: FilledButton.styleFrom(
         backgroundColor: const Color(0xFF2F2F2F),
         foregroundColor: Colors.white,

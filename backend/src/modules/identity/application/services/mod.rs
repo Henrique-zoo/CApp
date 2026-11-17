@@ -5,3 +5,5 @@
 //! dos contratos de `application::ports`, sem construção de clientes pelo serviço.
 
 pub mod authentication;
+
+pub mod accounts;

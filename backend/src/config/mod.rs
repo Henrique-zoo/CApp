@@ -4,7 +4,11 @@
 //! configurações externas da aplicação, como parâmetros de rede e prazos de
 //! encerramento controlado (*graceful shutdown*).
 //!
-//! # Variáveis de Ambiente
+//! Variáveis de infraestrutura como `DATABASE_URL`, `FIREBASE_PROJECT_ID`,
+//! `FIREBASE_PROJECT_NUMBER`, `FIREBASE_APP_CHECK_APP_IDS` e `RUST_LOG` são lidas
+//! na inicialização do executável em `main.rs`.
+//!
+//! # Variáveis de Ambiente do Módulo
 //!
 //! - `SHUTDOWN_TIMEOUT_SECS`: tempo limite em segundos para drenagem de requisições
 //!   ativas durante o encerramento gracioso (padrão: 15 segundos).

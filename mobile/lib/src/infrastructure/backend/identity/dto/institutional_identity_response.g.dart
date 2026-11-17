@@ -1,5 +1,7 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
+// ignore_for_file: unnecessary_cast
+
 part of 'institutional_identity_response.dart';
 
 // **************************************************************************
@@ -7,11 +9,9 @@ part of 'institutional_identity_response.dart';
 // **************************************************************************
 
 abstract class _$InstitutionalIdentityResponseCWProxy {
-  InstitutionalIdentityResponse microsoftObjectId(String microsoftObjectId);
+  InstitutionalIdentityResponse microsoftObjectId(UuidValue microsoftObjectId);
 
   InstitutionalIdentityResponse name(String? name);
-
-  InstitutionalIdentityResponse email(String? email);
 
   InstitutionalIdentityResponse affiliation(
     InstitutionalAffiliation affiliation,
@@ -26,9 +26,8 @@ abstract class _$InstitutionalIdentityResponseCWProxy {
   /// InstitutionalIdentityResponse(...).copyWith(id: 12, name: "My name")
   /// ```
   InstitutionalIdentityResponse call({
-    String microsoftObjectId,
+    UuidValue microsoftObjectId,
     String? name,
-    String? email,
     InstitutionalAffiliation affiliation,
   });
 }
@@ -42,14 +41,12 @@ class _$InstitutionalIdentityResponseCWProxyImpl
   final InstitutionalIdentityResponse _value;
 
   @override
-  InstitutionalIdentityResponse microsoftObjectId(String microsoftObjectId) =>
-      call(microsoftObjectId: microsoftObjectId);
+  InstitutionalIdentityResponse microsoftObjectId(
+    UuidValue microsoftObjectId,
+  ) => call(microsoftObjectId: microsoftObjectId);
 
   @override
   InstitutionalIdentityResponse name(String? name) => call(name: name);
-
-  @override
-  InstitutionalIdentityResponse email(String? email) => call(email: email);
 
   @override
   InstitutionalIdentityResponse affiliation(
@@ -68,7 +65,6 @@ class _$InstitutionalIdentityResponseCWProxyImpl
   InstitutionalIdentityResponse call({
     Object? microsoftObjectId = const $CopyWithPlaceholder(),
     Object? name = const $CopyWithPlaceholder(),
-    Object? email = const $CopyWithPlaceholder(),
     Object? affiliation = const $CopyWithPlaceholder(),
   }) {
     return InstitutionalIdentityResponse(
@@ -77,15 +73,11 @@ class _$InstitutionalIdentityResponseCWProxyImpl
               microsoftObjectId == null
           ? _value.microsoftObjectId
           // ignore: cast_nullable_to_non_nullable
-          : microsoftObjectId as String,
+          : microsoftObjectId as UuidValue,
       name: name == const $CopyWithPlaceholder()
           ? _value.name
           // ignore: cast_nullable_to_non_nullable
           : name as String?,
-      email: email == const $CopyWithPlaceholder()
-          ? _value.email
-          // ignore: cast_nullable_to_non_nullable
-          : email as String?,
       affiliation:
           affiliation == const $CopyWithPlaceholder() || affiliation == null
           ? _value.affiliation
@@ -113,12 +105,14 @@ InstitutionalIdentityResponse _$InstitutionalIdentityResponseFromJson(
 ) => $checkedCreate('InstitutionalIdentityResponse', json, ($checkedConvert) {
   $checkKeys(
     json,
-    requiredKeys: const ['microsoftObjectId', 'name', 'email', 'affiliation'],
+    requiredKeys: const ['microsoftObjectId', 'name', 'affiliation'],
   );
   final val = InstitutionalIdentityResponse(
-    microsoftObjectId: $checkedConvert('microsoftObjectId', (v) => v as String),
+    microsoftObjectId: $checkedConvert(
+      'microsoftObjectId',
+      (v) => const UuidValueConverter().fromJson(v as String),
+    ),
     name: $checkedConvert('name', (v) => v as String?),
-    email: $checkedConvert('email', (v) => v as String?),
     affiliation: $checkedConvert(
       'affiliation',
       (v) => InstitutionalAffiliation.fromJson(v as Map<String, dynamic>),
@@ -130,8 +124,9 @@ InstitutionalIdentityResponse _$InstitutionalIdentityResponseFromJson(
 Map<String, dynamic> _$InstitutionalIdentityResponseToJson(
   InstitutionalIdentityResponse instance,
 ) => <String, dynamic>{
-  'microsoftObjectId': instance.microsoftObjectId,
+  'microsoftObjectId': const UuidValueConverter().toJson(
+    instance.microsoftObjectId,
+  ),
   'name': instance.name,
-  'email': instance.email,
   'affiliation': instance.affiliation.toJson(),
 };

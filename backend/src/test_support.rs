@@ -10,7 +10,10 @@ use crate::{
     api::state::{AppState, Clients},
     modules::identity::{
         api::extractors::AuthenticatedInstitutionalIdentity,
-        infrastructure::{firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient},
+        infrastructure::{
+            firebase::{AppCheckVerifier, FirebaseTokenVerifier},
+            microsoft::MicrosoftGraphClient,
+        },
     },
 };
 
@@ -31,7 +34,12 @@ pub fn local_identity_clients(
 ) -> anyhow::Result<Clients> {
     Ok(Clients::new(
         FirebaseTokenVerifier::new_with_endpoint(project_id, http.clone(), jwks_url)?,
-        MicrosoftGraphClient::new_with_base_url(http, graph_url),
+        MicrosoftGraphClient::new_with_base_url(http.clone(), graph_url),
+        AppCheckVerifier::new(
+            "1234567890".into(),
+            vec!["1:1234567890:android:capp".into()],
+            http,
+        )?,
     ))
 }
 
