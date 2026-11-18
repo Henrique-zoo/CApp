@@ -106,7 +106,11 @@ Funcionalidade: Gerenciamento de eleições de Centros Acadêmicos
       Então a criação da eleição é recusada por período inválido
 
   @seguranca_computacional
-  Regra: A abertura exige configuração e autoridades completas
+  Regra: Na votação secreta, a abertura exige configuração e autoridades completas
+
+    Contexto:
+      Dado que a eleição está configurada para votação secreta
+      E a eleição está no período de votação
 
     Cenário: Recusar abertura quando falta uma autoridade
       Dado que a eleição está em preparação sem todas as autoridades definidas
@@ -125,7 +129,10 @@ Funcionalidade: Gerenciamento de eleições de Centros Acadêmicos
       E o manifesto é assinado pelo servidor e permanece imutável após a abertura
 
   @seguranca_computacional
-  Regra: A configuração publicada não pode ser alterada depois da abertura
+  Regra: Na votação secreta, o manifesto permanece imutável após a abertura
+
+    Contexto:
+      Dado que a eleição está configurada para votação secreta
 
     Cenário: Recusar alteração das opções após a abertura
       Dado que a eleição foi aberta e possui manifesto publicado
@@ -135,10 +142,16 @@ Funcionalidade: Gerenciamento de eleições de Centros Acadêmicos
 
   Regra: O encerramento normal respeita o prazo vigente
 
-    Cenário: Encerrar a votação ao atingir o prazo vigente
-      Dado que a eleição está aberta e o prazo vigente foi atingido
+    Esquema do Cenário: Encerrar a votação conforme a modalidade ao atingir o prazo vigente
+      Dado que a eleição está configurada para votação <modalidade>
+      E que a eleição está aberta e o prazo vigente foi atingido
       Quando o processo eleitoral é encerrado
       Então a eleição passa ao estado encerrado
       E nenhum novo voto é aceito
       E o registro final das cédulas é preservado
-      E a apuração aguarda as contribuições válidas de todas as autoridades
+      E a apuração <regra_das_contribuicoes>
+
+      Exemplos:
+        | modalidade   | regra_das_contribuicoes                                 |
+        | secreta      | aguarda as contribuições válidas de todas as autoridades |
+        | identificada | não exige contribuições de autoridades criptográficas   |

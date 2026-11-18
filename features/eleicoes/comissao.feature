@@ -60,11 +60,11 @@ Funcionalidade: Designação e permissões da comissão eleitoral
       Então a administração das chapas é concluída
 
     @happy @backend @mobile
-    Cenário: Permissão para apurar resultados autoriza realizar a apuração
+    Cenário: Permissão para apurar resultados autoriza a solicitação de apuração
       Dado que "241098765@aluno.unb.br" integra a comissão eleitoral de "CAER"
       E possui a permissão "Apurar resultados eleitorais" em "CAER"
-      Quando apura o resultado de uma eleição de "CAER"
-      Então a apuração é concluída
+      Quando solicita a apuração do resultado de uma eleição de "CAER"
+      Então a solicitação de apuração é autorizada
 
     @sad @backend @mobile
     Cenário: Permissão para configurar eleições não concede permissão para apurar resultados
