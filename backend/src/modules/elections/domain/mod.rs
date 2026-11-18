@@ -1,9 +1,11 @@
-//! Camada de domínio prevista para o módulo de eleições.
+//! Camada de domínio do módulo de eleições.
 //!
-//! [`entities`], [`rules`] e [`events`] reservarão os modelos, suas invariantes
-//! e os fatos relevantes do negócio. Ainda não há regras implementadas;
-//! essa camada deve permanecer independente de HTTP e banco de dados.
+//! Contém os modelos, objetos de valor, regras e eventos do negócio.
+//! Esta camada não deve depender de HTTP, banco de dados ou mecanismos
+//! de transporte.
 
 pub mod entities;
+pub mod errors;
 pub mod events;
 pub mod rules;
+pub mod value_objects;
