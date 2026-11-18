@@ -5,6 +5,9 @@
 /// ficam registradas para futura automação real do aplicativo; pendingStep falha
 /// quando executado e não prepara resultados fictícios. Vocabulário comum à
 /// votação permanece no registro compartilhado.
+///
+/// A autorização da solicitação de apuração não representa sua conclusão; apenas
+/// a modalidade secreta exige contribuições criptográficas após o encerramento.
 library;
 
 import '../../support/step_registry.dart';
@@ -140,8 +143,10 @@ final electionManagementSteps = <StepDefinition>[
   pendingStep(r'^a configuração da eleição é autorizada$'),
   pendingStep(r'^administra as chapas de uma eleição de "([^"]*)"$'),
   pendingStep(r'^a administração das chapas é concluída$'),
-  pendingStep(r'^apura o resultado de uma eleição de "([^"]*)"$'),
-  pendingStep(r'^a apuração é concluída$'),
+  pendingStep(
+    r'^solicita a apuração do resultado de uma eleição de "([^"]*)"$',
+  ),
+  pendingStep(r'^a solicitação de apuração é autorizada$'),
 
   // Calendário e encerramento normal da votação — Issue #124.
   pendingStep(
@@ -152,6 +157,9 @@ final electionManagementSteps = <StepDefinition>[
   pendingStep(r'^o registro final das cédulas é preservado$'),
   pendingStep(
     r'^a apuração aguarda as contribuições válidas de todas as autoridades$',
+  ),
+  pendingStep(
+    r'^a apuração não exige contribuições de autoridades criptográficas$',
   ),
   pendingStep(r'^que a eleição está aberta e o prazo vigente foi atingido$'),
 ];

@@ -8,6 +8,10 @@
 //! existirem. Cada corpo chama pending_step, sem simular autorização, persistência
 //! ou apuração. Expressões reutilizadas pela votação são registradas em shared_steps
 //! para conservar resolução única.
+//!
+//! A autorização da solicitação de apuração não representa sua conclusão. As
+//! contribuições criptográficas são uma condição exclusiva da votação secreta;
+//! o encerramento no prazo vigente também é especificado para a identificada.
 
 use cucumber::{given, then, when};
 
@@ -506,16 +510,16 @@ fn then_administracao_chapas_concluida(_world: &mut AppWorld) {
     pending_step("a administração das chapas é concluída");
 }
 
-/// Pendente: apura o resultado de uma eleição de {string}.
-#[when(regex = r#"^apura o resultado de uma eleição de "([^"]*)"$"#)]
-fn when_apura_resultado_eleicao(_world: &mut AppWorld, _ca: String) {
-    pending_step("apura o resultado de uma eleição de {string}");
+/// Pendente: solicita a apuração do resultado de uma eleição de {string}.
+#[when(regex = r#"^solicita a apuração do resultado de uma eleição de "([^"]*)"$"#)]
+fn when_solicita_apuracao_resultado_eleicao(_world: &mut AppWorld, _ca: String) {
+    pending_step("solicita a apuração do resultado de uma eleição de {string}");
 }
 
-/// Pendente: a apuração é concluída.
-#[then(regex = r#"^a apuração é concluída$"#)]
-fn then_apuracao_concluida(_world: &mut AppWorld) {
-    pending_step("a apuração é concluída");
+/// Pendente: a solicitação de apuração é autorizada.
+#[then(regex = r#"^a solicitação de apuração é autorizada$"#)]
+fn then_solicitacao_apuracao_autorizada(_world: &mut AppWorld) {
+    pending_step("a solicitação de apuração é autorizada");
 }
 
 // -----------------------------------------------------------------------------
@@ -550,6 +554,12 @@ fn then_registro_final_cedulas_preservado(_world: &mut AppWorld) {
 #[then(regex = r#"^a apuração aguarda as contribuições válidas de todas as autoridades$"#)]
 fn then_apuracao_aguarda_contribuicoes_autoridades(_world: &mut AppWorld) {
     pending_step("a apuração aguarda as contribuições válidas de todas as autoridades");
+}
+
+/// Pendente: a apuração não exige contribuições de autoridades criptográficas.
+#[then(regex = r#"^a apuração não exige contribuições de autoridades criptográficas$"#)]
+fn then_apuracao_dispensa_contribuicoes_criptograficas(_world: &mut AppWorld) {
+    pending_step("a apuração não exige contribuições de autoridades criptográficas");
 }
 
 /// Pendente: que a eleição está aberta e o prazo vigente foi atingido.
