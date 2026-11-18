@@ -8,19 +8,24 @@
 use crate::{
     infrastructure::database::PgDatabase,
     modules::identity::infrastructure::{
-        firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
+        firebase::{AppCheckVerifier, FirebaseTokenVerifier},
+        microsoft::MicrosoftGraphClient,
     },
 };
 
-/// Clientes externos reutilizados pelos casos de uso de identidade.
+/// Clientes de identidade reutilizados pela API e pelos casos de uso.
 ///
 /// O verificador Firebase compartilha seu cache entre clones; o cliente Microsoft
 /// compartilha o pool HTTP e recebe o access token em cada operação. Os clientes
 /// podem ser construídos com clones de um único [`reqwest::Client`].
 #[derive(Clone)]
 pub struct Clients {
+    /// Verificador da origem do aplicativo, independente do Firebase UID.
+    pub app_check: AppCheckVerifier,
+
     /// Verificador de Firebase ID tokens para o projeto configurado.
     pub firebase: FirebaseTokenVerifier,
+
     /// Adaptador de perfil, tenant e participação em grupos do Microsoft Graph.
     pub microsoft: MicrosoftGraphClient,
 }
@@ -32,15 +37,21 @@ impl Clients {
     ///
     /// - `firebase`: verificador cuja audiência e emissor correspondem ao projeto.
     /// - `microsoft`: cliente do Graph; seu cliente HTTP deve recusar redirecionamentos.
+    /// - `app_check`: verificador do número do projeto e dos App IDs permitidos.
     ///
     /// # Retorno
     ///
     /// Contêiner que assume a posse dos adaptadores. A operação não confirma
     /// permissões, disponibilidade dos provedores ou existência do projeto.
-    pub fn new(firebase: FirebaseTokenVerifier, microsoft: MicrosoftGraphClient) -> Self {
+    pub fn new(
+        firebase: FirebaseTokenVerifier,
+        microsoft: MicrosoftGraphClient,
+        app_check: AppCheckVerifier,
+    ) -> Self {
         Self {
             firebase,
             microsoft,
+            app_check,
         }
     }
 }
@@ -103,9 +114,11 @@ impl AppState {
     ///     .build()?;
     /// let firebase = FirebaseTokenVerifier::new("capp-example".into(), http.clone())?;
     /// let microsoft = MicrosoftGraphClient::new(http);
+    /// let app_check = backend::modules::identity::infrastructure::firebase::AppCheckVerifier::new(
+    ///     "1234567890".into(), vec!["1:1234567890:android:capp".into()], reqwest::Client::new())?;
     /// let state = AppState::new(
     ///     PgDatabase::new(pool.clone()),
-    ///     Clients::new(firebase, microsoft),
+    ///     Clients::new(firebase, microsoft, app_check),
     /// );
     /// let _another_handle = state.clone();
     /// pool.close().await; // Fecha o pool compartilhado com os dois estados.

@@ -44,14 +44,19 @@ use testcontainers::{ContainerAsync, GenericImage, ImageExt, core::WaitFor, runn
 
 /// Base-modelo preparada uma vez com migrations e fixture para clonagem.
 const POSTGRES_TEMPLATE_DB: &str = "capp_cucumber_template";
+
 /// Cópia da base-modelo usada pelos cenários consultivos.
 const POSTGRES_SHARED_DB: &str = "capp_cucumber_shared";
+
 /// Usuário criado exclusivamente no PostgreSQL descartável da suíte.
 const POSTGRES_USER: &str = "capp";
+
 /// Senha de teste usada apenas no container descartável.
 const POSTGRES_PASSWORD: &str = "capp";
+
 /// Porta interna do PostgreSQL; a porta publicada no host é dinâmica.
 const POSTGRES_PORT: u16 = 5432;
+
 /// Prefixo dos nomes gerados para as bases isoladas e reconhecidos na limpeza.
 const SCENARIO_DATABASE_PREFIX: &str = "capp_cucumber_scenario_";
 
@@ -63,6 +68,7 @@ const SCENARIO_DATABASE_PREFIX: &str = "capp_cucumber_scenario_";
 pub(super) struct TestDatabase {
     /// Pool usado pelo router e pelos steps SQL do cenário.
     pub(super) pool: PgPool,
+
     /// Nome da base isolada; `None` identifica o pool compartilhado.
     name: Option<String>,
 }
@@ -89,6 +95,7 @@ impl TestDatabase {
 pub(super) struct DatabaseServer {
     /// Handle que mantém o PostgreSQL descartável vivo durante a suíte.
     container: ContainerAsync<GenericImage>,
+
     /// Pools, router e sincronização compartilhados pelos hooks.
     pub(super) suite: Arc<SuiteDatabase>,
 }
@@ -101,18 +108,25 @@ pub(super) struct DatabaseServer {
 pub(super) struct SuiteDatabase {
     /// Endereço do PostgreSQL fornecido pelo Testcontainers.
     host: String,
+
     /// Porta do PostgreSQL publicada dinamicamente no host.
     port: u16,
+
     /// Pool conectado à base `postgres` para criar e remover bancos.
     admin_pool: PgPool,
+
     /// Pool de leitura reutilizado pelos cenários sem a tag de isolamento.
     shared_pool: PgPool,
+
     /// Router associado ao pool compartilhado.
     shared_app: Router,
+
     /// Contador atômico usado para gerar nomes de bases isoladas.
     next_database: AtomicU64,
+
     /// Mutex que serializa os comandos de clonagem da base-modelo.
     template_ddl: Mutex<()>,
+
     /// Clientes reutilizados pelos routers da suíte.
     clients: Clients,
 }
@@ -271,13 +285,20 @@ impl DatabaseServer {
         let firebase = FirebaseTokenVerifier::new(project_id, http.clone())
             .expect("configuração do Firebase deve ser válida");
 
+        let app_check =
+            backend::modules::identity::infrastructure::firebase::AppCheckVerifier::new(
+                "1234567890".into(),
+                vec!["1:1234567890:android:capp".into()],
+                http.clone(),
+            )
+            .unwrap();
         let microsoft = MicrosoftGraphClient::new(http);
 
-        let clients = Clients::new(firebase, microsoft);
+        let clients = Clients::new(firebase, microsoft, app_check);
 
         let shared_pool = connect_pool(&host, port, POSTGRES_SHARED_DB, 16).await;
 
-        let shared_app = api::router::create_router().with_state(AppState::new(
+        let shared_app = api::router::create_router(AppState::new(
             PgDatabase::new(shared_pool.clone()),
             clients.clone(),
         ));
@@ -366,6 +387,7 @@ impl SuiteDatabase {
 
         {
             let _template_guard = self.template_ddl.lock().await;
+
             sqlx::query(&format!(
                 "CREATE DATABASE \"{database_name}\" TEMPLATE \"{POSTGRES_TEMPLATE_DB}\""
             ))
@@ -378,7 +400,7 @@ impl SuiteDatabase {
 
         let pool = connect_pool(&self.host, self.port, &database_name, 5).await;
 
-        let app = api::router::create_router().with_state(AppState::new(
+        let app = api::router::create_router(AppState::new(
             PgDatabase::new(pool.clone()),
             self.clients.clone(),
         ));
@@ -405,6 +427,7 @@ impl SuiteDatabase {
     pub(super) async fn release_scenario(&self, database: TestDatabase) {
         let Some(database_name) = database.name else {
             drop(database.pool);
+
             return;
         };
 
@@ -438,6 +461,7 @@ impl SuiteDatabase {
         ))
         .execute(&self.admin_pool)
         .await?;
+
         Ok(())
     }
 

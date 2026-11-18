@@ -12,4 +12,4 @@ pub mod events;
 pub mod rules;
 mod status;
 
-pub use status::CatalogStatus;
+pub use status::{CatalogStatus, UserStatus};

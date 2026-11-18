@@ -22,9 +22,9 @@
 /// representa o desfecho observado pelo controlador.
 library;
 
-import '../models/institutional_verification_result.dart';
+import '../models/account_session_result.dart';
 
-/// A verificação concluiu, mas a persistência local falhou.
+/// A conta foi restaurada ou sincronizada, mas a persistência local falhou.
 ///
 /// O resultado continua disponível em memória. A falha não representa recusa
 /// do backend; a restauração futura pode exigir outra entrada.
@@ -39,7 +39,7 @@ final class SessionCacheWriteException implements Exception {
   });
 
   /// Identidade e verificação confirmadas antes da tentativa de gravação.
-  final InstitutionalVerificationResult result;
+  final AccountSessionResult result;
 
   /// Exceção original produzida pelo armazenamento.
   final Exception cause;
@@ -49,6 +49,5 @@ final class SessionCacheWriteException implements Exception {
 
   /// Descreve a situação sem serializar resultado ou diagnóstico.
   @override
-  String toString() =>
-      'A verificação foi concluída, mas não pôde ser persistida';
+  String toString() => 'A sessão foi confirmada, mas não pôde ser persistida';
 }

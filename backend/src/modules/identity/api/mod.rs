@@ -1,13 +1,14 @@
 //! Contratos HTTP da verificação institucional.
 //!
 //! [`handlers`] interpreta credenciais e chama o serviço; [`dto`] serializa o
-//! perfil e a validade; [`error`] converte erros de aplicação em respostas públicas.
+//! conta provisionada e a evidência; [`error`] converte erros de aplicação em respostas públicas.
 //! [`extractors`] oferece proteção reutilizável para handlers que exijam uma
 //! confirmação institucional existente. Esse extractor não deve anteceder a
 //! operação que cria ou renova a própria confirmação.
 //!
-//! Atualmente [`router`] registra somente `POST /auth/institutional/verify`;
-//! nenhuma rota exige o extractor de confirmação persistida ainda.
+//! [`router`] também expõe GET /auth/session e PUT /users/me/profile para restaurar
+//! a conta interna e concluir seu perfil. Só o endpoint institucional precisa de
+//! access token Microsoft. A autenticação de perfil é conferida pela aplicação.
 
 use axum::{Router, routing::post};
 
@@ -23,7 +24,7 @@ pub mod handlers;
 /// # Rotas
 ///
 /// - `POST /auth/institutional/verify`: valida as credenciais Firebase e Microsoft,
-///   registra a evidência institucional e retorna o perfil e sua validade.
+///   registra a evidência institucional e retorna a conta provisionada e a evidência.
 ///
 /// # Retorno
 ///
@@ -32,10 +33,19 @@ pub mod handlers;
 /// handler; não exige uma confirmação institucional prévia, pois esta rota também
 /// atende ao primeiro acesso e à renovação de uma confirmação vencida.
 pub fn router() -> Router<AppState> {
-    Router::new().route(
-        "/auth/institutional/verify",
-        post(handlers::verify_institutional),
-    )
+    Router::new()
+        .route(
+            "/auth/session",
+            axum::routing::get(handlers::restore_session),
+        )
+        .route(
+            "/users/me/profile",
+            axum::routing::put(handlers::complete_profile),
+        )
+        .route(
+            "/auth/institutional/verify",
+            post(handlers::verify_institutional),
+        )
 }
 
 #[cfg(test)]

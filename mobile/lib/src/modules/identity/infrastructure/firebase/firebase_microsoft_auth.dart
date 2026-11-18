@@ -1,13 +1,14 @@
-/// Adaptação da autenticação Firebase às portas do módulo de identidade.
+/// Adaptação da autenticação Firebase e sua integração com credenciais Microsoft.
 ///
-/// O aplicativo usa Firebase para manter a autenticação e Microsoft para fornecer
-/// a credencial delegada consumida pelo backend. Esta biblioteca concentra os
-/// detalhes desses SDKs, mantendo o caso de uso independente de User,
-/// UserCredential e dos mecanismos de interação de cada plataforma.
+/// O aplicativo mantém sua identidade autenticada no Firebase, mas a consulta
+/// institucional exige uma credencial Microsoft com ciclo de vida independente.
+/// Este adaptador combina essas operações por meio de MicrosoftTokenProvider,
+/// mantendo o caso de uso independente de User, UserCredential e dos mecanismos
+/// concretos de obtenção de tokens. O SDK MSAL fica em outro adaptador.
 ///
 /// ## Uma identidade compartilhada
 ///
-/// A mesma instância de FirebaseAuth implementa AuthSession, MicrosoftSignIn e
+/// Este adaptador usa uma instância de FirebaseAuth para AuthSession, MicrosoftSignIn e
 /// a obtenção do ID token usado no transporte. AppDependencies compartilha esse
 /// adaptador para que a conta observada corresponda às requisições protegidas.
 ///
@@ -15,27 +16,37 @@
 /// iguais. A primeira emissão informa a restauração do SDK. Erros continuam como
 /// erros do stream, sem produzir um evento falso de logout.
 ///
-/// ## Login e reautenticação
+/// ## Login inicial e credenciais da conta atual
 ///
-/// O provedor solicita User.Read, sem fixar um tenant. Na web, utiliza popup;
-/// nas plataformas nativas com suporte, utiliza o provedor do SDK.
-/// prompt=select_account solicita a escolha explícita de conta, interrompendo
-/// a seleção automática por SSO. Depois da escolha, a Microsoft ainda pode
-/// aproveitar sua sessão existente sem solicitar novamente a senha.
+/// O login estabelece somente a conta Firebase e preserva o cache MSAL. A
+/// aplicação consulta o backend antes de solicitar uma credencial Graph: contas
+/// com confirmação vigente não precisam dessa segunda etapa. O token Microsoft
+/// que o Firebase eventualmente retorna não é usado. Na composição Android atual,
+/// Firebase e MSAL têm sessões próprias e podem apresentar duas autorizações
+/// quando é necessário confirmar o vínculo institucional.
 ///
-/// No Android, o SDK Firebase apresenta a autenticação em uma Custom Tab do
-/// navegador. A aparência dessa janela pertence ao SDK e ao navegador instalado;
-/// esta biblioteca não cria uma WebView ou apaga os cookies do provedor.
-/// O resultado precisa conter um access token Microsoft não vazio.
-/// Reautenticação exige uma conta existente, que será novamente conferida
-/// pelo caso de uso e pelo controlador.
+/// Para uma conta já autenticada, getAccessTokenForCurrentUser tenta a obtenção
+/// silenciosa. Somente MicrosoftInteractionRequiredException permite passar à
+/// obtenção interativa, e apenas quando allowInteraction é verdadeiro. Uma falha
+/// de comunicação propaga sem abrir autorização. Não se executa reautenticação
+/// Firebase para renovar a evidência institucional.
 ///
-/// Estabelecer um UID Firebase não conclui a entrada no CApp: a verificação
-/// institucional no backend ainda precisa ser realizada.
+/// A permanência do UID é conferida antes e depois das etapas assíncronas.
+/// O e-mail enviado como loginHint apenas sugere uma conta: não prova que o
+/// token retornado corresponde à identidade Firebase. O backend valida essa
+/// correspondência. As revisões do SessionController também são necessárias
+/// para rejeitar resultados após trocas de sessão A/B/A.
+///
+/// A seleção de popup na web ou provedor nativo se aplica à etapa Firebase.
+/// Ela não torna o adaptador Microsoft compatível com todas as plataformas;
+/// a composição MSAL atual foi preparada para Android.
+///
+/// Estabelecer um UID Firebase não conclui a entrada no CApp: é preciso recuperar
+/// a conta e sua confirmação institucional, renovando-a apenas quando necessário.
 ///
 /// ## Dois tipos de token
 ///
-/// O access token Microsoft é obtido da credencial do login e segue para o corpo
+/// O access token Microsoft vem de MicrosoftTokenProvider e segue para o corpo
 /// da verificação. O ID token Firebase é consultado no usuário atual por requisição
 /// protegida e segue no cabeçalho Authorization. Nenhum deles é gravado no cache
 /// institucional.
@@ -50,8 +61,12 @@
 /// Falhas inesperadas continuam propagando. A configuração do provedor e o
 /// suporte da plataforma são pré-condições externas.
 ///
-/// O SDK possui a persistência da autenticação. signOut encerra a conta local,
-/// mas não limpa o perfil em preferências ou revoga evidências do backend.
+/// Os SDKs possuem suas persistências de autenticação e credenciais. signOut
+/// limpa a sessão Microsoft antes de encerrar a conta Firebase. Se a primeira
+/// etapa falhar, a segunda não é executada; se a segunda falhar, a primeira
+/// não é desfeita. As falhas propagam, sem simular uma saída bem-sucedida.
+/// O cache institucional em preferências é removido pelo controlador após a
+/// saída; este adaptador não revoga evidências do backend.
 /// O adaptador não assume o encerramento do aplicativo Firebase global.
 library;
 
@@ -61,9 +76,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../application/errors/identity_exception.dart';
+
+import 'firebase_auth_failure.dart';
+import '../../application/errors/microsoft_interaction_required_exception.dart';
 import '../../application/errors/session_identity_changed_exception.dart';
 import '../../application/ports/auth_session.dart';
 import '../../application/ports/microsoft_sign_in.dart';
+import '../../application/ports/microsoft_token_provider.dart';
 
 /// Implementa os contratos de autenticação sobre uma única instância Firebase.
 ///
@@ -74,9 +93,14 @@ final class FirebaseMicrosoftAuth implements MicrosoftSignIn, AuthSession {
   /// Recebe a instância compartilhada pela observação e pelas requisições.
   ///
   /// Construir não apresenta login nem registra inscrições.
-  const FirebaseMicrosoftAuth(this._firebaseAuth);
+  const FirebaseMicrosoftAuth(
+    this._firebaseAuth, {
+    required this._microsoftTokenProvider,
+  });
 
   final FirebaseAuth _firebaseAuth;
+
+  final MicrosoftTokenProvider _microsoftTokenProvider;
 
   /// Observa o UID restaurado e as alterações posteriores.
   ///
@@ -94,7 +118,7 @@ final class FirebaseMicrosoftAuth implements MicrosoftSignIn, AuthSession {
                 (Object error, StackTrace stack, EventSink<String?> sink) {
                   sink.addError(
                     error is FirebaseAuthException
-                        ? _translate(error, stack)
+                        ? translateFirebaseAuthFailure(error, stack)
                         : error,
                     stack,
                   );
@@ -120,89 +144,144 @@ final class FirebaseMicrosoftAuth implements MicrosoftSignIn, AuthSession {
   /// O ID token é distinto do access token Microsoft e não é armazenado aqui.
   Future<String?> getFirebaseIdToken() async {
     final user = _firebaseAuth.currentUser;
+
     if (user == null) return null;
+
     try {
       final token = await user.getIdToken();
+
       if (token == null || token.isEmpty) {
         throw _missingToken('O Firebase não retornou um ID token');
       }
+
       return token;
     } on FirebaseAuthException catch (error, stack) {
-      Error.throwWithStackTrace(_translate(error, stack), stack);
+      Error.throwWithStackTrace(
+        translateFirebaseAuthFailure(error, stack),
+        stack,
+      );
     }
   }
 
-  /// Encerra a autenticação local e permite que o SDK publique UID nulo.
+  /// Remove a sessão Microsoft antes de encerrar a autenticação Firebase.
   ///
-  /// Não remove cache, revoga tokens de outros dispositivos ou cancela ouvintes.
-  /// Falhas Firebase são traduzidas; erros inesperados propagam.
+  /// Uma falha na limpeza Microsoft impede prosseguir com a saída Firebase.
+  /// O cache institucional continua pertencendo ao SessionController.
   @override
   Future<void> signOut() async {
+    final expectedUid = _firebaseAuth.currentUser?.uid;
+
+    await _microsoftTokenProvider.clearSession();
+
+    if (_firebaseAuth.currentUser?.uid != expectedUid) {
+      throw const SessionIdentityChangedException();
+    }
+
     try {
       await _firebaseAuth.signOut();
     } on FirebaseAuthException catch (error, stack) {
-      Error.throwWithStackTrace(_translate(error, stack), stack);
+      Error.throwWithStackTrace(
+        translateFirebaseAuthFailure(error, stack),
+        stack,
+      );
     }
   }
 
-  /// Autentica com Microsoft e retorna a credencial delegada não vazia.
+  /// Estabelece a identidade Firebase antes da consulta à conta CApp.
   ///
-  /// Usa popup na web e provedor nativo nas plataformas suportadas. Pode emitir
-  /// o UID antes de concluir. Cancelamentos e recusas mantêm sua classificação.
-  /// Uma resposta sem access token produz IdentityException.invalidResponse.
+  /// A obtenção de credenciais Graph é solicitada separadamente, somente quando
+  /// a restauração indicar necessidade de provisionamento ou sincronização.
   @override
-  Future<String> signInAndGetAccessToken() async {
+  Future<void> signIn() async {
     try {
       final provider = _createProvider();
       final result = kIsWeb
           ? await _firebaseAuth.signInWithPopup(provider)
           : await _firebaseAuth.signInWithProvider(provider);
-      return _extractAccessToken(result);
+
+      final user = result.user;
+
+      if (user == null) {
+        throw IdentityException(
+          kind: IdentityFailureKind.invalidResponse,
+          cause: const FormatException('O Firebase não retornou o usuário'),
+          stackTrace: StackTrace.current,
+        );
+      }
+
+      _requireSameFirebaseUser(user.uid);
     } on FirebaseAuthException catch (error, stack) {
-      Error.throwWithStackTrace(_translate(error, stack), stack);
+      Error.throwWithStackTrace(
+        translateFirebaseAuthFailure(error, stack),
+        stack,
+      );
     }
   }
 
   /// Obtém uma nova credencial para a conta atual sem trocar sua identidade.
   ///
-  /// Ausência da conta lança SessionIdentityChangedException. O SDK rejeita
-  /// credenciais de outra conta. Falhas e cancelamentos são traduzidos;
-  /// concluir não renova a evidência institucional sem consultar o backend.
+  /// Ausência ou mudança da conta Firebase lança SessionIdentityChangedException.
+  /// A tentativa silenciosa só admite interação quando [allowInteraction]
+  /// permite. Uma autorização Microsoft bem-sucedida ainda precisa ser validada
+  /// pelo backend contra a identidade vinculada ao Firebase e não renova,
+  /// sozinha, a evidência institucional.
   @override
-  Future<String> reauthenticateAndGetAccessToken() async {
+  Future<String> getAccessTokenForCurrentUser({bool allowInteraction = true}) {
     final user = _firebaseAuth.currentUser;
+
     if (user == null) throw const SessionIdentityChangedException();
-    try {
-      final provider = _createProvider();
-      final result = kIsWeb
-          ? await user.reauthenticateWithPopup(provider)
-          : await user.reauthenticateWithProvider(provider);
-      return _extractAccessToken(result);
-    } on FirebaseAuthException catch (error, stack) {
-      Error.throwWithStackTrace(_translate(error, stack), stack);
-    }
+
+    return _getMicrosoftAccessToken(user, allowInteraction: allowInteraction);
   }
 
-  /// Solicita o escopo delegado e a escolha de conta, sem fixar um tenant.
+  /// Obtém a credencial e impede aplicar o resultado a outro UID Firebase.
   ///
-  /// A configuração é compartilhada por login e reautenticação. select_account
-  /// permite confirmar uma conta lembrada ou indicar outra, sem exigir senha
-  /// a cada interação. Na reautenticação, o SDK e o caso de uso continuam
-  /// exigindo a mesma identidade; a troca de conta requer encerrar a anterior.
+  /// Somente necessidade explícita de interação permite abrir o provedor.
+  /// A identidade Microsoft efetiva permanece sujeita à validação no backend.
+  Future<String> _getMicrosoftAccessToken(
+    User user, {
+    required bool allowInteraction,
+  }) async {
+    _requireSameFirebaseUser(user.uid);
+
+    String token;
+
+    try {
+      token = await _microsoftTokenProvider.getAccessTokenSilently();
+    } on MicrosoftInteractionRequiredException {
+      _requireSameFirebaseUser(user.uid);
+
+      if (!allowInteraction) rethrow;
+
+      token = await _microsoftTokenProvider.getAccessTokenInteractively(
+        loginHint:
+            user.providerData
+                .where((p) => p.providerId == 'microsoft.com')
+                .firstOrNull
+                ?.email ??
+            user.email,
+      );
+    }
+
+    _requireSameFirebaseUser(user.uid);
+
+    return token;
+  }
+
+  /// Solicita uma autenticação Microsoft nova para uma entrada explícita.
   ///
-  /// Não altera a restauração de uma sessão já válida, a persistência Firebase
-  /// ou os cookies do navegador. A construção não abre a interface do provedor.
+  /// prompt=login impede que esquecer uma conta seja seguido apenas pela escolha
+  /// de uma sessão do navegador já aberta. Esta política vale para novo login
+  /// Firebase; renovação da evidência continua silenciosa pelo MSAL e não passa
+  /// por este método. O CApp não apaga cookies de outros aplicativos.
   MicrosoftAuthProvider _createProvider() => MicrosoftAuthProvider()
     ..addScope('User.Read')
-    ..setCustomParameters(const {'prompt': 'select_account'});
+    ..setCustomParameters(const {'prompt': 'login'});
 
-  /// Exige o access token da resposta sem registrar seu conteúdo.
-  String _extractAccessToken(UserCredential result) {
-    final token = result.credential?.accessToken;
-    if (token == null || token.isEmpty) {
-      throw _missingToken('A Microsoft não retornou um access token');
+  void _requireSameFirebaseUser(String expectedUid) {
+    if (_firebaseAuth.currentUser?.uid != expectedUid) {
+      throw const SessionIdentityChangedException();
     }
-    return token;
   }
 
   /// Representa resposta de credencial incompleta com diagnóstico explícito.
@@ -211,33 +290,4 @@ final class FirebaseMicrosoftAuth implements MicrosoftSignIn, AuthSession {
     cause: FormatException(message),
     stackTrace: StackTrace.current,
   );
-
-  /// Traduz códigos conhecidos e conserva a exceção original.
-  ///
-  /// Mensagens arbitrárias do SDK não são marcadas como públicas. Códigos novos
-  /// permanecem em uma falha operacional não classificada, com causa acessível.
-  IdentityException _translate(FirebaseAuthException error, StackTrace stack) {
-    final kind = switch (error.code) {
-      'popup-closed-by-user' ||
-      'cancelled-popup-request' ||
-      'web-context-canceled' ||
-      'user-cancelled' => IdentityFailureKind.authenticationCancelled,
-      'network-request-failed' => IdentityFailureKind.communicationFailed,
-      'too-many-requests' ||
-      'quota-exceeded' => IdentityFailureKind.serviceUnavailable,
-      'invalid-credential' ||
-      'invalid-login-credentials' ||
-      'user-disabled' ||
-      'user-not-found' ||
-      'wrong-password' ||
-      'user-mismatch' ||
-      'invalid-user-token' ||
-      'user-token-expired' ||
-      'requires-recent-login' ||
-      'account-exists-with-different-credential' =>
-        IdentityFailureKind.credentialsRejected,
-      _ => IdentityFailureKind.unexpectedExternalFailure,
-    };
-    return IdentityException(kind: kind, cause: error, stackTrace: stack);
-  }
 }

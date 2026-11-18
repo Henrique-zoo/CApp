@@ -6,12 +6,12 @@
 ///
 /// ## Configuração e uso
 ///
-/// A construção define URL base, timeouts e FirebaseBearerInterceptor. As fachadas
+/// A construção define URL base, timeouts e interceptors de App Check e Bearer. As fachadas
 /// identity e monitoring são criadas no primeiro acesso, compartilhando a mesma
 /// instância de Dio. Construir a composição ou acessar uma fachada não faz I/O.
 ///
-/// Cada endpoint escolhe se exige credencial por meio do marcador firebaseAuth.
-/// O interceptor consulta o provedor de ID token somente para requisições marcadas.
+/// Cada endpoint marca firebaseAuth e firebaseAppCheck para consultar os provedores
+/// correspondentes. App Check comprova o aplicativo; Bearer identifica a conta.
 /// A composição solicita prontidão em paralelo à sessão na abertura. A sondagem
 /// não condiciona o login; saúde continua disponível para consultas explícitas.
 ///
@@ -29,6 +29,7 @@ library;
 import 'package:dio/dio.dart';
 
 import 'auth/firebase_bearer_interceptor.dart';
+import 'auth/firebase_app_check_interceptor.dart';
 import 'identity/identity.dart';
 import 'monitoring/monitoring.dart';
 
@@ -44,6 +45,7 @@ final class BackendApi {
   ///
   /// [baseUrl] deve apontar para a raiz do servidor, sem prefixo `/v1`.
   /// [getFirebaseIdToken] é consultado somente nas operações protegidas.
+  /// [getFirebaseAppCheckToken] fornece o atestado do aplicativo nessas operações.
   /// Quando [dio] é fornecido, suas opções são alteradas e o interceptor
   /// Firebase é inserido antes dos interceptors existentes.
   ///
@@ -60,13 +62,18 @@ final class BackendApi {
   BackendApi({
     required String baseUrl,
     required FirebaseIdTokenProvider getFirebaseIdToken,
+    required FirebaseAppCheckTokenProvider getFirebaseAppCheckToken,
     Dio? dio,
   }) : _dio = dio ?? Dio() {
     _dio.options.baseUrl = baseUrl;
     _dio.options.connectTimeout = const Duration(seconds: 5);
     // O serviço institucional pode consumir 15 segundos no backend.
     _dio.options.receiveTimeout = const Duration(seconds: 20);
-    _dio.interceptors.insert(0, FirebaseBearerInterceptor(getFirebaseIdToken));
+
+    _dio.interceptors.insertAll(0, [
+      FirebaseAppCheckInterceptor(getFirebaseAppCheckToken),
+      FirebaseBearerInterceptor(getFirebaseIdToken),
+    ]);
   }
 
   final Dio _dio;

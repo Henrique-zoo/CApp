@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use axum::{Router, extract::State, routing::get};
+use axum::{Router, extract::State, middleware, routing::get};
 use reqwest::StatusCode;
 use tokio::time::timeout;
 
@@ -30,11 +30,10 @@ use crate::api::state::AppState;
 ///
 /// # Retorno
 ///
-/// Um [`Router<AppState>`] que deve receber o estado por [`Router::with_state`]
-/// antes de atender requisições. Não inicia servidor, não aplica migrations e
-/// não instala proteção global. A rota de verificação interpreta suas próprias
-/// credenciais; o extractor de evidência persistida só protege handlers que o
-/// recebam explicitamente, e nenhuma rota atual o recebe.
+/// Router já associado a [AppState], com fiscalização App Check nas rotas de
+/// negócio. GET/HEAD /health e /ready são públicos. Construir não inicia servidor,
+/// aplica migrations ou consulta chaves remotas. Após a comprovação do aplicativo,
+/// cada rota continua verificando a identidade Firebase e suas regras de acesso.
 ///
 /// # Exemplos
 ///
@@ -61,10 +60,12 @@ use crate::api::state::AppState;
 ///     .build()?;
 /// let firebase = FirebaseTokenVerifier::new("capp-example".into(), http.clone())?;
 /// let microsoft = MicrosoftGraphClient::new(http);
+/// let app_check = backend::modules::identity::infrastructure::firebase::AppCheckVerifier::new(
+///     "1234567890".into(), vec!["1:1234567890:android:capp".into()], reqwest::Client::new())?;
 /// let state = AppState::new(
-///     PgDatabase::new(pool.clone()), Clients::new(firebase, microsoft),
+///     PgDatabase::new(pool.clone()), Clients::new(firebase, microsoft, app_check),
 /// );
-/// let app = create_router().with_state(state);
+/// let app = create_router(state);
 /// let response = app
 ///     .oneshot(Request::builder().uri("/health").body(Body::empty())?)
 ///     .await?;
@@ -73,7 +74,7 @@ use crate::api::state::AppState;
 /// # Ok(())
 /// # }
 /// ```
-pub fn create_router() -> Router<AppState> {
+pub fn create_router(state: AppState) -> Router {
     Router::new()
         .merge(crate::modules::identity::api::router())
         .route("/health", get(|| async { "O servidor está saudável." }))
@@ -99,4 +100,9 @@ pub fn create_router() -> Router<AppState> {
                 }
             }),
         )
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            super::app_check::require_app_check,
+        ))
+        .with_state(state)
 }

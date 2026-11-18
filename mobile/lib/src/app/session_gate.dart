@@ -11,9 +11,12 @@
 /// primeira construção. A seleção lê a fotografia atual do controlador, evitando
 /// que uma notificação assíncrona antiga reaplique um destino ultrapassado.
 ///
-/// SessionAccess distingue restauração, entrada pendente, prontidão e falha de
-/// restauração. O ramo pronto exige SessionSignedIn com verificação presente;
+/// SessionAccess distingue restauração, entrada pendente, conclusão de perfil,
+/// prontidão e falha de restauração. O ramo pronto exige SessionSignedIn com verificação presente;
 /// combinações incompatíveis representam erro de programação e lançam StateError.
+/// Depois de perder a autenticação durante uma saída, a operação signingOut
+/// seleciona uma interface de espera até concluir a tentativa de limpeza. Essa
+/// atividade não concede acesso nem mantém uma identidade que o SDK já encerrou.
 ///
 /// ## Identidade das subárvores
 ///
@@ -21,6 +24,8 @@
 /// O mesmo ramo de entrada é preservado durante Microsoft e backend; uma mudança
 /// de destino ou conta descarta sua subárvore. A navegação precisa ficar dentro
 /// dela para participar desse descarte, como ocorre em CApp.
+/// A espera de saída possui um ramo próprio: descarta a área anterior e impede
+/// montar o seletor com uma lista ainda em processo de remoção.
 ///
 /// O gate não consulta relógio, SDK, cache ou rede. Não inicia nem encerra o
 /// controlador; possui somente a inscrição visual criada por StreamBuilder.
@@ -60,7 +65,9 @@ class SessionGate extends StatelessWidget {
     super.key,
     required this.controller,
     required this.restoringBuilder,
+    required this.signingOutBuilder,
     required this.entryBuilder,
+    this.profileBuilder,
     required this.signedInBuilder,
     required this.restorationFailedBuilder,
   });
@@ -71,8 +78,17 @@ class SessionGate extends StatelessWidget {
   /// Interface durante a restauração da autenticação ou do cache.
   final WidgetBuilder restoringBuilder;
 
+  /// Espera da saída após encerrar a autenticação, antes de concluir a limpeza.
+  ///
+  /// O controlador mantém signingOut até a tentativa terminar. Não monta a
+  /// entrada nem reapresenta os dados da área autenticada nesse intervalo.
+  final SessionStateWidgetBuilder<SessionSignedOut> signingOutBuilder;
+
   /// Entrada, com ou sem autenticação Firebase já estabelecida.
   final SessionStateWidgetBuilder<SessionState> entryBuilder;
+
+  /// Conclusão do cadastro depois da confirmação institucional.
+  final SessionStateWidgetBuilder<SessionSignedIn>? profileBuilder;
 
   /// Área principal com identidade e verificação válidas na política local.
   final SessionStateWidgetBuilder<SessionSignedIn> signedInBuilder;
@@ -99,6 +115,7 @@ class SessionGate extends StatelessWidget {
             snapshot.stackTrace ?? StackTrace.current,
           );
         }
+
         return _buildForState(context, controller.state);
       },
     );
@@ -108,7 +125,17 @@ class SessionGate extends StatelessWidget {
   ///
   /// Estados incompatíveis com seu destino representam erro de programação.
   /// A mesma chave de entrada preserva a tela durante Microsoft e backend.
+  /// A operação de saída tem precedência sobre a entrada quando o UID já saiu;
+  /// a apresentação acompanha a atividade sem recalcular prontidão ou validade.
   Widget _buildForState(BuildContext context, SessionState state) {
+    if (state is SessionSignedOut &&
+        state.operation == SessionOperation.signingOut) {
+      return KeyedSubtree(
+        key: const ValueKey('signing-out'),
+        child: signingOutBuilder(context, state),
+      );
+    }
+
     switch (state.access) {
       case SessionAccess.restoring:
         return KeyedSubtree(
@@ -120,8 +147,20 @@ class SessionGate extends StatelessWidget {
           key: const ValueKey('entry'),
           child: entryBuilder(context, state),
         );
+      case SessionAccess.profileRequired:
+        if (state is! SessionSignedIn) {
+          throw StateError('Perfil sem identidade');
+        }
+        return KeyedSubtree(
+          key: ValueKey(('profile', state.firebaseUid)),
+          child:
+              profileBuilder?.call(context, state) ??
+              entryBuilder(context, state),
+        );
       case SessionAccess.ready:
-        if (state is! SessionSignedIn || state.verification == null) {
+        if (state is! SessionSignedIn ||
+            state.verification == null ||
+            state.user?.status != InternalUserStatus.active) {
           throw StateError('Sessão pronta sem identidade e perfil');
         }
         return KeyedSubtree(

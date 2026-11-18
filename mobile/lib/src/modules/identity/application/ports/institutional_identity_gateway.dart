@@ -8,7 +8,7 @@
 ///
 /// InstitutionalAuthService obtém um access token Microsoft e solicita verify.
 /// A implementação de infraestrutura providencia a requisição autenticada,
-/// converte a resposta e devolve InstitutionalVerification.
+/// converte a resposta e devolve a conta provisionada com sua verificação.
 ///
 /// Na composição atual, o ID token Firebase é obtido pelo transporte a partir
 /// da mesma autenticação. Ele não é argumento desta porta nem se confunde com
@@ -26,7 +26,7 @@
 library;
 
 import '../errors/identity_exception.dart';
-import '../models/institutional_verification.dart';
+import '../models/internal_user.dart';
 
 /// Obtém uma verificação institucional para a identidade autenticada.
 ///
@@ -41,7 +41,7 @@ abstract interface class InstitutionalIdentityGateway {
   /// A credencial deve ser não vazia e pertencer à mesma identidade utilizada
   /// na autenticação da requisição ao backend.
   ///
-  /// Retorna um modelo próprio da aplicação. A implementação deve converter
+  /// Retorna a conta provisionada e uma verificação não nula em modelos próprios. A implementação deve converter
   /// a resposta externa antes de concluir, sem expor DTOs de transporte.
   ///
   /// O resultado de vínculo não estudantil é um sucesso da operação.
@@ -56,7 +56,5 @@ abstract interface class InstitutionalIdentityGateway {
   ///
   /// A credencial é sensível e não deve ser persistida no cache institucional
   /// ou incluída em diagnósticos públicos.
-  Future<InstitutionalVerification> verify({
-    required String microsoftAccessToken,
-  });
+  Future<AccountSession> verify({required String microsoftAccessToken});
 }

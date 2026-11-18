@@ -7,29 +7,39 @@ part of 'institutional_affiliation.dart';
 /// Construir o DTO não comprova validade atual ou autorização. O curso continua
 /// sendo texto externo, sem associação ao catálogo acadêmico interno.
 final class StudentAffiliation extends InstitutionalAffiliation {
-  /// Cria o vínculo confirmado, mesmo quando o nome do curso não foi informado.
-  const StudentAffiliation({required this.courseName});
+  /// Cria o vínculo confirmado com curso não vazio fornecido pelo Graph.
+  ///
+  /// [courseName] é preservado sem aparar; nulo não faz parte do tipo e vazio ou
+  /// somente espaços lança [FormatException]. A instância descreve o protocolo,
+  /// não prova que a confirmação continua vigente ou autoriza uma operação.
+  StudentAffiliation({required this.courseName}) {
+    if (courseName.trim().isEmpty) {
+      throw const FormatException(
+        'Vínculo estudantil exige curso institucional',
+      );
+    }
+  }
 
-  /// Curso informado em `jobTitle`, ou `null` se não fornecido.
-  final String? courseName;
+  /// Curso não vazio informado em `jobTitle`.
+  final String courseName;
 
   /// Desserializa um vínculo `student` com a propriedade `courseName` presente.
   ///
   /// Lança [FormatException] se o tipo estiver incorreto, se o campo estiver
-  /// ausente ou se seu valor não for uma string ou `null`.
+  /// ausente, nulo, vazio ou composto apenas por espaços.
   /// Outras chaves são aceitas; nenhum texto é aparado ou normalizado.
   factory StudentAffiliation.fromJson(Map<String, dynamic> json) {
     if (json['type'] != 'student' || !json.containsKey('courseName')) {
       throw const FormatException('Vínculo estudantil inválido');
     }
     final raw = json['courseName'];
-    if (raw != null && raw is! String) {
-      throw const FormatException('courseName deve ser string ou null');
+    if (raw is! String) {
+      throw const FormatException('courseName deve ser uma string não vazia');
     }
-    return StudentAffiliation(courseName: raw as String?);
+    return StudentAffiliation(courseName: raw);
   }
 
-  /// Serializa `type: student` e inclui `courseName`, mesmo quando nulo.
+  /// Serializa `type: student` e seu curso institucional obrigatório.
   @override
   Map<String, dynamic> toJson() => {
     'type': 'student',

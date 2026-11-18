@@ -17,9 +17,15 @@ use crate::modules::identity::{
             InstitutionalVerificationRepositoryError,
         },
         ports::{InstitutionalAffiliation, InstitutionalProfile, VerifiedIdentity},
+        services::accounts::restore,
     },
-    domain::entities::{
-        institution::Institution, institutional_verification::InstitutionalVerification,
+    domain::{
+        UserStatus,
+        entities::{
+            institution::Institution,
+            institutional_verification::InstitutionalVerification,
+            user::{ProfileCompletion, User},
+        },
     },
 };
 
@@ -32,6 +38,7 @@ use mocks::*;
 /// Configura uma única validação do token fictício com identidade Microsoft vinculada.
 fn verifier_ok() -> MockVerifier {
     let mut verifier = MockVerifier::new();
+
     verifier
         .expect_verify()
         .with(eq(FIREBASE_TOKEN))
@@ -44,22 +51,26 @@ fn verifier_ok() -> MockVerifier {
 /// Configura somente a consulta do tenant, sem permitir consulta de grupo ou perfil.
 fn directory_tenant_only() -> MockDirectory {
     let mut directory = MockDirectory::new();
+
     directory
         .expect_get_tenant_id()
         .with(eq(MICROSOFT_TOKEN))
         .times(1)
         .returning(|_| Ok(tenant_id()));
+
     directory
 }
 
 /// Configura tenant e participação no grupo, deixando a obtenção do perfil ao caso.
 fn directory_membership(is_student: bool) -> MockDirectory {
     let mut directory = directory_tenant_only();
+
     directory
         .expect_is_student_member()
         .with(eq(MICROSOFT_TOKEN), eq(student_group_id()))
         .times(1)
         .returning(move |_, _| Ok(is_student));
+
     directory
 }
 
@@ -69,11 +80,13 @@ fn directory_membership(is_student: bool) -> MockDirectory {
 fn directory_with_profile(id: &str, is_student: bool) -> MockDirectory {
     let mut directory = directory_membership(is_student);
     let profile = profile_with_id(id, is_student);
+
     directory
         .expect_get_profile()
         .with(eq(MICROSOFT_TOKEN), eq(is_student))
         .times(1)
         .return_once(move |_, _| Ok(profile));
+
     directory
 }
 
@@ -84,7 +97,8 @@ fn directory_success(is_student: bool) -> MockDirectory {
 
 /// Configura a busca da instituição fictícia pelo tenant, sem permitir gravações.
 fn repositories_institution() -> MockRepositories {
-    let mut repo = MockRepositories::new();
+    let mut repo = repositories();
+
     repo.expect_find_by_microsoft_tenant_id()
         .with(eq(tenant_id()))
         .times(1)
@@ -96,7 +110,7 @@ fn repositories_institution() -> MockRepositories {
 /// Verifica a persistência de uma confirmação estudantil positiva e seu prazo de validade.
 ///
 /// Configura Firebase, perfil, tenant e grupo compatíveis. Exige uma gravação com
-/// todos os identificadores e TTL de 24 horas; confere o ID do perfil retornado e
+/// todos os identificadores e TTL de 120 dias; confere o ID do perfil retornado e
 /// situa sua expiração entre os instantes medidos antes e depois da operação.
 #[tokio::test]
 async fn first_verification_persists_positive_evidence_with_all_identifiers() {
@@ -107,13 +121,13 @@ async fn first_verification_persists_positive_evidence_with_all_identifiers() {
     repo.expect_save()
         .times(1)
         .withf(|v| {
-            v.firebase_uid == FIREBASE_UID
+            v.user_id == Uuid::nil()
                 && v.microsoft_object_id == microsoft_object_id()
                 && v.microsoft_tenant_id == tenant_id()
                 && v.microsoft_student_group_id == student_group_id()
                 && v.institution_id == institution_id()
                 && v.student_membership_confirmed
-                && v.expires_at == v.checked_at + Duration::hours(24)
+                && v.expires_at == v.checked_at + Duration::days(120)
         })
         .returning(|_| Ok(true));
 
@@ -130,14 +144,17 @@ async fn first_verification_persists_positive_evidence_with_all_identifiers() {
 
     let after = Utc::now();
 
-    assert_eq!(result.profile.id, MICROSOFT_OBJECT_ID);
+    assert_eq!(result.user.id(), Uuid::nil());
+    assert_eq!(result.user.status(), UserStatus::Incomplete);
+
+    assert_eq!(result.verification.profile.id, MICROSOFT_OBJECT_ID);
     assert!(matches!(
-        result.profile.affiliation,
-        InstitutionalAffiliation::Student { course_name: Some(ref name) }
+        result.verification.profile.affiliation,
+        InstitutionalAffiliation::Student { course_name: ref name }
             if name == "Curso de Teste"
     ));
-    assert!(result.expires_at >= before + Duration::hours(24));
-    assert!(result.expires_at <= after + Duration::hours(24));
+    assert!(result.verification.expires_at >= before + Duration::days(120));
+    assert!(result.verification.expires_at <= after + Duration::days(120));
 }
 
 /// Verifica que um token Firebase inválido interrompe a verificação institucional.
@@ -148,7 +165,7 @@ async fn first_verification_persists_positive_evidence_with_all_identifiers() {
 async fn invalid_firebase_token_stops_before_any_graph_or_database_calls() {
     let mut verifier = MockVerifier::new();
     let directory = MockDirectory::new();
-    let repo = MockRepositories::new();
+    let repo = repositories();
 
     verifier
         .expect_verify()
@@ -164,6 +181,7 @@ async fn invalid_firebase_token_stops_before_any_graph_or_database_calls() {
         MICROSOFT_TOKEN,
     )
     .await;
+
     assert!(matches!(result, Err(AuthenticationError::InvalidToken)));
     // Mockall falha caso seja chamado método não configurado.
 }
@@ -178,6 +196,8 @@ async fn missing_microsoft_identity_stops_before_graph() {
 
     verifier.expect_verify().times(1).returning(|_| {
         Ok(VerifiedIdentity {
+            email: None,
+            sign_in_provider: None,
             firebase_uid: FIREBASE_UID.into(),
             microsoft_object_id: None,
         })
@@ -186,7 +206,7 @@ async fn missing_microsoft_identity_stops_before_graph() {
     let result = verify_institutional_identity(
         &MockDirectory::new(),
         &verifier,
-        &MockRepositories::new(),
+        &repositories(),
         FIREBASE_TOKEN,
         MICROSOFT_TOKEN,
     )
@@ -208,6 +228,8 @@ async fn malformed_microsoft_identity_is_rejected() {
 
     verifier.expect_verify().times(1).returning(|_| {
         Ok(VerifiedIdentity {
+            email: None,
+            sign_in_provider: None,
             firebase_uid: FIREBASE_UID.into(),
             microsoft_object_id: Some("not-a-uuid".into()),
         })
@@ -216,7 +238,7 @@ async fn malformed_microsoft_identity_is_rejected() {
     let result = verify_institutional_identity(
         &MockDirectory::new(),
         &verifier,
-        &MockRepositories::new(),
+        &repositories(),
         FIREBASE_TOKEN,
         MICROSOFT_TOKEN,
     )
@@ -280,7 +302,7 @@ async fn malformed_graph_id_means_unavailable_profile() {
 async fn unknown_tenant_is_a_business_rejection_not_a_database_failure() {
     let verifier = verifier_ok();
     let directory = directory_tenant_only();
-    let mut repo = MockRepositories::new();
+    let mut repo = repositories();
 
     repo.expect_find_by_microsoft_tenant_id()
         .with(eq(tenant_id()))
@@ -328,9 +350,9 @@ async fn non_student_membership_is_saved_and_profile_is_returned() {
     .await
     .expect("não estudantes também devem concluir a verificação");
 
-    assert_eq!(result.profile.id, MICROSOFT_OBJECT_ID);
+    assert_eq!(result.verification.profile.id, MICROSOFT_OBJECT_ID);
     assert!(matches!(
-        result.profile.affiliation,
+        result.verification.profile.affiliation,
         InstitutionalAffiliation::NonStudent
     ));
 }
@@ -371,7 +393,7 @@ async fn positive_membership_cannot_authorize_when_evidence_was_not_saved() {
 #[tokio::test]
 async fn valid_persisted_evidence_allows_later_requests_without_graph() {
     let verifier = verifier_ok();
-    let mut repo = MockRepositories::new();
+    let mut repo = repositories();
 
     repo.expect_find_valid_by_firebase_uid()
         .with(eq(FIREBASE_UID))
@@ -394,7 +416,7 @@ async fn valid_persisted_evidence_allows_later_requests_without_graph() {
 #[tokio::test]
 async fn valid_non_student_evidence_allows_later_authentication() {
     let verifier = verifier_ok();
-    let mut repo = MockRepositories::new();
+    let mut repo = repositories();
 
     repo.expect_find_valid_by_firebase_uid()
         .with(eq(FIREBASE_UID))
@@ -416,7 +438,7 @@ async fn valid_non_student_evidence_allows_later_authentication() {
 #[tokio::test]
 async fn missing_evidence_requires_fresh_institutional_verification() {
     let verifier = verifier_ok();
-    let mut repo = MockRepositories::new();
+    let mut repo = repositories();
 
     repo.expect_find_valid_by_firebase_uid()
         .with(eq(FIREBASE_UID))
@@ -438,14 +460,16 @@ async fn missing_evidence_requires_fresh_institutional_verification() {
 #[tokio::test]
 async fn another_microsoft_account_cannot_reuse_saved_verification() {
     let verifier = verifier_ok();
-    let mut repo = MockRepositories::new();
+    let mut repo = repositories();
 
     repo.expect_find_valid_by_firebase_uid()
         .times(1)
         .returning(|_| {
             let mut v = evidence(true, Duration::hours(1));
+
             v.microsoft_object_id =
                 Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap();
+
             Ok(Some(v))
         });
 
@@ -465,7 +489,7 @@ async fn another_microsoft_account_cannot_reuse_saved_verification() {
 #[tokio::test]
 async fn expired_evidence_cannot_be_reused_even_if_repository_returns_it() {
     let verifier = verifier_ok();
-    let mut repo = MockRepositories::new();
+    let mut repo = repositories();
 
     repo.expect_find_valid_by_firebase_uid()
         .times(1)
@@ -495,7 +519,7 @@ async fn firebase_expiration_error_is_propagated_without_graph() {
     let result = verify_institutional_identity(
         &MockDirectory::new(),
         &verifier,
-        &MockRepositories::new(),
+        &repositories(),
         FIREBASE_TOKEN,
         MICROSOFT_TOKEN,
     )
@@ -551,7 +575,7 @@ async fn tenant_lookup_failure_does_not_persist_anything() {
     let result = verify_institutional_identity(
         &directory,
         &verifier,
-        &MockRepositories::new(),
+        &repositories(),
         FIREBASE_TOKEN,
         MICROSOFT_TOKEN,
     )
@@ -573,7 +597,7 @@ async fn institution_repository_failure_is_not_unknown_institution() {
     let verifier = verifier_ok();
     let directory = directory_tenant_only();
 
-    let mut repo = MockRepositories::new();
+    let mut repo = repositories();
 
     repo.expect_find_by_microsoft_tenant_id()
         .times(1)
@@ -690,14 +714,15 @@ async fn request_authentication_rejects_missing_linked_microsoft_id() {
 
     verifier.expect_verify().times(1).returning(|_| {
         Ok(VerifiedIdentity {
+            email: None,
+            sign_in_provider: None,
             firebase_uid: FIREBASE_UID.into(),
             microsoft_object_id: None,
         })
     });
 
     let result =
-        authenticate_institutional_request(&verifier, &MockRepositories::new(), FIREBASE_TOKEN)
-            .await;
+        authenticate_institutional_request(&verifier, &repositories(), FIREBASE_TOKEN).await;
 
     assert!(matches!(
         result,
@@ -718,8 +743,7 @@ async fn request_authentication_propagates_invalid_firebase_token() {
         .returning(|_| Err(AuthenticationError::InvalidToken));
 
     let result =
-        authenticate_institutional_request(&verifier, &MockRepositories::new(), FIREBASE_TOKEN)
-            .await;
+        authenticate_institutional_request(&verifier, &repositories(), FIREBASE_TOKEN).await;
 
     assert!(matches!(result, Err(AuthenticationError::InvalidToken)));
 }
@@ -732,7 +756,7 @@ async fn request_authentication_propagates_invalid_firebase_token() {
 #[tokio::test]
 async fn request_authentication_propagates_repository_failure() {
     let verifier = verifier_ok();
-    let mut repo = MockRepositories::new();
+    let mut repo = repositories();
 
     repo.expect_find_valid_by_firebase_uid()
         .times(1)
@@ -743,12 +767,12 @@ async fn request_authentication_propagates_repository_failure() {
     assert!(matches!(result, Err(AuthenticationError::Internal)));
 }
 
-/// Verifica que um estudante sem nome, e-mail ou curso pode concluir a verificação.
+/// Grupo confirmado sem curso permite entrada limitada, sem evidência estudantil.
 ///
-/// O grupo confirma o vínculo, que é repassado a `get_profile`. Exige a gravação
-/// positiva e preserva a variante `Student` mesmo com `course_name: None`.
+/// A consulta concluída persiste a negativa e mantém o perfil sem nome/e-mail.
+/// A ausência de curso nunca é preenchida por dados declarados do perfil interno.
 #[tokio::test]
-async fn valid_profile_without_optional_fields_is_accepted() {
+async fn missing_course_persists_limited_access_even_with_student_group() {
     let verifier = verifier_ok();
     let mut directory = MockDirectory::new();
     let mut repo = repositories_institution();
@@ -762,7 +786,7 @@ async fn valid_profile_without_optional_fields_is_accepted() {
                 id: MICROSOFT_OBJECT_ID.to_owned(),
                 name: None,
                 mail: None,
-                affiliation: InstitutionalAffiliation::Student { course_name: None },
+                affiliation: InstitutionalAffiliation::NonStudent,
             })
         });
 
@@ -779,7 +803,9 @@ async fn valid_profile_without_optional_fields_is_accepted() {
         .returning(|_, _| Ok(true));
 
     repo.expect_save()
-        .withf(|verification| verification.student_membership_confirmed)
+        .withf(|verification| {
+            !verification.student_membership_confirmed && verification.course_name.is_none()
+        })
         .times(1)
         .returning(|_| Ok(true));
 
@@ -793,12 +819,12 @@ async fn valid_profile_without_optional_fields_is_accepted() {
     .await
     .expect("atributos opcionais ausentes não devem impedir a verificação");
 
-    assert_eq!(result.profile.id, MICROSOFT_OBJECT_ID);
-    assert!(result.profile.name.is_none());
-    assert!(result.profile.mail.is_none());
+    assert_eq!(result.verification.profile.id, MICROSOFT_OBJECT_ID);
+    assert!(result.verification.profile.name.is_none());
+    assert!(result.verification.profile.mail.is_none());
     assert!(matches!(
-        result.profile.affiliation,
-        InstitutionalAffiliation::Student { course_name: None }
+        result.verification.profile.affiliation,
+        InstitutionalAffiliation::NonStudent
     ));
 }
 
@@ -836,7 +862,7 @@ async fn non_student_persistence_failure_never_returns_success() {
 #[tokio::test]
 async fn request_authentication_propagates_expired_firebase_token() {
     let mut verifier = MockVerifier::new();
-    let repo = MockRepositories::new();
+    let repo = repositories();
 
     verifier
         .expect_verify()
@@ -856,7 +882,7 @@ async fn request_authentication_propagates_expired_firebase_token() {
 #[tokio::test]
 async fn request_authentication_rejects_malformed_linked_microsoft_id() {
     let mut verifier = MockVerifier::new();
-    let repo = MockRepositories::new();
+    let repo = repositories();
 
     verifier
         .expect_verify()
@@ -864,7 +890,9 @@ async fn request_authentication_rejects_malformed_linked_microsoft_id() {
         .times(1)
         .returning(|_| {
             let mut identity = valid_identity();
+
             identity.microsoft_object_id = Some("not-a-uuid".to_owned());
+
             Ok(identity)
         });
 
@@ -874,4 +902,110 @@ async fn request_authentication_rejects_malformed_linked_microsoft_id() {
         result,
         Err(AuthenticationError::InvalidMicrosoftId)
     ));
+}
+
+/// Evidências legadas com grupo positivo e curso ausente não restauram direitos.
+/// O mesmo cuidado vale sem migrations, por exemplo em outra implementação da porta.
+///
+/// Reconstitui registros com curso nulo, vazio e em branco por mocks de
+/// repositório. Espera restauração bem-sucedida com perfil não estudantil,
+/// sem transformar essa inconsistência em falha de autenticação ou consultar
+/// provedores. Exercita a defesa no caso de uso, independente da restrição SQL.
+#[tokio::test]
+async fn restore_downgrades_legacy_student_evidence_without_course() {
+    for course in [None, Some(String::new()), Some(" \t\n".into())] {
+        let verifier = verifier_ok();
+        let mut repo = repositories_institution();
+        let mut legacy = evidence(true, Duration::days(120));
+
+        legacy.course_name = course;
+
+        repo.expect_get_by_firebase_uid()
+            .with(eq(FIREBASE_UID))
+            .times(1)
+            .returning(|uid| Ok(Some(User::provisioned(Uuid::nil(), uid.into(), Utc::now()))));
+        repo.expect_find_valid_by_firebase_uid()
+            .with(eq(FIREBASE_UID))
+            .times(1)
+            .returning(move |_| Ok(Some(legacy.clone())));
+
+        let result = restore(&verifier, &repo, FIREBASE_TOKEN).await.unwrap();
+
+        assert!(matches!(
+            result.verification.unwrap().profile.affiliation,
+            InstitutionalAffiliation::NonStudent
+        ));
+    }
+}
+
+/// O endereço do Graph só é sugerido no cadastro, sem alterar o e-mail já escolhido.
+///
+/// Confere os resultados para perfil incompleto com endereço presente, ausente
+/// ou em branco e para perfil ativo com outro endereço interno. A verificação
+/// continua sendo persistida, mas somente o cadastro com texto não vazio recebe
+/// sugestão; o perfil ativo preserva o e-mail escolhido. Usa portas controladas,
+/// sem depender de Firebase, Graph ou PostgreSQL reais.
+#[tokio::test]
+async fn graph_email_is_transient_and_only_suggested_for_incomplete_accounts() {
+    for (complete, mail) in [
+        (false, Some("graph@example.test")),
+        (false, None),
+        (false, Some(" \t")),
+        (true, Some("graph@example.test")),
+    ] {
+        let verifier = verifier_ok();
+        let mut directory = directory_membership(true);
+        let mut repo = MockRepositories::new();
+        let mut profile = profile_with_id(MICROSOFT_OBJECT_ID, true);
+
+        profile.mail = mail.map(str::to_owned);
+
+        directory
+            .expect_get_profile()
+            .with(eq(MICROSOFT_TOKEN), eq(true))
+            .times(1)
+            .return_once(move |_, _| Ok(profile));
+        repo.expect_find_by_microsoft_tenant_id()
+            .with(eq(tenant_id()))
+            .times(1)
+            .returning(|_| Ok(Some(institution())));
+        repo.expect_provision().times(1).returning(move |uid| {
+            let mut user = User::provisioned(Uuid::nil(), uid.into(), Utc::now());
+
+            if complete {
+                user.complete_profile(
+                    ProfileCompletion {
+                        nickname: "Pessoa".into(),
+                        current_semester: 4,
+                        institution_entry_semester: "2024.1".into(),
+                        name: None,
+                    },
+                    "escolhido@example.test",
+                    Utc::now(),
+                )
+                .unwrap();
+            }
+
+            Ok(user)
+        });
+        repo.expect_save().times(1).returning(|_| Ok(true));
+
+        let result = verify_institutional_identity(
+            &directory,
+            &verifier,
+            &repo,
+            FIREBASE_TOKEN,
+            MICROSOFT_TOKEN,
+        )
+        .await
+        .unwrap();
+
+        let expected = mail.filter(|email| !complete && !email.trim().is_empty());
+
+        assert_eq!(result.suggested_email.as_deref(), expected);
+
+        if complete {
+            assert_eq!(result.user.email(), Some("escolhido@example.test"));
+        }
+    }
 }

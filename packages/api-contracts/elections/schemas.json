@@ -1,0 +1,1072 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:capp:elections:wire:1",
+  "title": "CApp elections protocol v1",
+  "type": "object",
+  "required": [
+    "payload",
+    "signature"
+  ],
+  "properties": {
+    "payload": {
+      "$ref": "#/$defs/Payload"
+    },
+    "signature": {
+      "$ref": "#/$defs/Base64Url"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "Hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "BigUInt": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "maxLength": 617
+    },
+    "Base64Url": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "maxLength": 1024
+    },
+    "Time": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9]Z$"
+    },
+    "Count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "Reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "OptionId": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Uuid"
+        },
+        {
+          "const": "00000000-0000-0000-0000-000000000000"
+        }
+      ]
+    },
+    "Option": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/OptionId"
+        },
+        "kind": {
+          "enum": [
+            "slate",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "const": "00000000-0000-0000-0000-000000000000"
+              },
+              "name": {
+                "const": "Nulo"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "slate"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "not": {
+                  "const": "00000000-0000-0000-0000-000000000000"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Ciphertext": {
+      "type": "object",
+      "required": [
+        "optionId",
+        "a",
+        "b"
+      ],
+      "properties": {
+        "optionId": {
+          "$ref": "#/$defs/OptionId"
+        },
+        "a": {
+          "$ref": "#/$defs/BigUInt"
+        },
+        "b": {
+          "$ref": "#/$defs/BigUInt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Ciphertexts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Ciphertext"
+      },
+      "minItems": 2,
+      "maxItems": 51
+    },
+    "KeyProof": {
+      "type": "object",
+      "required": [
+        "commitment",
+        "response"
+      ],
+      "properties": {
+        "commitment": {
+          "$ref": "#/$defs/BigUInt"
+        },
+        "response": {
+          "$ref": "#/$defs/BigUInt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Authority": {
+      "type": "object",
+      "required": [
+        "id",
+        "role",
+        "slateId",
+        "signingKey",
+        "publicValue",
+        "keyProof"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "role": {
+          "enum": [
+            "server",
+            "commission",
+            "slate"
+          ]
+        },
+        "slateId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "signingKey": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "publicValue": {
+          "$ref": "#/$defs/BigUInt"
+        },
+        "keyProof": {
+          "$ref": "#/$defs/KeyProof"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "slate"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "slateId": {
+                "$ref": "#/$defs/Uuid"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "slateId": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Manifest": {
+      "type": "object",
+      "required": [
+        "version",
+        "kind",
+        "electionId",
+        "academicCenterId",
+        "groupId",
+        "options",
+        "authorities",
+        "combinedPublicKey",
+        "serverSigningKey",
+        "calendarOriginHash"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "manifest"
+        },
+        "electionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "academicCenterId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "groupId": {
+          "const": "rfc3526-modp14"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Option"
+          },
+          "minItems": 2,
+          "maxItems": 51,
+          "contains": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "null"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        "authorities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Authority"
+          },
+          "minItems": 3,
+          "maxItems": 52
+        },
+        "combinedPublicKey": {
+          "$ref": "#/$defs/BigUInt"
+        },
+        "serverSigningKey": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "calendarOriginHash": {
+          "$ref": "#/$defs/Hash"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Ballot": {
+      "type": "object",
+      "required": [
+        "version",
+        "kind",
+        "electionId",
+        "manifestHash",
+        "voterId",
+        "submissionId",
+        "publicKey",
+        "ciphertexts"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "ballot"
+        },
+        "electionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "manifestHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "voterId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "submissionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "publicKey": {
+          "$ref": "#/$defs/Base64Url"
+        },
+        "ciphertexts": {
+          "$ref": "#/$defs/Ciphertexts"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SignedBallot": {
+      "type": "object",
+      "required": [
+        "payload",
+        "signature"
+      ],
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/Ballot"
+        },
+        "signature": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      },
+      "additionalProperties": false
+    },
+    "BoardEntry": {
+      "type": "object",
+      "required": [
+        "version",
+        "kind",
+        "electionId",
+        "manifestHash",
+        "index",
+        "previousHash",
+        "ballot"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "board-entry"
+        },
+        "electionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "manifestHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "previousHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "ballot": {
+          "$ref": "#/$defs/SignedBallot"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Receipt": {
+      "type": "object",
+      "required": [
+        "version",
+        "kind",
+        "electionId",
+        "manifestHash",
+        "ballotHash",
+        "index",
+        "entryHash"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "receipt"
+        },
+        "electionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "manifestHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "ballotHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "entryHash": {
+          "$ref": "#/$defs/Hash"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ScheduleChange": {
+      "type": "object",
+      "required": [
+        "version",
+        "kind",
+        "electionId",
+        "manifestHash",
+        "revision",
+        "previousScheduleHash",
+        "startsAt",
+        "endsAt",
+        "changedBy",
+        "changedAt",
+        "reason"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "schedule-change"
+        },
+        "electionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "manifestHash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "previousScheduleHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "startsAt": {
+          "$ref": "#/$defs/Time"
+        },
+        "endsAt": {
+          "$ref": "#/$defs/Time"
+        },
+        "changedBy": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "changedAt": {
+          "$ref": "#/$defs/Time"
+        },
+        "reason": {
+          "$ref": "#/$defs/Reason"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Cancellation": {
+      "type": "object",
+      "required": [
+        "version",
+        "kind",
+        "electionId",
+        "manifestHash",
+        "scheduleHash",
+        "headHash",
+        "voterCount",
+        "requestedBy",
+        "cancelledAt",
+        "reason"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "cancellation"
+        },
+        "electionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "manifestHash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scheduleHash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "headHash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "voterCount": {
+          "$ref": "#/$defs/Count"
+        },
+        "requestedBy": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "cancelledAt": {
+          "$ref": "#/$defs/Time"
+        },
+        "reason": {
+          "$ref": "#/$defs/Reason"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Closure": {
+      "type": "object",
+      "required": [
+        "version",
+        "kind",
+        "electionId",
+        "manifestHash",
+        "scheduleHash",
+        "headHash",
+        "voterCount",
+        "closedAt"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "closure"
+        },
+        "electionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "manifestHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "scheduleHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "headHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "voterCount": {
+          "$ref": "#/$defs/Count"
+        },
+        "closedAt": {
+          "$ref": "#/$defs/Time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Aggregate": {
+      "type": "object",
+      "required": [
+        "version",
+        "kind",
+        "electionId",
+        "manifestHash",
+        "closureHash",
+        "ciphertexts"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "aggregate"
+        },
+        "electionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "manifestHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "closureHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "ciphertexts": {
+          "$ref": "#/$defs/Ciphertexts"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DecryptionProof": {
+      "type": "object",
+      "required": [
+        "commitmentG",
+        "commitmentA",
+        "response"
+      ],
+      "properties": {
+        "commitmentG": {
+          "$ref": "#/$defs/BigUInt"
+        },
+        "commitmentA": {
+          "$ref": "#/$defs/BigUInt"
+        },
+        "response": {
+          "$ref": "#/$defs/BigUInt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "OptionShare": {
+      "type": "object",
+      "required": [
+        "optionId",
+        "value",
+        "proof"
+      ],
+      "properties": {
+        "optionId": {
+          "$ref": "#/$defs/OptionId"
+        },
+        "value": {
+          "$ref": "#/$defs/BigUInt"
+        },
+        "proof": {
+          "$ref": "#/$defs/DecryptionProof"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DecryptionShare": {
+      "type": "object",
+      "required": [
+        "version",
+        "kind",
+        "electionId",
+        "manifestHash",
+        "closureHash",
+        "aggregateHash",
+        "authorityId",
+        "shares"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "decryption-share"
+        },
+        "electionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "manifestHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "closureHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "aggregateHash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "authorityId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "shares": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OptionShare"
+          },
+          "minItems": 2,
+          "maxItems": 51
+        }
+      },
+      "additionalProperties": false
+    },
+    "OptionCount": {
+      "type": "object",
+      "required": [
+        "optionId",
+        "count"
+      ],
+      "properties": {
+        "optionId": {
+          "$ref": "#/$defs/OptionId"
+        },
+        "count": {
+          "$ref": "#/$defs/Count"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Result": {
+      "type": "object",
+      "required": [
+        "version",
+        "kind",
+        "electionId",
+        "manifestHash",
+        "closureHash",
+        "aggregateHash",
+        "cancellationHash",
+        "voterCount",
+        "status",
+        "reason",
+        "counts",
+        "missingAuthorities"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "result"
+        },
+        "electionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "manifestHash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "closureHash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aggregateHash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cancellationHash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "voterCount": {
+          "$ref": "#/$defs/Count"
+        },
+        "status": {
+          "enum": [
+            "valid",
+            "annulled",
+            "incomplete",
+            "cancelled"
+          ]
+        },
+        "reason": {
+          "enum": [
+            null,
+            "missing_authority",
+            "invalid_authority_share",
+            "aggregate_sum_mismatch",
+            "tally_out_of_range",
+            "manual_cancellation"
+          ]
+        },
+        "counts": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/OptionCount"
+              },
+              "minItems": 2,
+              "maxItems": 51
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "missingAuthorities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "maxItems": 52,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "const": "valid"
+            },
+            "reason": {
+              "type": "null"
+            },
+            "manifestHash": {
+              "$ref": "#/$defs/Hash"
+            },
+            "closureHash": {
+              "$ref": "#/$defs/Hash"
+            },
+            "aggregateHash": {
+              "$ref": "#/$defs/Hash"
+            },
+            "cancellationHash": {
+              "type": "null"
+            },
+            "counts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/OptionCount"
+              },
+              "minItems": 2,
+              "maxItems": 51
+            },
+            "missingAuthorities": {
+              "maxItems": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "annulled"
+            },
+            "reason": {
+              "enum": [
+                "aggregate_sum_mismatch",
+                "tally_out_of_range"
+              ]
+            },
+            "manifestHash": {
+              "$ref": "#/$defs/Hash"
+            },
+            "closureHash": {
+              "$ref": "#/$defs/Hash"
+            },
+            "aggregateHash": {
+              "$ref": "#/$defs/Hash"
+            },
+            "cancellationHash": {
+              "type": "null"
+            },
+            "missingAuthorities": {
+              "maxItems": 0
+            }
+          },
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "aggregate_sum_mismatch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "counts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/OptionCount"
+                },
+                "minItems": 2,
+                "maxItems": 51
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "counts": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "incomplete"
+            },
+            "reason": {
+              "enum": [
+                "missing_authority",
+                "invalid_authority_share"
+              ]
+            },
+            "manifestHash": {
+              "$ref": "#/$defs/Hash"
+            },
+            "closureHash": {
+              "$ref": "#/$defs/Hash"
+            },
+            "aggregateHash": {
+              "$ref": "#/$defs/Hash"
+            },
+            "cancellationHash": {
+              "type": "null"
+            },
+            "counts": {
+              "type": "null"
+            },
+            "missingAuthorities": {
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "cancelled"
+            },
+            "reason": {
+              "const": "manual_cancellation"
+            },
+            "counts": {
+              "type": "null"
+            },
+            "closureHash": {
+              "type": "null"
+            },
+            "aggregateHash": {
+              "type": "null"
+            },
+            "cancellationHash": {
+              "$ref": "#/$defs/Hash"
+            },
+            "missingAuthorities": {
+              "maxItems": 0
+            }
+          }
+        }
+      ]
+    },
+    "Payload": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Manifest"
+        },
+        {
+          "$ref": "#/$defs/Ballot"
+        },
+        {
+          "$ref": "#/$defs/BoardEntry"
+        },
+        {
+          "$ref": "#/$defs/Receipt"
+        },
+        {
+          "$ref": "#/$defs/ScheduleChange"
+        },
+        {
+          "$ref": "#/$defs/Cancellation"
+        },
+        {
+          "$ref": "#/$defs/Closure"
+        },
+        {
+          "$ref": "#/$defs/Aggregate"
+        },
+        {
+          "$ref": "#/$defs/DecryptionShare"
+        },
+        {
+          "$ref": "#/$defs/Result"
+        },
+        {
+          "$ref": "#/$defs/CalendarOrigin"
+        }
+      ]
+    },
+    "CalendarOrigin": {
+      "type": "object",
+      "required": [
+        "version",
+        "kind",
+        "electionId",
+        "startsAt",
+        "endsAt"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "calendar-origin"
+        },
+        "electionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "startsAt": {
+          "$ref": "#/$defs/Time"
+        },
+        "endsAt": {
+          "$ref": "#/$defs/Time"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

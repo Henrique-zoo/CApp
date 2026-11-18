@@ -1,0 +1,127 @@
+name: API Contracts CI
+
+on:
+  push:
+    paths:
+      - "packages/api-contracts/**"
+      - "backend/src/modules/**/api/**"
+      - "backend/src/api/**"
+      - "mobile/lib/src/infrastructure/backend/**"
+      - "mobile/test/src/infrastructure/backend/**"
+      - "mobile/test/src/modules/identity/infrastructure/backend/**"
+      - ".github/workflows/api-contracts.yml"
+  pull_request:
+    paths:
+      - "packages/api-contracts/**"
+      - "backend/src/modules/**/api/**"
+      - "backend/src/api/**"
+      - "mobile/lib/src/infrastructure/backend/**"
+      - "mobile/test/src/infrastructure/backend/**"
+      - "mobile/test/src/modules/identity/infrastructure/backend/**"
+      - ".github/workflows/api-contracts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-contracts-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Lint and check compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install example validation dependencies
+        run: |
+          python -m pip install \
+            --disable-pip-version-check \
+            -r packages/api-contracts/requirements-ci.txt
+
+      - name: Test OpenAPI example validator
+        run: |
+          python -m unittest discover \
+            -s packages/api-contracts/scripts \
+            -p 'test_validate_examples.py' \
+            -v
+
+      - name: Validate electoral protocol and shared vectors
+        run: |
+          python -m unittest discover \
+            -s packages/api-contracts/scripts \
+            -p 'test_election_contracts.py' \
+            -v
+
+      - name: Test OASDiff versioning policy
+        run: |
+          python -m unittest discover \
+            -s packages/api-contracts/scripts \
+            -p 'test_oasdiff_policy.py' \
+            -v
+
+      - name: Validate shared examples against OpenAPI schemas
+        run: |
+          python packages/api-contracts/scripts/validate_examples.py
+
+      - name: Lint OpenAPI description
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/spec" \
+            -w /spec \
+            redocly/cli:2.73.0 \
+            lint packages/api-contracts/openapi.yaml \
+            --config packages/api-contracts/redocly.yaml \
+            --format=github-actions
+
+      - name: Fetch exact pull request base commit
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::SHA-base da pull request ausente ou inválido."
+            exit 1
+          fi
+
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git cat-file -e "${BASE_SHA}^{commit}"
+
+      - name: Require OpenAPI update for backend API changes
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          CHANGED_FILES="$(git diff --name-only "$BASE_SHA" HEAD)"
+          API_FILES="$(printf '%s\n' "$CHANGED_FILES" \
+            | grep -E '^backend/src/api/.*\.rs$|^backend/src/modules/.*/api/.*\.rs$' \
+            | grep -v '/tests\.rs$' || true)"
+
+          if [ -n "$API_FILES" ] &&
+             ! printf '%s\n' "$CHANGED_FILES" \
+               | grep -Fxq 'packages/api-contracts/openapi.yaml'; then
+            echo "::error::Alterações na implementação HTTP do backend exigem atualização de packages/api-contracts/openapi.yaml no mesmo PR."
+            echo "$API_FILES"
+            exit 1
+          fi
+
+      - name: Detect breaking changes
+        if: github.event_name == 'pull_request'
+        env:
+          OASDIFF_CONFIG: packages/api-contracts/.oasdiff.yaml
+        # OASDiff 1.38.0: keep the runner and local policy tests on the same version.
+        uses: oasdiff/oasdiff-action/breaking@0b95859a27abaed7445bb05c18a39f1a6610a9a4
+        with:
+          base: "${{ github.event.pull_request.base.sha }}:packages/api-contracts/openapi.yaml"
+          revision: "HEAD:packages/api-contracts/openapi.yaml"
+          review: false

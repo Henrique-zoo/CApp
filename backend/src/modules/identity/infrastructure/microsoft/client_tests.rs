@@ -38,19 +38,28 @@ async fn student_profile_preserves_external_values() {
     assert_eq!(profile.name.as_deref(), Some("Pessoa"));
     assert_eq!(profile.mail.as_deref(), Some("pessoa@example.edu"));
     assert!(
-        matches!(profile.affiliation, InstitutionalAffiliation::Student { course_name: Some(name) } if name == "  Engenharia  ")
+        matches!(profile.affiliation, InstitutionalAffiliation::Student { course_name: name } if name == "  Engenharia  ")
     );
 }
 
-/// Campos ausentes, nulos e curso em branco são aceitos sem inventar um curso.
+/// Nome/e-mail podem faltar; curso ausente, nulo ou em branco limita o acesso.
 #[tokio::test]
-async fn optional_profile_fields_and_blank_courses_are_supported() {
-    for job in [serde_json::Value::Null, json!(""), json!(" \t\n")] {
+async fn missing_or_blank_courses_do_not_confirm_student_affiliation() {
+    for job in [
+        None,
+        Some(serde_json::Value::Null),
+        Some(json!("")),
+        Some(json!(" \t\n")),
+    ] {
         let server = MockServer::start().await;
+        let mut body = json!({"id": ID});
+
+        if let Some(job) = job {
+            body["jobTitle"] = job;
+        }
+
         Mock::given(path("/v1.0/me"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(json!({"id": ID, "jobTitle": job})),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
             .expect(1)
             .mount(&server)
             .await;
@@ -58,7 +67,7 @@ async fn optional_profile_fields_and_blank_courses_are_supported() {
         assert!(profile.name.is_none() && profile.mail.is_none());
         assert!(matches!(
             profile.affiliation,
-            InstitutionalAffiliation::Student { course_name: None }
+            InstitutionalAffiliation::NonStudent
         ));
     }
 }
