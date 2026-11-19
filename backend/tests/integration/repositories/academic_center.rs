@@ -203,6 +203,65 @@ async fn should_enforce_institutional_foreign_key_relationship() {
 }
 
 #[tokio::test]
+async fn should_reference_app_user_when_creator_is_informed() {
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "Universidade do Criador").await;
+    let unknown_user_id = Uuid::new_v4();
+
+    let missing_creator = sqlx::query(
+        "INSERT INTO academic_center (institution_id, created_by_id, name, status) \
+         VALUES ($1, $2, 'CA sem autor conhecido', 'active')",
+    )
+    .bind(institution_id)
+    .bind(unknown_user_id)
+    .execute(&db.pool)
+    .await;
+    assert!(
+        missing_creator.is_err(),
+        "deve falhar ao referenciar um usuário que não existe em app_user"
+    );
+
+    let creator_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO app_user (id, firebase_uid) VALUES ($1, $2)")
+        .bind(creator_id)
+        .bind(format!("creator-{}", creator_id))
+        .execute(&db.pool)
+        .await
+        .expect("should insert creator");
+
+    let ca_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, created_by_id, name, status) \
+         VALUES ($1, $2, $3, 'CA com autor', 'active')",
+    )
+    .bind(ca_id)
+    .bind(institution_id)
+    .bind(creator_id)
+    .execute(&db.pool)
+    .await
+    .expect("should insert academic center created by an existing user");
+
+    let stored_creator: Option<Uuid> =
+        sqlx::query_scalar("SELECT created_by_id FROM academic_center WHERE id = $1")
+            .bind(ca_id)
+            .fetch_one(&db.pool)
+            .await
+            .expect("should read creator");
+    assert_eq!(stored_creator, Some(creator_id));
+
+    let delete_creator = sqlx::query("DELETE FROM app_user WHERE id = $1")
+        .bind(creator_id)
+        .execute(&db.pool)
+        .await;
+    assert!(
+        delete_creator.is_err(),
+        "deve impedir apagar o usuário enquanto ele for o autor de um CA"
+    );
+
+    db.close().await;
+}
+
+#[tokio::test]
 async fn should_allow_duplicate_acronyms_without_global_uniqueness() {
     let db = TestDatabase::new().await;
     let inst_1 = create_test_institution(&db.pool, "Instituição Alfa").await;
