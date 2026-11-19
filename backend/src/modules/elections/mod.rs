@@ -6,10 +6,69 @@
 //! em `packages/api-contracts/elections/` fixa formatos, bytes, parâmetros e vetores
 //! antes de as quatro frentes implementarem seus próprios adaptadores.
 //!
-//! Este módulo conserva os espaços de [`api`], [`application`], [`domain`] e
-//! [`infrastructure`]. Os contratos da issue #377 não implementam endpoints,
-//! entidades, persistência ou telas: essas entregas pertencem às issues consumidoras.
+//! Este módulo separa [`api`], [`application`], [`domain`] e [`infrastructure`].
+//! A #130 implementa entidades e invariantes; os contratos da #377 continuam
+//! sendo a referência pública. Endpoints, persistência e telas são entregas das
+//! respectivas issues consumidoras, ainda reservadas neste módulo.
 //! A CLI que confere fixtures não é um servidor de votação nem o auditor do produto.
+//!
+//! # Modelo implementado na #130
+//!
+//! A comissão escolhe [`domain::value_objects::modality::ElectionModality`] ao
+//! criar [`domain::entities::election::Election`]. O calendário existe antes da
+//! configuração. A identificada recebe opções validadas e associa a conta à
+//! escolha; a confidencial recebe manifesto verificado e conserva somente cifras.
+//! Nulo é opção própria; sua posição final é obrigatória no manifesto confidencial.
+//!
+//! Na preparação, [`domain::entities::election::Election::invalidate_configuration`]
+//! retira a prontidão quando opções/autoridades/chaves precisam de revisão pela
+//! aplicação da #131. O histórico mantém cada configuração junto da revisão de
+//! calendário vigente, inclusive manifestos posteriormente invalidados. Uma nova
+//! publicação não modifica a origem ou as revisões assinadas que referenciam o
+//! manifesto antigo. Depois da abertura, publicação e invalidação são recusadas.
+//! Esse histórico pertence à persistência interna; não acrescenta mensagens aos
+//! schemas públicos nem implementa assinatura, auditoria ou a configuração HTTP.
+//!
+//! A abertura congela configuração e revisão vigente. Reconstituição reproduz as
+//! mesmas transições, incluindo revisões anteriores ao manifesto, sem flags que
+//! desativem invariantes. Hashes de encerramento e agregado são referências
+//! independentes do resultado. A apuração confidencial exige o conjunto exato de
+//! contribuições verificadas; a identificada não exige esses artefatos.
+//! Cancelamento e encerramento confidenciais também preservam a origem do quadro
+//! vazio: sua cabeça é o digest do manifesto. Antes de existir manifesto, um
+//! cancelamento não pode afirmar cabeça ou participantes. As mesmas regras são
+//! aplicadas na reconstituição e na construção da fotografia de encerramento.
+//!
+//! [`domain::entities::participation::Participation`] representa o primeiro aceite
+//! por conta interna/eleição e o vínculo à chave pública, sem cadastro antecipado.
+//! A repetição usa operação e digest do payload, recuperando o mesmo aceite até
+//! após o fim; não precisa da chave privada ou de nova elegibilidade. O repositório
+//! de #381 continua responsável por unicidade concorrente e commit conjunto de
+//! participação, cédula, quadro e recibo, conforme [`application::ballot_ports`].
+//! [`domain::entities::board_entry::BoardEntry`] conserva a cédula original e sua
+//! posição encadeada. O aceite confidencial exige registro e recibo com a mesma
+//! cédula, índice e digest do registro; a identificada dispensa ambos. O modelo
+//! confere referências, enquanto o codec confere digests/assinaturas e o store
+//! confirma o conjunto atomicamente. Repetições devolvem as evidências originais.
+//!
+//! `VerifiedManifest`, `VerifiedBallot` e `VerifiedTally` representam verificações
+//! efetuadas nas portas de #378–#380/#139. Seus construtores de evidência
+//! criptográfica são restritos ao crate. Não são algoritmos nem atalhos públicos de
+//! construção. Os adaptadores verificam também os objetos persistidos antes de
+//! reconstituí-los. O domínio não implementa ElGamal, RSA-PSS, JCS ou auditoria.
+//! A contagem identificada usa um construtor próprio que rejeita resultados
+//! confidenciais e cancelamentos administrativos.
+//!
+//! As entidades não implementam `Deserialize`: DTOs dos adaptadores devem chamar
+//! construtores validados. Nenhum tipo persistido contém segredos de autoridades,
+//! chave RSA privada do eleitor ou aleatoriedade de cifragem. A integridade de um
+//! histórico completo depende das assinaturas e do backend confiável da #377;
+//! reconstituição semântica não promete detectar uma reescrita integral maliciosa.
+//!
+//! Os testes unitários cobrem ambas as modalidades, participação, calendário,
+//! estados e snapshots adulterados, sem banco ou cloud. Leem os casos semânticos
+//! de `vectors.json`, incluindo a irregularidade compensada. Isso não substitui
+//! verificação criptográfica dos vetores ou automação funcional dos BDDs.
 //!
 //! # Participação no fluxo
 //!

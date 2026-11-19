@@ -1,4 +1,13 @@
-//! Espaço reservado para entidades do módulo de eleições.
-//!
-//! Ainda não define tipos. Os modelos de domínio deverão expressar identidade
-//! e estado do negócio sem depender dos formatos HTTP ou SQL.
+//! Entidades do domínio eleitoral.
+
+pub mod authority;
+pub mod ballot;
+pub mod board_entry;
+pub mod closure;
+pub mod configuration;
+pub mod election;
+pub mod election_snapshot;
+pub mod manifest;
+pub mod participation;
+pub mod result;
+pub mod tally;

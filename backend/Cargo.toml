@@ -38,6 +38,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 validator = { version = "0.19", features = ["derive"] }
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+base64 = "0.22.1"
 
 [dev-dependencies]
 tokio-test = "0.4"
