@@ -4,13 +4,16 @@ use chrono::{DateTime, Timelike, Utc};
 
 use crate::modules::elections::domain::{
     entities::{
-        closure::ElectionClosure,
+        closure::{ElectionClosure, InvalidElectionClosure},
         configuration::{ElectionConfiguration, PreparationConfigurationChange},
         manifest::{Manifest, VerifiedManifest},
         result::{ElectionResult, ResultReason, ResultStatus},
         tally::VerifiedTally,
     },
-    rules::result_consistency::{CountConsistency, validate_result_counts},
+    rules::{
+        board_snapshot::{InvalidBoardSnapshot, validate_confidential_board_snapshot},
+        result_consistency::{CountConsistency, validate_result_counts},
+    },
     value_objects::{
         calendar_origin::CalendarOrigin,
         election_period::ElectionPeriod,
@@ -389,8 +392,8 @@ pub enum ElectionTransitionError {
     #[error("Os dados do cancelamento divergem do encerramento registrado")]
     CancellationSnapshotMismatch,
 
-    /// A cabeça de um quadro vazio deve ser o hash do manifesto.
-    #[error("A fotografia do quadro vazio diverge do manifesto")]
+    /// A origem do quadro corresponde exatamente à contagem zero.
+    #[error("A cabeça do quadro é incompatível com a contagem de participantes")]
     InvalidEmptyBoard,
 }
 
@@ -669,6 +672,9 @@ impl Election {
     /// O cancelamento preserva o manifesto, o calendário, o histórico de
     /// revisões e eventual registro de encerramento. A autorização do ator
     /// deve ser verificada pela camada de aplicação.
+    /// Na confidencial, manifesto publicado exige uma cabeça de quadro; sem
+    /// participantes, essa cabeça é o hash do manifesto. Antes do manifesto,
+    /// não há cabeça ou participantes. A identificada não exige quadro.
     pub fn cancel(
         &mut self,
         requested_by: ActorId,
@@ -721,6 +727,19 @@ impl Election {
         }
         if self.modality == ElectionModality::Identified && head_hash.is_some() {
             return Err(ElectionTransitionError::ModalityMismatch);
+        }
+        if self.modality == ElectionModality::Confidential {
+            validate_confidential_board_snapshot(
+                self.manifest_hash(),
+                head_hash.as_ref(),
+                voter_count,
+            )
+            .map_err(|error| match error {
+                InvalidBoardSnapshot::InvalidEmptyBoard => {
+                    ElectionTransitionError::InvalidEmptyBoard
+                }
+                _ => ElectionTransitionError::CancellationSnapshotMismatch,
+            })?;
         }
         let reason = reason.into();
         let reason_length = reason.chars().count();
@@ -802,12 +821,6 @@ impl Election {
         if closed_at < *self.current_period.ends_at() {
             return Err(ElectionTransitionError::ClosingBeforeDeadline);
         }
-        if self.modality == ElectionModality::Confidential
-            && voter_count.value() == 0
-            && head_hash.as_ref() != self.manifest_hash()
-        {
-            return Err(ElectionTransitionError::InvalidEmptyBoard);
-        }
         let closure = match (self.manifest_hash().cloned(), head_hash) {
             (Some(manifest), Some(head)) => ElectionClosure::try_new(
                 self.id,
@@ -825,7 +838,12 @@ impl Election {
             ),
             _ => return Err(ElectionTransitionError::ModalityMismatch),
         }
-        .map_err(|_| ElectionTransitionError::SubsecondPrecision)?;
+        .map_err(|error| match error {
+            InvalidElectionClosure::SubsecondPrecision => {
+                ElectionTransitionError::SubsecondPrecision
+            }
+            InvalidElectionClosure::InvalidEmptyBoard => ElectionTransitionError::InvalidEmptyBoard,
+        })?;
         self.closure = Some(closure);
         self.closure_hash = Some(closure_hash);
         self.status = ElectionStatus::Closed;

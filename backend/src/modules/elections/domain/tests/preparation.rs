@@ -229,7 +229,7 @@ fn opening_or_terminal_state_prevents_invalidation_in_both_modalities() {
             .cancel(
                 actor(),
                 at(19, 10),
-                None,
+                cancelled.manifest_hash().cloned(),
                 VoterCount::try_new(0).unwrap(),
                 "Cancelamento",
             )

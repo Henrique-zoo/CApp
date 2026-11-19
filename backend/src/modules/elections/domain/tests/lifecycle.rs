@@ -398,7 +398,7 @@ fn administrative_result_preserves_both_modalities_without_early_counts() {
             .cancel(
                 actor(),
                 at(20, 12),
-                None,
+                election.manifest_hash().cloned(),
                 VoterCount::try_new(0).unwrap(),
                 "Cancelamento",
             )
