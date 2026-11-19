@@ -1,4 +1,7 @@
-//! Espaço reservado para entidades do módulo de materiais acadêmicos.
-//!
-//! Ainda não define tipos. Os modelos de domínio deverão expressar identidade
-//! e estado do negócio sem depender dos formatos HTTP ou SQL.
+//! Entidades do domínio de materiais acadêmicos.
+
+pub mod study_material;
+
+pub use study_material::{
+    StudyMaterial, StudyMaterialContent, StudyMaterialKind, StudyMaterialStatus,
+};

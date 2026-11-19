@@ -1,4 +1,5 @@
-//! Espaço reservado para regras do módulo de materiais acadêmicos.
-//!
-//! Ainda não define validações. As invariantes de negócio implementadas aqui
-//! deverão ser independentes dos mecanismos de transporte e persistência.
+//! Regras e invariantes de domínio dos materiais acadêmicos.
+
+mod material_rules;
+
+pub(crate) use material_rules::{validate_external_link, validate_title};
