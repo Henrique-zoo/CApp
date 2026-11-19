@@ -8,15 +8,16 @@ use chrono::{DateTime, Utc};
 use crate::modules::elections::domain::{
     entities::{
         closure::ElectionClosure,
+        configuration::ElectionConfiguration,
         election::{ElectionStatus, TallyStatus},
-        manifest::Manifest,
-        result::ElectionResult,
+        tally::VerifiedTally,
     },
     value_objects::{
         calendar_origin::CalendarOrigin,
         election_period::ElectionPeriod,
         fingerprint::Fingerprint,
         identifiers::{AcademicCenterId, ActorId, ElectionId},
+        modality::ElectionModality,
         schedule_change::ScheduleChange,
         voter_count::VoterCount,
     },
@@ -29,8 +30,6 @@ pub struct AppliedScheduleChangeSnapshot {
     pub change: ScheduleChange,
     /// Hash do calendário produzido pela alteração.
     pub resulting_schedule_hash: Fingerprint,
-    /// Indica se a alteração foi aplicada durante a votação aberta.
-    pub was_open: bool,
 }
 
 /// Dados persistidos de um cancelamento eleitoral.
@@ -61,6 +60,10 @@ pub struct ElectionSnapshot {
     pub id: ElectionId,
     /// Centro Acadêmico responsável pela eleição.
     pub academic_center_id: AcademicCenterId,
+    /// Modalidade escolhida na criação.
+    pub modality: ElectionModality,
+    /// Configuração pronta, quando existente.
+    pub configuration: Option<ElectionConfiguration>,
     /// Estado operacional persistido.
     pub status: ElectionStatus,
     /// Situação persistida da apuração.
@@ -73,34 +76,34 @@ pub struct ElectionSnapshot {
     pub current_period: ElectionPeriod,
     /// Instante de abertura, quando a votação foi aberta.
     pub opened_at: Option<DateTime<Utc>>,
+    /// Revisão vigente quando a votação foi aberta; separa preparação de prorrogação.
+    pub opening_schedule_revision: Option<u32>,
     /// Hash do calendário atualmente vigente.
     pub current_schedule_hash: Fingerprint,
     /// Número da última revisão aplicada.
     pub schedule_revision: u32,
     /// Histórico ordenado das revisões e respectivos hashes.
     pub schedule_changes: Vec<AppliedScheduleChangeSnapshot>,
-    /// Manifesto publicado, quando existente.
-    pub manifest: Option<Manifest>,
-    /// Hash do manifesto publicado, quando existente.
-    pub manifest_hash: Option<Fingerprint>,
     /// Registro de cancelamento, quando existente.
     pub cancellation: Option<ElectionCancellationSnapshot>,
     /// Registro de encerramento, quando existente.
     pub closure: Option<ElectionClosure>,
+    /// Digest do encerramento conferido pelo codec, independente do resultado.
+    pub closure_hash: Option<Fingerprint>,
     /// Último resultado de apuração publicado, quando existente.
-    pub tally_result: Option<ElectionResult>,
+    pub tally_result: Option<VerifiedTally>,
 }
 
 /// Erros encontrados ao reconstituir um agregado eleitoral persistido.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ElectionReconstitutionError {
+    /// A modalidade diverge da configuração pública persistida.
+    #[error("Configuração incompatível com a modalidade")]
+    InvalidConfiguration,
+
     /// A origem do calendário pertence a outra eleição.
     #[error("A origem do calendário pertence a outra eleição")]
     CalendarOriginElectionMismatch,
-
-    /// O manifesto e seu hash não estão presentes simultaneamente.
-    #[error("O manifesto e seu hash persistido são inconsistentes")]
-    ManifestHashMismatch,
 
     /// O manifesto não corresponde à eleição, ao centro ou ao calendário.
     #[error("O manifesto não corresponde aos dados da eleição")]

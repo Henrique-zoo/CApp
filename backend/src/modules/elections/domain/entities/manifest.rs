@@ -10,6 +10,7 @@ use crate::modules::elections::domain::{
         fingerprint::Fingerprint,
         identifiers::{AcademicCenterId, ElectionId},
         option::{ElectionOption, OptionKind},
+        options::{ElectionOptions, InvalidElectionOptions},
     },
 };
 
@@ -31,6 +32,50 @@ pub const MAX_AUTHORITIES: usize = 52;
 /// Versão do protocolo eleitoral.
 pub const MANIFEST_VERSION: u8 = 1;
 
+/// Manifesto cuja criptografia e digest foram conferidos pelo adaptador.
+///
+/// A implementação de `ElectionCryptography` verifica grupo, chaves, provas,
+/// chave conjunta e a chave RSA; o codec calcula/confere o digest. Somente
+/// depois ela constrói esta evidência. A reconstituição do armazenamento deve
+/// passar pela mesma fronteira. O domínio não implementa essas verificações.
+///
+/// O construtor restrito ao crate evita que consumidores externos tratem um
+/// manifesto apenas estrutural como autorização para abrir uma eleição.
+///
+/// ```compile_fail
+/// use backend::modules::elections::domain::{entities::manifest::{Manifest, VerifiedManifest},
+///     value_objects::fingerprint::Fingerprint};
+/// fn bypass(manifest: Manifest, hash: Fingerprint) -> VerifiedManifest {
+///     VerifiedManifest::from_verified_parts(manifest, hash)
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedManifest {
+    manifest: Manifest,
+    hash: Fingerprint,
+}
+
+impl VerifiedManifest {
+    /// Registra a verificação realizada pelas portas de criptografia e codec.
+    #[allow(
+        dead_code,
+        reason = "A implementação criptográfica pertence às issues #378–#380; testes usam evidências controladas."
+    )]
+    pub(crate) fn from_verified_parts(manifest: Manifest, hash: Fingerprint) -> Self {
+        Self { manifest, hash }
+    }
+
+    /// Retorna a configuração pública verificada.
+    pub const fn manifest(&self) -> &Manifest {
+        &self.manifest
+    }
+
+    /// Retorna o digest calculado ou conferido pelo codec.
+    pub const fn hash(&self) -> &Fingerprint {
+        &self.hash
+    }
+}
+
 /// Manifesto imutável de uma eleição.
 ///
 /// A ordem das opções e das autoridades é preservada, pois faz parte
@@ -39,7 +84,7 @@ pub const MANIFEST_VERSION: u8 = 1;
 pub struct Manifest {
     election_id: ElectionId,
     academic_center_id: AcademicCenterId,
-    options: Vec<ElectionOption>,
+    options: ElectionOptions,
     authorities: Vec<Authority>,
     combined_public_key: BigUInt,
     server_signing_key: Base64Url,
@@ -77,6 +122,10 @@ pub enum InvalidManifest {
     #[error("As chaves de assinatura das autoridades devem ser distintas")]
     DuplicateAuthoritySigningKey,
 
+    /// As contribuições públicas das autoridades devem ser distintas.
+    #[error("Os valores públicos das autoridades devem ser distintos")]
+    DuplicateAuthorityPublicValue,
+
     /// Deve existir exatamente uma autoridade do servidor.
     #[error("O manifesto deve possuir exatamente uma autoridade Server")]
     InvalidServerAuthorityCount,
@@ -89,8 +138,8 @@ pub enum InvalidManifest {
     #[error("Deve existir exatamente uma autoridade para cada chapa")]
     SlateAuthorityMismatch,
 
-    /// A chave pública combinada não pode ser igual a 1.
-    #[error("A chave pública combinada não pode ser 1")]
+    /// A chave pública combinada não pode ser zero ou um.
+    #[error("A chave pública combinada não pode ser zero ou um")]
     InvalidCombinedPublicKey,
 }
 
@@ -106,47 +155,33 @@ impl Manifest {
         server_signing_key: Base64Url,
         calendar_origin_hash: Fingerprint,
     ) -> Result<Self, InvalidManifest> {
-        if !(MIN_OPTIONS..=MAX_OPTIONS).contains(&options.len()) {
-            return Err(InvalidManifest::InvalidOptionCount);
+        let options = ElectionOptions::try_new(options).map_err(|error| match error {
+            InvalidElectionOptions::InvalidCount => InvalidManifest::InvalidOptionCount,
+            InvalidElectionOptions::DuplicateId => InvalidManifest::DuplicateOptionId,
+            InvalidElectionOptions::InvalidNullCount => InvalidManifest::InvalidNullOptionCount,
+        })?;
+        if options.as_slice().last().map(ElectionOption::kind) != Some(OptionKind::Null) {
+            return Err(InvalidManifest::NullOptionMustBeLast);
         }
 
         if !(MIN_AUTHORITIES..=MAX_AUTHORITIES).contains(&authorities.len()) {
             return Err(InvalidManifest::InvalidAuthorityCount);
         }
 
-        if combined_public_key.as_str() == "1" {
+        if matches!(combined_public_key.as_str(), "0" | "1") {
             return Err(InvalidManifest::InvalidCombinedPublicKey);
         }
 
-        let mut option_ids = HashSet::with_capacity(options.len());
-        let mut null_option_count = 0usize;
-        let mut slate_ids = HashSet::with_capacity(options.len() - 1);
-
-        for option in &options {
-            if !option_ids.insert(*option.id().as_uuid()) {
-                return Err(InvalidManifest::DuplicateOptionId);
-            }
-
-            match option.kind() {
-                OptionKind::Null => {
-                    null_option_count += 1;
-                }
-                OptionKind::Slate => {
-                    slate_ids.insert(*option.id().as_uuid());
-                }
-            }
-        }
-
-        if null_option_count != 1 {
-            return Err(InvalidManifest::InvalidNullOptionCount);
-        }
-
-        if options.last().map(ElectionOption::kind) != Some(OptionKind::Null) {
-            return Err(InvalidManifest::NullOptionMustBeLast);
-        }
+        let slate_ids: HashSet<_> = options
+            .as_slice()
+            .iter()
+            .filter(|option| option.kind() == OptionKind::Slate)
+            .map(|option| *option.id().as_uuid())
+            .collect();
 
         let mut authority_ids = HashSet::with_capacity(authorities.len());
         let mut signing_keys = HashSet::with_capacity(authorities.len());
+        let mut public_values = HashSet::with_capacity(authorities.len());
         let mut authority_slate_ids = HashSet::with_capacity(authorities.len());
 
         let mut server_authority_count = 0usize;
@@ -158,6 +193,9 @@ impl Manifest {
 
             if !signing_keys.insert(authority.signing_key().as_str()) {
                 return Err(InvalidManifest::DuplicateAuthoritySigningKey);
+            }
+            if !public_values.insert(authority.public_value().as_str()) {
+                return Err(InvalidManifest::DuplicateAuthorityPublicValue);
             }
 
             match authority.role() {
@@ -216,7 +254,7 @@ impl Manifest {
 
     /// Retorna as opções na ordem publicada.
     pub fn options(&self) -> &[ElectionOption] {
-        &self.options
+        self.options.as_slice()
     }
 
     /// Retorna as autoridades na ordem publicada.
@@ -306,7 +344,7 @@ mod tests {
             role,
             slate_id,
             Base64Url::try_new(encoded_key(signing_key)).unwrap(),
-            BigUInt::try_from_decimal("123").unwrap(),
+            BigUInt::try_from_decimal(id.as_uuid().as_u128().max(2).to_string()).unwrap(),
             KeyProof::new(
                 BigUInt::try_from_decimal("456").unwrap(),
                 BigUInt::try_from_decimal("789").unwrap(),

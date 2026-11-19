@@ -3,6 +3,7 @@
 use crate::modules::elections::domain::value_objects::{
     fingerprint::Fingerprint,
     identifiers::{AuthorityId, ElectionId},
+    modality::ElectionModality,
     option_count::OptionCount,
     voter_count::VoterCount,
 };
@@ -49,6 +50,7 @@ pub enum ResultReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ElectionResult {
     election_id: ElectionId,
+    modality: ElectionModality,
     manifest_hash: Option<Fingerprint>,
     closure_hash: Option<Fingerprint>,
     aggregate_hash: Option<Fingerprint>,
@@ -63,6 +65,10 @@ pub struct ElectionResult {
 /// Erros encontrados ao construir um resultado eleitoral.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidElectionResult {
+    /// Uma contagem publicada deve pertencer ao intervalo `[0,N]`.
+    #[error("Uma contagem excede o número de participantes")]
+    CountOutOfRange,
+
     /// Hashes obrigatórios ausentes para o estado informado.
     #[error("Hashes obrigatórios ausentes para o estado do resultado")]
     MissingRequiredHash,
@@ -109,7 +115,11 @@ pub enum InvalidElectionResult {
 }
 
 impl ElectionResult {
-    /// Constrói um resultado eleitoral validando as regras do contrato.
+    /// Constrói o resultado confidencial conforme os campos do contrato v1.
+    ///
+    /// Valida forma, campos condicionais, duplicatas e limites `[0,N]`. Ordem,
+    /// soma, fotografia e contribuições são conferidas por `Election::publish_tally`
+    /// ao consumir `VerifiedTally`. Não considera a assinatura uma prova de bits.
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         election_id: ElectionId,
@@ -123,6 +133,110 @@ impl ElectionResult {
         counts: Option<Vec<OptionCount>>,
         missing_authorities: Vec<AuthorityId>,
     ) -> Result<Self, InvalidElectionResult> {
+        Self::try_with_modality(
+            ElectionModality::Confidential,
+            election_id,
+            manifest_hash,
+            closure_hash,
+            aggregate_hash,
+            cancellation_hash,
+            voter_count,
+            status,
+            reason,
+            counts,
+            missing_authorities,
+        )
+    }
+
+    /// Constrói a contagem identificada sem manifesto, agregado ou autoridades.
+    ///
+    /// A soma determina `valid` ou `annulled`; a correspondência das opções é
+    /// conferida ao publicar no agregado. Não decide vencedor, quórum ou posse.
+    pub fn try_identified(
+        election_id: ElectionId,
+        closure_hash: Fingerprint,
+        voter_count: VoterCount,
+        counts: Vec<OptionCount>,
+    ) -> Result<Self, InvalidElectionResult> {
+        let consistent = counts
+            .iter()
+            .map(|c| u64::from(c.count().value()))
+            .sum::<u64>()
+            == u64::from(voter_count.value());
+        Self::try_with_modality(
+            ElectionModality::Identified,
+            election_id,
+            None,
+            Some(closure_hash),
+            None,
+            None,
+            voter_count,
+            if consistent {
+                ResultStatus::Valid
+            } else {
+                ResultStatus::Annulled
+            },
+            if consistent {
+                None
+            } else {
+                Some(ResultReason::AggregateSumMismatch)
+            },
+            Some(counts),
+            vec![],
+        )
+    }
+
+    /// Representa cancelamento sem exigir manifesto na modalidade identificada.
+    ///
+    /// O digest é calculado pelo codec; a associação ao registro administrativo
+    /// deve ser feita por `Election::cancelled_result`. Não produz contagens.
+    pub fn try_cancelled(
+        election_id: ElectionId,
+        modality: ElectionModality,
+        manifest_hash: Option<Fingerprint>,
+        cancellation_hash: Fingerprint,
+        voter_count: VoterCount,
+    ) -> Result<Self, InvalidElectionResult> {
+        if modality == ElectionModality::Identified && manifest_hash.is_some() {
+            return Err(InvalidElectionResult::UnexpectedHash);
+        }
+        Self::try_with_modality(
+            modality,
+            election_id,
+            manifest_hash,
+            None,
+            None,
+            Some(cancellation_hash),
+            voter_count,
+            ResultStatus::Cancelled,
+            Some(ResultReason::ManualCancellation),
+            None,
+            vec![],
+        )
+    }
+
+    /// Valida estrutura e campos condicionais; o agregado confere contexto e ordem.
+    #[allow(clippy::too_many_arguments)]
+    fn try_with_modality(
+        modality: ElectionModality,
+        election_id: ElectionId,
+        manifest_hash: Option<Fingerprint>,
+        closure_hash: Option<Fingerprint>,
+        aggregate_hash: Option<Fingerprint>,
+        cancellation_hash: Option<Fingerprint>,
+        voter_count: VoterCount,
+        status: ResultStatus,
+        reason: Option<ResultReason>,
+        counts: Option<Vec<OptionCount>>,
+        missing_authorities: Vec<AuthorityId>,
+    ) -> Result<Self, InvalidElectionResult> {
+        if counts.as_ref().is_some_and(|counts| {
+            counts
+                .iter()
+                .any(|c| c.count().value() > voter_count.value())
+        }) {
+            return Err(InvalidElectionResult::CountOutOfRange);
+        }
         if missing_authorities.len() > 52 {
             return Err(InvalidElectionResult::TooManyMissingAuthorities);
         }
@@ -135,7 +249,10 @@ impl ElectionResult {
 
         match status {
             ResultStatus::Valid => {
-                if manifest_hash.is_none() || closure_hash.is_none() || aggregate_hash.is_none() {
+                if closure_hash.is_none()
+                    || (modality == ElectionModality::Confidential
+                        && (manifest_hash.is_none() || aggregate_hash.is_none()))
+                {
                     return Err(InvalidElectionResult::MissingRequiredHash);
                 }
 
@@ -158,7 +275,10 @@ impl ElectionResult {
                 }
             }
             ResultStatus::Annulled => {
-                if manifest_hash.is_none() || closure_hash.is_none() || aggregate_hash.is_none() {
+                if closure_hash.is_none()
+                    || (modality == ElectionModality::Confidential
+                        && (manifest_hash.is_none() || aggregate_hash.is_none()))
+                {
                     return Err(InvalidElectionResult::MissingRequiredHash);
                 }
 
@@ -187,7 +307,10 @@ impl ElectionResult {
                 }
             }
             ResultStatus::Incomplete => {
-                if manifest_hash.is_none() || closure_hash.is_none() || aggregate_hash.is_none() {
+                if closure_hash.is_none()
+                    || (modality == ElectionModality::Confidential
+                        && (manifest_hash.is_none() || aggregate_hash.is_none()))
+                {
                     return Err(InvalidElectionResult::MissingRequiredHash);
                 }
 
@@ -235,6 +358,7 @@ impl ElectionResult {
 
         Ok(Self {
             election_id,
+            modality,
             manifest_hash,
             closure_hash,
             aggregate_hash,
@@ -262,6 +386,11 @@ impl ElectionResult {
         }
 
         Ok(())
+    }
+
+    /// Retorna a modalidade à qual as evidências do resultado pertencem.
+    pub const fn modality(&self) -> ElectionModality {
+        self.modality
     }
 
     /// Retorna o identificador da eleição.

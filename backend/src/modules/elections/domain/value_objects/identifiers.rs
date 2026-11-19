@@ -47,6 +47,7 @@ non_null_identifier!(VoterId);
 non_null_identifier!(SubmissionId);
 non_null_identifier!(ActorId);
 non_null_identifier!(SlateId);
+non_null_identifier!(AccountId);
 
 /// Identificador de uma opção eleitoral.
 ///

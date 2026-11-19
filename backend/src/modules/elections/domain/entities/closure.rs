@@ -3,7 +3,8 @@
 use chrono::{DateTime, Timelike, Utc};
 
 use crate::modules::elections::domain::value_objects::{
-    fingerprint::Fingerprint, identifiers::ElectionId, voter_count::VoterCount,
+    fingerprint::Fingerprint, identifiers::ElectionId, modality::ElectionModality,
+    voter_count::VoterCount,
 };
 
 /// Versão do formato do encerramento eleitoral.
@@ -13,9 +14,9 @@ pub const ELECTION_CLOSURE_VERSION: u8 = 1;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ElectionClosure {
     election_id: ElectionId,
-    manifest_hash: Fingerprint,
+    manifest_hash: Option<Fingerprint>,
     schedule_hash: Fingerprint,
-    head_hash: Fingerprint,
+    head_hash: Option<Fingerprint>,
     voter_count: VoterCount,
     closed_at: DateTime<Utc>,
 }
@@ -44,12 +45,44 @@ impl ElectionClosure {
 
         Ok(Self {
             election_id,
-            manifest_hash,
+            manifest_hash: Some(manifest_hash),
             schedule_hash,
-            head_hash,
+            head_hash: Some(head_hash),
             voter_count,
             closed_at,
         })
+    }
+
+    /// Constrói uma fotografia identificada sem exigir artefatos confidenciais.
+    ///
+    /// A contagem é obtida dos registros identificados pela aplicação. Nenhum
+    /// segredo, escolha individual ou dado pessoal integra esta fotografia.
+    pub fn try_identified(
+        election_id: ElectionId,
+        schedule_hash: Fingerprint,
+        voter_count: VoterCount,
+        closed_at: DateTime<Utc>,
+    ) -> Result<Self, InvalidElectionClosure> {
+        if closed_at.nanosecond() != 0 {
+            return Err(InvalidElectionClosure::SubsecondPrecision);
+        }
+        Ok(Self {
+            election_id,
+            manifest_hash: None,
+            schedule_hash,
+            head_hash: None,
+            voter_count,
+            closed_at,
+        })
+    }
+
+    /// Retorna a modalidade da fotografia.
+    pub const fn modality(&self) -> ElectionModality {
+        if self.manifest_hash.is_some() {
+            ElectionModality::Confidential
+        } else {
+            ElectionModality::Identified
+        }
     }
 
     /// Retorna o identificador da eleição.
@@ -58,8 +91,8 @@ impl ElectionClosure {
     }
 
     /// Retorna o hash do manifesto.
-    pub const fn manifest_hash(&self) -> &Fingerprint {
-        &self.manifest_hash
+    pub const fn manifest_hash(&self) -> Option<&Fingerprint> {
+        self.manifest_hash.as_ref()
     }
 
     /// Retorna o hash do calendário vigente no encerramento.
@@ -68,8 +101,8 @@ impl ElectionClosure {
     }
 
     /// Retorna o hash da cabeça do quadro de votos.
-    pub const fn head_hash(&self) -> &Fingerprint {
-        &self.head_hash
+    pub const fn head_hash(&self) -> Option<&Fingerprint> {
+        self.head_hash.as_ref()
     }
 
     /// Retorna a quantidade final de eleitores distintos.
@@ -132,9 +165,9 @@ mod tests {
         let closure = build_closure(closed_at()).unwrap();
 
         assert_eq!(closure.election_id(), election_id());
-        assert_eq!(closure.manifest_hash(), &fingerprint('a'));
+        assert_eq!(closure.manifest_hash(), Some(&fingerprint('a')));
         assert_eq!(closure.schedule_hash(), &fingerprint('b'));
-        assert_eq!(closure.head_hash(), &fingerprint('c'));
+        assert_eq!(closure.head_hash(), Some(&fingerprint('c')));
         assert_eq!(closure.voter_count().value(), 42);
         assert_eq!(closure.closed_at(), &closed_at());
         assert_eq!(closure.version(), ELECTION_CLOSURE_VERSION);

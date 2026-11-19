@@ -6,7 +6,10 @@ pub mod election_period;
 pub mod fingerprint;
 pub mod identifiers;
 pub mod key_proof;
+pub mod modality;
 pub mod option;
+pub mod options;
+pub mod receipt;
 
 pub mod calendar_origin;
 pub mod schedule_change;
