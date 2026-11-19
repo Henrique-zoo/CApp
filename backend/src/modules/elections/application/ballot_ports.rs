@@ -7,6 +7,7 @@ use super::ports::AuthenticatedElectorContext;
 use crate::modules::elections::domain::{
     entities::{
         ballot::{SignedBallot, VerifiedBallot},
+        board_entry::BoardEntry,
         manifest::{Manifest, VerifiedManifest},
         participation::{Participation, ParticipationError, ParticipationKey},
     },
@@ -45,44 +46,58 @@ pub trait ElectionEvidenceVerifier: Send + Sync {
     ) -> Result<VerifiedBallot, ElectionEvidenceError>;
 }
 
-/// Aceite confirmado, com recibo obrigatório somente no protocolo confidencial.
+/// Aceite confirmado, com registro e recibo somente no protocolo confidencial.
 ///
 /// O construtor verifica referências; cabe ao adaptador devolver este valor
 /// somente depois de confirmar voto/participação/quadro/recibo na mesma transação.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedBallot {
     participation: Participation,
+    board_entry: Option<BoardEntry>,
     receipt: Option<Receipt>,
 }
 
-/// Recibo ausente ou associado a outro registro.
+/// Evidências ausentes ou associadas a outro registro/participação.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("Recibo incompatível com a participação confirmada")]
+#[error("Registro ou recibo incompatível com a participação confirmada")]
 pub struct InvalidRecordedBallot;
 
 impl RecordedBallot {
     /// Confere referências sem substituir o commit ou a verificação da assinatura.
     pub fn try_new(
         participation: Participation,
+        board_entry: Option<BoardEntry>,
         receipt: Option<Receipt>,
     ) -> Result<Self, InvalidRecordedBallot> {
         use crate::modules::elections::domain::entities::ballot::BallotContent;
-        match (participation.accepted_ballot().ballot().content(), &receipt) {
-            (BallotContent::Identified(_), None) => {}
-            (BallotContent::Confidential { manifest_hash, .. }, Some(receipt))
+        match (
+            participation.accepted_ballot().ballot().content(),
+            &board_entry,
+            &receipt,
+        ) {
+            (BallotContent::Identified(_), None, None) => {}
+            (BallotContent::Confidential { manifest_hash, .. }, Some(entry), Some(receipt))
                 if receipt.election_id() == participation.key().election_id()
                     && receipt.manifest_hash() == manifest_hash
-                    && receipt.ballot_hash() == participation.accepted_ballot().ballot_hash() => {}
+                    && receipt.ballot_hash() == participation.accepted_ballot().ballot_hash()
+                    && entry.ballot() == participation.accepted_ballot()
+                    && receipt.index() == entry.index()
+                    && receipt.entry_hash() == entry.entry_hash() => {}
             _ => return Err(InvalidRecordedBallot),
         }
         Ok(Self {
             participation,
+            board_entry,
             receipt,
         })
     }
     /// Primeiro aceite, preservado em recuperações idempotentes.
     pub const fn participation(&self) -> &Participation {
         &self.participation
+    }
+    /// Registro confidencial confirmado, conservado em recuperações idempotentes.
+    pub const fn board_entry(&self) -> Option<&BoardEntry> {
+        self.board_entry.as_ref()
     }
     /// Recibo confidencial do registro confirmado, sem promessa de inclusão isolada.
     pub const fn receipt(&self) -> Option<&Receipt> {
@@ -143,6 +158,8 @@ pub enum RecordBallotError {
 /// para rollback e não aceita conta ou curso declarados no corpo da requisição.
 /// Use `RecordedBallot::recover` para repetição e
 /// `AuthenticatedElectorContext::prepare_participation` para novo aceite.
+/// O registro confidencial deve suceder a cabeça confirmada do quadro; conferir
+/// suas referências com `BoardEntry::validate_successor_of` dentro da transação.
 #[async_trait::async_trait]
 pub trait BallotStore: Send + Sync {
     /// Confirma ou recupera uma submissão sem criar participação duplicada.

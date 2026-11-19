@@ -4,6 +4,7 @@ use super::{
     entities::{
         authority::{Authority, AuthorityRole},
         ballot::{BallotContent, Ciphertext, SignedBallot, VerifiedBallot},
+        board_entry::{BoardEntry, InvalidBoardEntry},
         election::{Election, ElectionStatus, ElectionTransitionError, TallyStatus},
         election_snapshot::ElectionReconstitutionError,
         manifest::{Manifest, VerifiedManifest},
@@ -30,6 +31,7 @@ use super::{
 use chrono::{DateTime, TimeZone, Utc};
 use uuid::Uuid;
 
+mod board_entries;
 mod contracts;
 mod lifecycle;
 mod participation;

@@ -430,7 +430,7 @@ fn confirmed_confidential_receipt_must_match_ballot_and_manifest() {
     )
     .unwrap();
     assert_eq!(
-        RecordedBallot::try_new(participation.clone(), None),
+        RecordedBallot::try_new(participation.clone(), None, None),
         Err(InvalidRecordedBallot)
     );
     for (manifest, ballot_hash) in [('b', 'e'), ('f', 'e'), ('b', 'f')] {
@@ -444,7 +444,20 @@ fn confirmed_confidential_receipt_must_match_ballot_and_manifest() {
         )
         .unwrap();
         assert_eq!(
-            RecordedBallot::try_new(participation.clone(), Some(receipt)).is_ok(),
+            RecordedBallot::try_new(
+                participation.clone(),
+                Some(
+                    BoardEntry::try_new(
+                        participation.accepted_ballot().clone(),
+                        1,
+                        fp('b'),
+                        fp('c')
+                    )
+                    .unwrap()
+                ),
+                Some(receipt)
+            )
+            .is_ok(),
             manifest == 'b' && ballot_hash == 'e'
         );
     }
@@ -465,7 +478,9 @@ fn confidential_retry_preserves_the_exact_confirmed_receipt_after_closure() {
     .unwrap();
     let key = participation.key();
     let receipt = Receipt::try_new(eid(), fp('b'), fp('e'), 1, fp('c'), encoded("Yg")).unwrap();
-    let record = RecordedBallot::try_new(participation, Some(receipt.clone())).unwrap();
+    let entry = BoardEntry::try_new(accepted.clone(), 1, fp('b'), fp('c')).unwrap();
+    let record =
+        RecordedBallot::try_new(participation, Some(entry.clone()), Some(receipt.clone())).unwrap();
     election
         .close(
             at(20, 18),
@@ -476,6 +491,7 @@ fn confidential_retry_preserves_the_exact_confirmed_receipt_after_closure() {
         .unwrap();
     let recovered = record.recover(key, &accepted).unwrap();
     assert_eq!(recovered.receipt(), Some(&receipt));
+    assert_eq!(recovered.board_entry(), Some(&entry));
     assert_eq!(recovered.receipt().unwrap().signature().as_str(), "Yg");
     assert_eq!(recovered.receipt().unwrap().index(), 1);
     assert_eq!(
@@ -502,5 +518,227 @@ fn receipt_indices_follow_profile_limits_and_identified_needs_no_secret_board() 
         at(20, 11),
     )
     .unwrap();
-    assert!(RecordedBallot::try_new(participation, None).is_ok());
+    assert!(RecordedBallot::try_new(participation, None, None).is_ok());
+}
+
+#[test]
+fn confirmed_record_requires_the_same_ballot_position_and_digest_as_the_receipt() {
+    let mode = ElectionModality::Confidential;
+    let election = opened(mode);
+    let accepted = ballot(mode, 60, 'e', 'f');
+    let participation = Participation::try_accept(
+        &election,
+        account(50),
+        voter(40),
+        accepted.clone(),
+        at(20, 11),
+    )
+    .unwrap();
+    let receipt = Receipt::try_new(eid(), fp('b'), fp('e'), 1, fp('c'), encoded("Yg")).unwrap();
+    let correct = BoardEntry::try_new(accepted.clone(), 1, fp('b'), fp('c')).unwrap();
+    for (entry, receipt) in [
+        (None, Some(receipt.clone())),
+        (Some(correct.clone()), None),
+        (
+            Some(BoardEntry::try_new(accepted.clone(), 2, fp('a'), fp('c')).unwrap()),
+            Some(receipt.clone()),
+        ),
+        (
+            Some(BoardEntry::try_new(accepted, 1, fp('b'), fp('d')).unwrap()),
+            Some(receipt.clone()),
+        ),
+        (
+            Some(BoardEntry::try_new(ballot(mode, 61, 'e', 'f'), 1, fp('b'), fp('c')).unwrap()),
+            Some(receipt.clone()),
+        ),
+        (
+            Some(correct),
+            Some(
+                Receipt::try_new(
+                    ElectionId::try_from_uuid(Uuid::from_u128(2)).unwrap(),
+                    fp('b'),
+                    fp('e'),
+                    1,
+                    fp('c'),
+                    encoded("Yg"),
+                )
+                .unwrap(),
+            ),
+        ),
+    ] {
+        assert_eq!(
+            RecordedBallot::try_new(participation.clone(), entry, receipt),
+            Err(InvalidRecordedBallot)
+        );
+    }
+}
+
+#[test]
+fn identified_record_rejects_confidential_evidence() {
+    let participation = Participation::try_accept(
+        &opened(ElectionModality::Identified),
+        account(50),
+        voter(40),
+        ballot(ElectionModality::Identified, 60, 'e', 'f'),
+        at(20, 11),
+    )
+    .unwrap();
+    let entry = BoardEntry::try_new(
+        ballot(ElectionModality::Confidential, 60, 'e', 'f'),
+        1,
+        fp('b'),
+        fp('c'),
+    )
+    .unwrap();
+    let receipt = Receipt::try_new(eid(), fp('b'), fp('e'), 1, fp('c'), encoded("Yg")).unwrap();
+    for (entry, receipt) in [
+        (Some(entry.clone()), None),
+        (None, Some(receipt.clone())),
+        (Some(entry), Some(receipt)),
+    ] {
+        assert_eq!(
+            RecordedBallot::try_new(participation.clone(), entry, receipt),
+            Err(InvalidRecordedBallot)
+        );
+    }
+}
+
+#[test]
+fn randomized_ballot_signature_does_not_replace_the_confirmed_board_entry() {
+    let mode = ElectionModality::Confidential;
+    let election = opened(mode);
+    let accepted = ballot(mode, 60, 'e', 'f');
+    let participation = Participation::try_accept(
+        &election,
+        account(50),
+        voter(40),
+        accepted.clone(),
+        at(20, 11),
+    )
+    .unwrap();
+    let original = accepted.ballot();
+    let resigned = SignedBallot::try_new(
+        original.election_id(),
+        original.voter_id(),
+        original.submission_id(),
+        original.public_key().clone(),
+        encoded("Yw"),
+        original.content().clone(),
+    )
+    .unwrap();
+    let resigned = VerifiedBallot::from_verified_parts(resigned, fp('e'), fp('f'));
+    let receipt = Receipt::try_new(eid(), fp('b'), fp('e'), 1, fp('c'), encoded("Yg")).unwrap();
+    // A assinatura externa não muda ballotHash, mas está aninhada no board-entry.
+    // Recuperar o aceite não autoriza reconstruir/trocar esse payload persistido.
+    let replacement = BoardEntry::try_new(resigned.clone(), 1, fp('b'), fp('c')).unwrap();
+    assert_eq!(
+        RecordedBallot::try_new(
+            participation.clone(),
+            Some(replacement),
+            Some(receipt.clone())
+        ),
+        Err(InvalidRecordedBallot)
+    );
+    let entry = BoardEntry::try_new(accepted, 1, fp('b'), fp('c')).unwrap();
+    let record = RecordedBallot::try_new(
+        participation.clone(),
+        Some(entry.clone()),
+        Some(receipt.clone()),
+    )
+    .unwrap();
+    let recovered = record.recover(participation.key(), &resigned).unwrap();
+    assert_eq!(recovered.board_entry(), Some(&entry));
+    assert_eq!(recovered.receipt(), Some(&receipt));
+}
+
+#[test]
+fn new_acceptance_cannot_predate_the_current_extension_but_history_can() {
+    for mode in [ElectionModality::Identified, ElectionModality::Confidential] {
+        let mut election = opened(mode);
+        let original = Participation::try_accept(
+            &election,
+            account(50),
+            voter(40),
+            ballot(mode, 60, 'e', 'f'),
+            at(20, 11),
+        )
+        .unwrap();
+        election
+            .change_schedule(
+                ScheduleChange::try_new(
+                    eid(),
+                    election.manifest_hash().cloned(),
+                    1,
+                    fp('a'),
+                    ElectionPeriod::try_new(at(20, 10), at(20, 20)).unwrap(),
+                    actor(),
+                    at(20, 12),
+                    "Prorrogação",
+                )
+                .unwrap(),
+                fp('c'),
+            )
+            .unwrap();
+        assert_eq!(
+            Participation::try_accept(
+                &election,
+                account(50),
+                voter(40),
+                ballot(mode, 60, 'e', 'f'),
+                at(20, 11)
+            ),
+            Err(ParticipationError::InvalidAcceptanceTime)
+        );
+        assert_eq!(
+            Participation::try_reconstitute(
+                &election,
+                account(50),
+                voter(40),
+                ballot(mode, 60, 'e', 'f'),
+                at(20, 11)
+            ),
+            Ok(original)
+        );
+        for time in [at(20, 12), at(20, 19)] {
+            assert!(
+                Participation::try_accept(
+                    &election,
+                    account(50),
+                    voter(40),
+                    ballot(mode, 60, 'e', 'f'),
+                    time
+                )
+                .is_ok()
+            );
+        }
+    }
+}
+
+#[test]
+fn empty_terminal_snapshot_cannot_reconstitute_a_participation() {
+    for mode in [ElectionModality::Identified, ElectionModality::Confidential] {
+        let closed = closed(mode, 0);
+        let mut cancelled = opened(mode);
+        cancelled
+            .cancel(
+                actor(),
+                at(20, 12),
+                None,
+                VoterCount::try_new(0).unwrap(),
+                "Cancelamento",
+            )
+            .unwrap();
+        for election in [&closed, &cancelled] {
+            assert_eq!(
+                Participation::try_reconstitute(
+                    election,
+                    account(50),
+                    voter(40),
+                    ballot(mode, 60, 'e', 'f'),
+                    at(20, 11)
+                ),
+                Err(ParticipationError::EmptyParticipationSnapshot)
+            );
+        }
+    }
 }

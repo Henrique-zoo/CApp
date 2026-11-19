@@ -2,6 +2,7 @@
 
 pub mod authority;
 pub mod ballot;
+pub mod board_entry;
 pub mod closure;
 pub mod configuration;
 pub mod election;
