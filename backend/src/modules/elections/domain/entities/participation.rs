@@ -58,6 +58,9 @@ pub enum ParticipationError {
     /// Aceite fora do intervalo vigente ou com precisão incompatível.
     #[error("O instante do aceite é inválido")]
     InvalidAcceptanceTime,
+    /// A fotografia terminal afirma que nenhuma participação foi aceita.
+    #[error("A fotografia eleitoral não contém participantes")]
+    EmptyParticipationSnapshot,
     /// A conta/identidade eleitoral não corresponde à operação autenticada.
     #[error("A identidade não corresponde à participação")]
     IdentityMismatch,
@@ -77,6 +80,8 @@ impl Participation {
     ///
     /// A aplicação deve reavaliar a elegibilidade vigente e chamar este caminho
     /// dentro da operação atômica. Só o commit autoriza devolver um recibo.
+    /// O instante vem do relógio confiável e não pode anteceder a última revisão
+    /// de calendário já aplicada; para aceites históricos use a reconstituição.
     pub fn try_accept(
         election: &Election,
         account_id: AccountId,
@@ -87,6 +92,13 @@ impl Participation {
         if election.status() != ElectionStatus::Open {
             return Err(ParticipationError::ElectionNotOpen);
         }
+        if election
+            .schedule_changes()
+            .last()
+            .is_some_and(|applied| accepted_at < *applied.schedule_change().changed_at())
+        {
+            return Err(ParticipationError::InvalidAcceptanceTime);
+        }
         Self::try_reconstitute(election, account_id, voter_id, ballot, accepted_at)
     }
 
@@ -95,6 +107,9 @@ impl Participation {
     /// A cédula pública é reverificada pelo adaptador antes deste método. Confere
     /// configuração e instante contra abertura, encerramento e cancelamento; a
     /// transação de persistência ordena operações concorrentes no mesmo segundo.
+    /// Aceites anteriores a uma prorrogação continuam válidos. Uma fotografia
+    /// terminal vazia impede reconstituir participação; a associação completa ao
+    /// conjunto congelado exige também a conferência do repositório.
     pub fn try_reconstitute(
         election: &Election,
         account_id: AccountId,
@@ -116,6 +131,15 @@ impl Participation {
                 .is_some_and(|c| accepted_at > *c.cancelled_at())
         {
             return Err(ParticipationError::InvalidAcceptanceTime);
+        }
+        if election
+            .closure()
+            .is_some_and(|closure| closure.voter_count().value() == 0)
+            || election
+                .cancellation()
+                .is_some_and(|cancellation| cancellation.voter_count().value() == 0)
+        {
+            return Err(ParticipationError::EmptyParticipationSnapshot);
         }
         Ok(Self {
             key: ParticipationKey::new(election.id(), account_id),
