@@ -4,6 +4,12 @@ use std::collections::HashSet;
 
 use super::option::{ElectionOption, OptionKind};
 
+/// Uma chapa e a opção especial Nulo.
+pub const MIN_OPTIONS: usize = 2;
+
+/// Cinquenta chapas e a opção especial Nulo, conforme o perfil v1.
+pub const MAX_OPTIONS: usize = 51;
+
 /// Opções aprovadas fornecidas pela aplicação, na ordem da configuração.
 ///
 /// A aprovação das candidaturas é externa a este valor. Uma a cinquenta chapas
@@ -30,7 +36,7 @@ impl ElectionOptions {
     /// Valida limites, unicidade e presença de Nulo sem ordenar a entrada.
     /// Somente o manifesto confidencial exige Nulo na última posição.
     pub fn try_new(options: Vec<ElectionOption>) -> Result<Self, InvalidElectionOptions> {
-        if !(2..=51).contains(&options.len()) {
+        if !(MIN_OPTIONS..=MAX_OPTIONS).contains(&options.len()) {
             return Err(InvalidElectionOptions::InvalidCount);
         }
         let mut ids = HashSet::with_capacity(options.len());

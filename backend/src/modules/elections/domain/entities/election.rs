@@ -5,7 +5,7 @@ use chrono::{DateTime, Timelike, Utc};
 use crate::modules::elections::domain::{
     entities::{
         closure::ElectionClosure,
-        configuration::ElectionConfiguration,
+        configuration::{ElectionConfiguration, PreparationConfigurationChange},
         manifest::{Manifest, VerifiedManifest},
         result::{ElectionResult, ResultReason, ResultStatus},
         tally::VerifiedTally,
@@ -203,10 +203,12 @@ pub struct Election {
     current_period: ElectionPeriod,
     opened_at: Option<DateTime<Utc>>,
     opening_schedule_revision: Option<u32>,
+    opening_configuration_count: Option<usize>,
     current_schedule_hash: Fingerprint,
     schedule_revision: u32,
     schedule_changes: Vec<AppliedScheduleChange>,
     configuration: Option<ElectionConfiguration>,
+    configuration_changes: Vec<PreparationConfigurationChange>,
     cancellation: Option<ElectionCancellation>,
     closure: Option<ElectionClosure>,
     closure_hash: Option<Fingerprint>,
@@ -242,6 +244,10 @@ pub enum InvalidElection {
     /// O manifesto só pode ser publicado durante a preparação.
     #[error("O manifesto só pode ser publicado durante a preparação")]
     ManifestPublicationAfterPreparation,
+
+    /// Somente a preparação admite publicar ou invalidar configuração.
+    #[error("A configuração só pode ser alterada durante a preparação")]
+    ConfigurationAfterPreparation,
 }
 
 /// Erros encontrados durante uma transição do ciclo de vida eleitoral.
@@ -417,10 +423,12 @@ impl Election {
             current_period,
             opened_at: None,
             opening_schedule_revision: None,
+            opening_configuration_count: None,
             current_schedule_hash: calendar_origin_hash,
             schedule_revision: 0,
             schedule_changes: Vec::new(),
             configuration: None,
+            configuration_changes: Vec::new(),
             cancellation: None,
             closure: None,
             closure_hash: None,
@@ -537,13 +545,48 @@ impl Election {
         options: ElectionOptions,
     ) -> Result<(), InvalidElection> {
         if self.status != ElectionStatus::Preparing {
-            return Err(InvalidElection::ManifestPublicationAfterPreparation);
+            return Err(InvalidElection::ConfigurationAfterPreparation);
         }
         if self.modality != ElectionModality::Identified {
             return Err(InvalidElection::ModalityMismatch);
         }
-        self.configuration = Some(ElectionConfiguration::Identified(options));
+        self.record_configuration(Some(ElectionConfiguration::Identified(options)));
         Ok(())
+    }
+
+    /// Invalida os artefatos derivados após edição da configuração em preparação.
+    ///
+    /// Preserva o material público anterior no histórico e impede abertura até
+    /// nova configuração pronta. Não altera calendário, seus hashes ou revisões.
+    /// A aplicação da #131 chama esta operação antes de persistir mudanças que
+    /// invalidem opções, autoridades ou chaves; depois obtém novas verificações.
+    ///
+    /// Retorna `ConfigurationAfterPreparation` em eleição aberta ou terminal.
+    /// Repetir a invalidação sem configuração vigente não cria outro registro.
+    pub fn invalidate_configuration(&mut self) -> Result<(), InvalidElection> {
+        if self.status != ElectionStatus::Preparing {
+            return Err(InvalidElection::ConfigurationAfterPreparation);
+        }
+        self.record_configuration(None);
+        Ok(())
+    }
+
+    /// Retorna as configurações e invalidações na ordem em que foram aplicadas.
+    pub fn configuration_changes(&self) -> &[PreparationConfigurationChange] {
+        &self.configuration_changes
+    }
+
+    /// Registra somente mudanças efetivas, após as validações específicas.
+    fn record_configuration(&mut self, configuration: Option<ElectionConfiguration>) {
+        if self.configuration == configuration {
+            return;
+        }
+        self.configuration_changes
+            .push(PreparationConfigurationChange::new(
+                self.schedule_revision,
+                configuration.clone(),
+            ));
+        self.configuration = configuration;
     }
 
     /// Publica o manifesto após verificação pelas portas de criptografia e codec.
@@ -570,7 +613,9 @@ impl Election {
         if manifest.calendar_origin_hash() != &self.calendar_origin_hash {
             return Err(InvalidElection::ManifestCalendarOriginMismatch);
         }
-        self.configuration = Some(ElectionConfiguration::Confidential(Box::new(verified)));
+        self.record_configuration(Some(ElectionConfiguration::Confidential(Box::new(
+            verified,
+        ))));
         Ok(())
     }
 
@@ -613,6 +658,7 @@ impl Election {
 
         self.opened_at = Some(opened_at);
         self.opening_schedule_revision = Some(self.schedule_revision);
+        self.opening_configuration_count = Some(self.configuration_changes.len());
         self.status = ElectionStatus::Open;
 
         Ok(())

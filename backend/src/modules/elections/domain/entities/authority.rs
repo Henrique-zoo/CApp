@@ -10,7 +10,7 @@ use crate::modules::elections::domain::value_objects::{
 /// Papel desempenhado por uma autoridade no protocolo eleitoral.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AuthorityRole {
-    /// Autoridade responsável pelos registros assinados pelo servidor.
+    /// Autoridade ElGamal do backend; distinta da assinatura RSA dos registros.
     Server,
 
     /// Autoridade da comissão eleitoral.

@@ -5,6 +5,7 @@ use crate::modules::elections::domain::value_objects::{
     identifiers::{AuthorityId, ElectionId},
     modality::ElectionModality,
     option_count::OptionCount,
+    options::{MAX_OPTIONS, MIN_OPTIONS},
     voter_count::VoterCount,
 };
 
@@ -237,7 +238,7 @@ impl ElectionResult {
         }) {
             return Err(InvalidElectionResult::CountOutOfRange);
         }
-        if missing_authorities.len() > 52 {
+        if missing_authorities.len() > super::manifest::MAX_AUTHORITIES {
             return Err(InvalidElectionResult::TooManyMissingAuthorities);
         }
 
@@ -372,7 +373,7 @@ impl ElectionResult {
     }
 
     fn validate_counts(counts: &[OptionCount]) -> Result<(), InvalidElectionResult> {
-        if !(2..=51).contains(&counts.len()) {
+        if !(MIN_OPTIONS..=MAX_OPTIONS).contains(&counts.len()) {
             return Err(InvalidElectionResult::InvalidCountLength);
         }
 

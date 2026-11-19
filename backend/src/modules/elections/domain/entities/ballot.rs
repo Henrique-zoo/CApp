@@ -13,6 +13,7 @@ use crate::modules::elections::domain::value_objects::{
     fingerprint::Fingerprint,
     identifiers::{ElectionId, OptionId, SubmissionId, VoterId},
     modality::ElectionModality,
+    options::{MAX_OPTIONS, MIN_OPTIONS},
 };
 
 /// Cifra pública de uma opção; a identidade é permitida em agregados.
@@ -181,8 +182,11 @@ impl SignedBallot {
 
 /// Confere dimensão e IDs sem interpretar os inteiros como bits.
 pub(super) fn validate_ciphertexts(ciphertexts: &[Ciphertext]) -> Result<(), InvalidBallot> {
+    if !(MIN_OPTIONS..=MAX_OPTIONS).contains(&ciphertexts.len()) {
+        return Err(InvalidBallot::InvalidOptions);
+    }
     let ids: HashSet<_> = ciphertexts.iter().map(Ciphertext::option_id).collect();
-    if !(2..=51).contains(&ciphertexts.len()) || ids.len() != ciphertexts.len() {
+    if ids.len() != ciphertexts.len() {
         return Err(InvalidBallot::InvalidOptions);
     }
     Ok(())
