@@ -145,12 +145,6 @@ fn then_a_criacao_nao_publica_automaticamente_o_evento(_world: &mut AppWorld) {
     pending_step("a criação não publica automaticamente o evento");
 }
 
-/// Pendente: a data de publicação do evento fica registrada.
-#[then(regex = r#"^a data de publicação do evento fica registrada$"#)]
-fn then_a_data_de_publicacao_do_evento_fica_registrada(_world: &mut AppWorld) {
-    pending_step("a data de publicação do evento fica registrada");
-}
-
 /// Pendente: a operação é recusada informando que o horário de término deve ser posterior ao início.
 #[then(
     regex = r#"^a operação é recusada informando que o horário de término deve ser posterior ao início$"#

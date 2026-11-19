@@ -24,7 +24,7 @@ CREATE TYPE event_registration_status AS ENUM (
 
 CREATE TABLE event (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    ca_id uuid NOT NULL,
+    ca_id uuid NOT NULL REFERENCES academic_center(id) ON DELETE RESTRICT,
     author_id uuid NOT NULL,
     title text NOT NULL,
     description text NOT NULL,

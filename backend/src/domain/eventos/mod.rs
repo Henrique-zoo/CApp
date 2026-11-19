@@ -25,7 +25,8 @@ mod tests {
             "Auditório do Departamento de Engenharia Elétrica",
             starts_at,
             ends_at,
-            EventRegistrationInfo::unrestricted(),
+            None,
+            EventRegistrationPolicy::unrestricted(),
         )
         .expect("deve criar evento válido via reexportação");
 

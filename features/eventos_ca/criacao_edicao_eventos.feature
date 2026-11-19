@@ -60,7 +60,6 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       Quando o gestor "231012345@aluno.unb.br" publica diretamente o evento "Oficina de Redes Definidas por Software" em "CAER"
       Então o evento "Oficina de Redes Definidas por Software" passa a estar publicado em "CAER"
       E o evento passa a figurar na agenda de eventos publicados de "CAER"
-      E a data de publicação do evento fica registrada
 
     @happy @backend
     Cenário: Publicar evento em um CA não altera a agenda de outro CA

@@ -11,7 +11,6 @@ import '../../support/step_registry.dart';
 /// Expressões pendentes consumidas pelo registro global dos cenários.
 final eventManagementSteps = <StepDefinition>[
   pendingStep(r'^a criação não publica automaticamente o evento$'),
-  pendingStep(r'^a data de publicação do evento fica registrada$'),
   pendingStep(
     r'^a operação é recusada informando que o horário de término deve ser posterior ao início$',
   ),

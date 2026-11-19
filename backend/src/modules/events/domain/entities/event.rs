@@ -8,7 +8,7 @@
 //! - período do evento (`starts_at` e `ends_at`, exigindo `ends_at > starts_at`);
 //! - capacidade opcional (`capacity`), revisão do conteúdo (`revision`) e estado ([`EventPublicationStatus`]);
 //! - homologação de versões específicas ([`EventReview`] e [`PublicationReviewDecision`]);
-//! - política e controle de inscrições ([`EventRegistrationInfo`], [`EventRegistration`] e [`RegistrationStatus`]).
+//! - política e controle de inscrições ([`EventRegistrationPolicy`], [`EventRegistration`] e [`RegistrationStatus`]).
 //!
 //! Todos os campos das entidades e objetos de valor são privados para garantir que
 //! nenhuma construção ou mutação contorne as invariantes de domínio.
@@ -147,17 +147,6 @@ pub enum EventDomainError {
     #[error("o limite máximo de vagas deve ser maior que zero (informado: {0})")]
     InvalidMaxCapacity(u32),
 
-    /// A capacidade configurada no evento diverge da política de inscrição.
-    #[error(
-        "a capacidade do evento ({event_capacity:?}) diverge da política de inscrição ({policy_capacity:?})"
-    )]
-    InconsistentCapacity {
-        /// Capacidade definida na coluna `capacity` do evento.
-        event_capacity: Option<u32>,
-        /// Capacidade definida na política de inscrição.
-        policy_capacity: Option<u32>,
-    },
-
     /// O número de inscrições confirmadas ultrapassa a capacidade máxima configurada.
     #[error(
         "o total de inscrições confirmadas ({confirmed}) excede o limite de vagas ({max_capacity})"
@@ -169,6 +158,17 @@ pub enum EventDomainError {
         max_capacity: u32,
     },
 
+    /// A janela de inscrição é inválida (`opens_at` deve ser estritamente anterior a `closes_at`).
+    #[error(
+        "a abertura das inscrições ({opens_at}) deve ser anterior ao encerramento ({closes_at})"
+    )]
+    InvalidRegistrationWindow {
+        /// Instante de abertura das inscrições.
+        opens_at: DateTime<Utc>,
+        /// Instante de encerramento das inscrições.
+        closes_at: DateTime<Utc>,
+    },
+
     /// O prazo limite para inscrição não pode ser posterior ao término do evento.
     #[error(
         "o prazo limite de inscrição ({deadline}) não pode ser posterior ao término do evento ({ends_at})"
@@ -178,6 +178,17 @@ pub enum EventDomainError {
         deadline: DateTime<Utc>,
         /// Data/hora de término do evento.
         ends_at: DateTime<Utc>,
+    },
+
+    /// O período de inscrição ainda não começou.
+    #[error(
+        "as inscrições abrem em {opens_at} (tentativa realizada em {attempted_at})"
+    )]
+    RegistrationNotYetOpen {
+        /// Instante de abertura das inscrições.
+        opens_at: DateTime<Utc>,
+        /// Instante em que a tentativa de inscrição ocorreu.
+        attempted_at: DateTime<Utc>,
     },
 
     /// O prazo de inscrição ou o horário de encerramento do evento já foi ultrapassado.
@@ -524,133 +535,122 @@ impl EventPeriod {
     }
 }
 
-/// Política e informações de inscrição configuradas para um evento (`registration_policy`).
+/// Política mínima de inscrição persistida em `registration_policy` (JSONB).
 ///
-/// Todos os campos são privados para impedir alterações diretas da contagem de
-/// inscritos ou do limite de vagas sem validação.
+/// Capacidade e ocupação **não** pertencem a esta política: vagas ficam em
+/// [`Event::capacity`] e a ocupação é a contagem de `event_registration` com
+/// status `registered`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EventRegistrationInfo {
+pub struct EventRegistrationPolicy {
     /// Indica se o evento aceita inscrições de participantes na plataforma.
-    #[serde(default = "default_requires_registration")]
-    requires_registration: bool,
-    /// Limite máximo opcional de participantes (`None` significa vagas ilimitadas).
+    #[serde(default = "default_registration_enabled")]
+    enabled: bool,
+    /// Instante opcional de abertura das inscrições.
     #[serde(default)]
-    max_capacity: Option<u32>,
-    /// Quantidade atual de inscrições confirmadas no evento.
+    opens_at: Option<DateTime<Utc>>,
+    /// Instante opcional de encerramento das inscrições.
     #[serde(default)]
-    confirmed_registrations: u32,
-    /// Data/hora limite opcional para realização de inscrições.
-    #[serde(default)]
-    registration_deadline: Option<DateTime<Utc>>,
+    closes_at: Option<DateTime<Utc>>,
 }
 
-const fn default_requires_registration() -> bool {
+const fn default_registration_enabled() -> bool {
     true
 }
 
-/// Alias semântico alinhado à coluna `registration_policy` do Modelo Entidade-Relacionamento.
-pub type EventRegistrationPolicy = EventRegistrationInfo;
+/// Alias alinhado ao contrato MVP do plano de domínio (`enabled` / `opens_at` / `closes_at`).
+pub type RegistrationPolicy = EventRegistrationPolicy;
 
-impl Default for EventRegistrationInfo {
+/// Alias legado mantido para compatibilidade com reexportações existentes.
+pub type EventRegistrationInfo = EventRegistrationPolicy;
+
+impl Default for EventRegistrationPolicy {
     fn default() -> Self {
         Self::unrestricted()
     }
 }
 
-impl EventRegistrationInfo {
-    /// Cria uma configuração de inscrição aberta e sem limite máximo de vagas.
+impl EventRegistrationPolicy {
+    /// Cria uma política com inscrições habilitadas e sem janela explícita.
     pub const fn unrestricted() -> Self {
         Self {
-            requires_registration: true,
-            max_capacity: None,
-            confirmed_registrations: 0,
-            registration_deadline: None,
+            enabled: true,
+            opens_at: None,
+            closes_at: None,
         }
     }
 
-    /// Cria uma configuração para evento puramente informativo (sem necessidade de inscrição).
+    /// Cria uma política para evento puramente informativo (inscrições desabilitadas).
     pub const fn disabled() -> Self {
         Self {
-            requires_registration: false,
-            max_capacity: None,
-            confirmed_registrations: 0,
-            registration_deadline: None,
+            enabled: false,
+            opens_at: None,
+            closes_at: None,
         }
     }
 
-    /// Cria uma configuração de inscrição com limite máximo de vagas definido.
+    /// Cria uma política personalizada validando a janela `opens_at`/`closes_at`.
     ///
     /// # Erros
     ///
-    /// Retorna [`EventDomainError::InvalidMaxCapacity`] se `max_capacity == 0`.
-    pub fn with_capacity(max_capacity: u32) -> Result<Self, EventDomainError> {
-        if max_capacity == 0 {
-            return Err(EventDomainError::InvalidMaxCapacity(0));
-        }
-        Ok(Self {
-            requires_registration: true,
-            max_capacity: Some(max_capacity),
-            confirmed_registrations: 0,
-            registration_deadline: None,
-        })
-    }
-
-    /// Cria uma configuração de inscrição personalizada validando o limite máximo de vagas.
-    ///
-    /// # Erros
-    ///
-    /// Retorna [`EventDomainError::InvalidMaxCapacity`] se `max_capacity == Some(0)`,
-    /// ou [`EventDomainError::CapacityExceeded`] se `confirmed_registrations` exceder o limite.
+    /// Retorna [`EventDomainError::InvalidRegistrationWindow`] se ambos os limites
+    /// existirem e `opens_at >= closes_at`.
     pub fn new(
-        requires_registration: bool,
-        max_capacity: Option<u32>,
-        confirmed_registrations: u32,
-        registration_deadline: Option<DateTime<Utc>>,
+        enabled: bool,
+        opens_at: Option<DateTime<Utc>>,
+        closes_at: Option<DateTime<Utc>>,
     ) -> Result<Self, EventDomainError> {
-        if let Some(limit) = max_capacity {
-            if limit == 0 {
-                return Err(EventDomainError::InvalidMaxCapacity(0));
-            }
-            if confirmed_registrations > limit {
-                return Err(EventDomainError::CapacityExceeded {
-                    confirmed: confirmed_registrations,
-                    max_capacity: limit,
-                });
-            }
-        }
-        Ok(Self {
-            requires_registration,
-            max_capacity,
-            confirmed_registrations,
-            registration_deadline,
-        })
+        let policy = Self {
+            enabled,
+            opens_at,
+            closes_at,
+        };
+        policy.validate_window()?;
+        Ok(policy)
     }
 
-    /// Define um prazo limite para realização de inscrições.
-    pub const fn with_deadline(mut self, deadline: DateTime<Utc>) -> Self {
-        self.registration_deadline = Some(deadline);
+    /// Define o instante de abertura das inscrições.
+    pub const fn with_opens_at(mut self, opens_at: DateTime<Utc>) -> Self {
+        self.opens_at = Some(opens_at);
         self
     }
 
-    /// Valida a consistência das informações de inscrição em relação ao horário de término do evento.
-    pub fn validate(&self, event_ends_at: DateTime<Utc>) -> Result<(), EventDomainError> {
-        if let Some(limit) = self.max_capacity {
-            if limit == 0 {
-                return Err(EventDomainError::InvalidMaxCapacity(0));
-            }
-            if self.confirmed_registrations > limit {
-                return Err(EventDomainError::CapacityExceeded {
-                    confirmed: self.confirmed_registrations,
-                    max_capacity: limit,
-                });
-            }
-        }
+    /// Define o instante de encerramento das inscrições.
+    pub const fn with_closes_at(mut self, closes_at: DateTime<Utc>) -> Self {
+        self.closes_at = Some(closes_at);
+        self
+    }
 
-        if let Some(deadline) = self.registration_deadline
-            && deadline > event_ends_at
+    /// Valida apenas a consistência interna da janela `opens_at`/`closes_at`.
+    fn validate_window(&self) -> Result<(), EventDomainError> {
+        if let (Some(opens_at), Some(closes_at)) = (self.opens_at, self.closes_at)
+            && opens_at >= closes_at
+        {
+            return Err(EventDomainError::InvalidRegistrationWindow {
+                opens_at,
+                closes_at,
+            });
+        }
+        Ok(())
+    }
+
+    /// Valida a política em relação ao horário de término do evento.
+    pub fn validate(&self, event_ends_at: DateTime<Utc>) -> Result<(), EventDomainError> {
+        self.validate_window()?;
+
+        if let Some(closes_at) = self.closes_at
+            && closes_at > event_ends_at
         {
             return Err(EventDomainError::RegistrationDeadlineAfterEventEnd {
-                deadline,
+                deadline: closes_at,
+                ends_at: event_ends_at,
+            });
+        }
+
+        if let Some(opens_at) = self.opens_at
+            && opens_at > event_ends_at
+        {
+            return Err(EventDomainError::RegistrationDeadlineAfterEventEnd {
+                deadline: opens_at,
                 ends_at: event_ends_at,
             });
         }
@@ -658,43 +658,42 @@ impl EventRegistrationInfo {
         Ok(())
     }
 
-    /// Indica se o evento aceita inscrições de participantes.
+    /// Indica se as inscrições estão habilitadas na política.
+    pub const fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Alias semântico de [`Self::enabled`].
     pub const fn requires_registration(&self) -> bool {
-        self.requires_registration
+        self.enabled
     }
 
-    /// Retorna o limite máximo de vagas configurado, quando houver.
-    pub const fn max_capacity(&self) -> Option<u32> {
-        self.max_capacity
+    /// Retorna o instante de abertura das inscrições, quando configurado.
+    pub const fn opens_at(&self) -> Option<DateTime<Utc>> {
+        self.opens_at
     }
 
-    /// Retorna a quantidade atual de inscrições confirmadas.
-    pub const fn confirmed_registrations(&self) -> u32 {
-        self.confirmed_registrations
+    /// Retorna o instante de encerramento das inscrições, quando configurado.
+    pub const fn closes_at(&self) -> Option<DateTime<Utc>> {
+        self.closes_at
     }
 
-    /// Retorna o prazo limite para inscrição, quando configurado.
-    pub const fn registration_deadline(&self) -> Option<DateTime<Utc>> {
-        self.registration_deadline
-    }
-
-    /// Indica se ainda há vagas disponíveis para inscrição.
-    pub const fn has_available_spots(&self) -> bool {
-        if !self.requires_registration {
+    /// Indica se, no instante `now`, a janela de inscrição está aberta.
+    pub fn is_open_at(&self, now: DateTime<Utc>) -> bool {
+        if !self.enabled {
             return false;
         }
-        match self.max_capacity {
-            Some(limit) => self.confirmed_registrations < limit,
-            None => true,
+        if let Some(opens_at) = self.opens_at
+            && now < opens_at
+        {
+            return false;
         }
-    }
-
-    /// Retorna o número de vagas restantes quando o evento possui capacidade máxima configurada.
-    pub const fn remaining_spots(&self) -> Option<u32> {
-        match self.max_capacity {
-            Some(limit) => Some(limit.saturating_sub(self.confirmed_registrations)),
-            None => None,
+        if let Some(closes_at) = self.closes_at
+            && now > closes_at
+        {
+            return false;
         }
+        true
     }
 }
 
@@ -984,7 +983,7 @@ pub struct Event {
     /// Número da revisão deste registro, incrementado a cada edição de conteúdo.
     revision: i32,
     /// Configuração validada das inscrições (`registration_policy` em JSONB).
-    registration_policy: Json<EventRegistrationInfo>,
+    registration_policy: Json<EventRegistrationPolicy>,
 }
 
 impl Event {
@@ -1005,19 +1004,11 @@ impl Event {
         location: impl Into<String>,
         starts_at: DateTime<Utc>,
         ends_at: DateTime<Utc>,
+        capacity: Option<i32>,
         status: EventPublicationStatus,
         revision: i32,
-        mut registration: EventRegistrationInfo,
+        registration: EventRegistrationPolicy,
     ) -> Result<Self, EventDomainError> {
-        let capacity = match registration.max_capacity {
-            Some(0) => return Err(EventDomainError::InvalidMaxCapacity(0)),
-            Some(limit) => Some(
-                i32::try_from(limit).map_err(|_| EventDomainError::InvalidMaxCapacity(limit))?,
-            ),
-            None => None,
-        };
-        registration.max_capacity = capacity.and_then(|c| u32::try_from(c).ok());
-
         let event = Self {
             id,
             ca_id,
@@ -1047,7 +1038,8 @@ impl Event {
         location: impl Into<String>,
         starts_at: DateTime<Utc>,
         ends_at: DateTime<Utc>,
-        registration: EventRegistrationInfo,
+        capacity: Option<i32>,
+        registration: EventRegistrationPolicy,
     ) -> Result<Self, EventDomainError> {
         Self::new(
             Uuid::new_v4(),
@@ -1058,6 +1050,7 @@ impl Event {
             location,
             starts_at,
             ends_at,
+            capacity,
             EventPublicationStatus::Draft,
             1,
             registration,
@@ -1074,7 +1067,8 @@ impl Event {
         location: impl Into<String>,
         starts_at: DateTime<Utc>,
         ends_at: DateTime<Utc>,
-        registration: EventRegistrationInfo,
+        capacity: Option<i32>,
+        registration: EventRegistrationPolicy,
     ) -> Result<Self, EventDomainError> {
         Self::new(
             Uuid::new_v4(),
@@ -1085,6 +1079,7 @@ impl Event {
             location,
             starts_at,
             ends_at,
+            capacity,
             EventPublicationStatus::Published,
             1,
             registration,
@@ -1113,15 +1108,6 @@ impl Event {
             return Err(EventDomainError::InvalidMaxCapacity(
                 u32::try_from(cap).unwrap_or(0),
             ));
-        }
-
-        let event_capacity = self.capacity.and_then(|c| u32::try_from(c).ok());
-        let policy_capacity = self.registration_policy.max_capacity;
-        if event_capacity != policy_capacity {
-            return Err(EventDomainError::InconsistentCapacity {
-                event_capacity,
-                policy_capacity,
-            });
         }
 
         Self::validate_basic_fields(&self.title, &self.description, &self.location)?;
@@ -1231,13 +1217,36 @@ impl Event {
     }
 
     /// Retorna a configuração de inscrição do evento (`registration_policy`).
-    pub fn registration(&self) -> &EventRegistrationInfo {
+    pub fn registration(&self) -> &EventRegistrationPolicy {
         &self.registration_policy.0
     }
 
     /// Retorna a política de inscrição do evento (alias para [`Self::registration`]).
-    pub fn registration_policy(&self) -> &EventRegistrationInfo {
+    pub fn registration_policy(&self) -> &EventRegistrationPolicy {
         &self.registration_policy.0
+    }
+
+    /// Indica se ainda há vagas disponíveis considerando a capacidade do evento e a
+    /// contagem externa de inscrições confirmadas (`registered`).
+    pub fn has_available_spots(&self, registered_count: u32) -> bool {
+        match self.capacity {
+            Some(limit) => u32::try_from(limit)
+                .map(|limit| registered_count < limit)
+                .unwrap_or(false),
+            None => true,
+        }
+    }
+
+    /// Retorna o número de vagas restantes quando o evento possui capacidade máxima.
+    pub fn remaining_spots(&self, registered_count: u32) -> Option<u32> {
+        match self.capacity {
+            Some(limit) => Some(
+                u32::try_from(limit)
+                    .map(|limit| limit.saturating_sub(registered_count))
+                    .unwrap_or(0),
+            ),
+            None => None,
+        }
     }
 
     /// Retorna o período estruturado do evento.
@@ -1353,42 +1362,62 @@ impl Event {
         Ok(())
     }
 
-    /// Atualiza a configuração de inscrição e capacidade do evento preservando sua consistência com o período.
+    /// Atualiza a capacidade e a política de inscrição do evento preservando a
+    /// consistência com o período.
     pub fn configure_registration(
         &mut self,
-        registration: EventRegistrationInfo,
+        capacity: Option<i32>,
+        registration: EventRegistrationPolicy,
     ) -> Result<(), EventDomainError> {
+        if let Some(cap) = capacity
+            && cap <= 0
+        {
+            return Err(EventDomainError::InvalidMaxCapacity(
+                u32::try_from(cap).unwrap_or(0),
+            ));
+        }
         registration.validate(self.ends_at)?;
-        let capacity = match registration.max_capacity {
-            Some(0) => return Err(EventDomainError::InvalidMaxCapacity(0)),
-            Some(limit) => Some(
-                i32::try_from(limit).map_err(|_| EventDomainError::InvalidMaxCapacity(limit))?,
-            ),
-            None => None,
-        };
         self.capacity = capacity;
         self.registration_policy = Json(registration);
         self.revision += 1;
         Ok(())
     }
 
-    /// Registra uma nova inscrição confirmada no evento no instante `now`, validando:
+    /// Valida se uma nova inscrição confirmada pode ser aceita no instante `now`.
+    ///
+    /// A ocupação atual deve ser informada por `registered_count` (fonte de verdade:
+    /// contagem de `event_registration` com status `registered`). Este método **não**
+    /// muta a política JSONB.
+    ///
+    /// Valida:
     /// - se o evento está publicado ([`EventPublicationStatus::Published`]);
-    /// - se o evento aceita inscrições (`requires_registration`);
-    /// - se o prazo de inscrição (`registration_deadline`) ou o término do evento (`ends_at`) já passou;
-    /// - se ainda há disponibilidade dentro do limite de vagas (`capacity`).
-    pub fn register_participant(&mut self, now: DateTime<Utc>) -> Result<(), EventDomainError> {
+    /// - se a política está habilitada (`enabled`);
+    /// - se a janela `opens_at`/`closes_at` e o término do evento permitem a inscrição;
+    /// - se ainda há disponibilidade dentro de [`Event::capacity`].
+    pub fn register_participant(
+        &self,
+        now: DateTime<Utc>,
+        registered_count: u32,
+    ) -> Result<(), EventDomainError> {
         if !self.status.can_accept_registrations() {
             return Err(EventDomainError::EventNotPublished);
         }
-        if !self.registration_policy.requires_registration {
+        if !self.registration_policy.enabled {
             return Err(EventDomainError::RegistrationsClosed);
         }
-        if let Some(deadline) = self.registration_policy.registration_deadline
-            && now > deadline
+        if let Some(opens_at) = self.registration_policy.opens_at
+            && now < opens_at
+        {
+            return Err(EventDomainError::RegistrationNotYetOpen {
+                opens_at,
+                attempted_at: now,
+            });
+        }
+        if let Some(closes_at) = self.registration_policy.closes_at
+            && now > closes_at
         {
             return Err(EventDomainError::RegistrationDeadlinePassed {
-                deadline,
+                deadline: closes_at,
                 attempted_at: now,
             });
         }
@@ -1398,24 +1427,17 @@ impl Event {
                 attempted_at: now,
             });
         }
-        if let Some(limit) = self.registration_policy.max_capacity
-            && self.registration_policy.confirmed_registrations >= limit
-        {
-            return Err(EventDomainError::CapacityExceeded {
-                confirmed: self.registration_policy.confirmed_registrations,
-                max_capacity: limit,
-            });
+        if let Some(limit) = self.capacity {
+            let limit = u32::try_from(limit).map_err(|_| EventDomainError::InvalidMaxCapacity(0))?;
+            if registered_count >= limit {
+                return Err(EventDomainError::CapacityExceeded {
+                    confirmed: registered_count,
+                    max_capacity: limit,
+                });
+            }
         }
 
-        self.registration_policy.0.confirmed_registrations += 1;
         Ok(())
-    }
-
-    /// Libera uma vaga previamente ocupada quando um participante cancela sua inscrição.
-    pub fn cancel_participant_registration(&mut self) {
-        if self.registration_policy.confirmed_registrations > 0 {
-            self.registration_policy.0.confirmed_registrations -= 1;
-        }
     }
 }
 
@@ -1445,7 +1467,8 @@ mod tests {
             "Auditório do Departamento de Engenharia Elétrica",
             starts_at,
             ends_at,
-            EventRegistrationInfo::unrestricted(),
+            None,
+            EventRegistrationPolicy::unrestricted(),
         )
         .expect("deve criar evento publicado válido");
 
@@ -1456,6 +1479,7 @@ mod tests {
         assert_eq!(event.status(), EventPublicationStatus::Published);
         assert_eq!(event.revision(), 1);
         assert_eq!(event.capacity(), None);
+        assert!(event.registration_policy().enabled());
         assert!(event.is_published());
     }
 
@@ -1470,7 +1494,8 @@ mod tests {
             "Laboratório de Redes - Bloco B",
             starts_at,
             ends_at,
-            EventRegistrationInfo::unrestricted(),
+            None,
+            EventRegistrationPolicy::unrestricted(),
         )
         .expect("deve criar evento em rascunho");
 
@@ -1496,7 +1521,8 @@ mod tests {
             "Auditório BCE",
             starts_at,
             ends_at,
-            EventRegistrationInfo::unrestricted(),
+            None,
+            EventRegistrationPolicy::unrestricted(),
         )
         .expect("deve criar evento em rascunho");
 
@@ -1548,7 +1574,8 @@ mod tests {
             "Local válido",
             starts_at,
             ends_at,
-            EventRegistrationInfo::unrestricted(),
+            None,
+            EventRegistrationPolicy::unrestricted(),
         );
         assert_eq!(empty_title, Err(EventDomainError::EmptyTitle));
 
@@ -1560,7 +1587,8 @@ mod tests {
             "Local válido",
             starts_at,
             ends_at,
-            EventRegistrationInfo::unrestricted(),
+            None,
+            EventRegistrationPolicy::unrestricted(),
         );
         assert_eq!(empty_description, Err(EventDomainError::EmptyDescription));
 
@@ -1572,7 +1600,8 @@ mod tests {
             "",
             starts_at,
             ends_at,
-            EventRegistrationInfo::unrestricted(),
+            None,
+            EventRegistrationPolicy::unrestricted(),
         );
         assert_eq!(empty_location, Err(EventDomainError::EmptyLocation));
     }
@@ -1590,7 +1619,8 @@ mod tests {
             "Sala AT-11",
             starts_at,
             ends_before,
-            EventRegistrationInfo::unrestricted(),
+            None,
+            EventRegistrationPolicy::unrestricted(),
         );
         assert_eq!(
             result_before,
@@ -1608,7 +1638,8 @@ mod tests {
             "Sala AT-11",
             starts_at,
             starts_at,
-            EventRegistrationInfo::unrestricted(),
+            None,
+            EventRegistrationPolicy::unrestricted(),
         );
         assert_eq!(
             result_equal,
@@ -1630,7 +1661,8 @@ mod tests {
             "Auditório do Departamento de Engenharia Elétrica",
             starts_at,
             ends_at,
-            EventRegistrationInfo::unrestricted(),
+            None,
+            EventRegistrationPolicy::unrestricted(),
         )
         .expect("deve criar evento válido");
 
@@ -1657,14 +1689,12 @@ mod tests {
     }
 
     #[test]
-    fn should_enforce_registration_capacity_and_deadline_limits() {
+    fn should_enforce_registration_capacity_and_window_limits() {
         let (starts_at, ends_at) = sample_dates();
-        let deadline = starts_at - chrono::Duration::hours(1);
-        let registration = EventRegistrationInfo::with_capacity(2)
-            .expect("capacidade 2 deve ser válida")
-            .with_deadline(deadline);
+        let closes_at = starts_at - chrono::Duration::hours(1);
+        let registration = EventRegistrationPolicy::unrestricted().with_closes_at(closes_at);
 
-        let mut event = Event::create_published(
+        let event = Event::create_published(
             Uuid::new_v4(),
             Uuid::new_v4(),
             "Workshop de Roteamento BGP",
@@ -1672,39 +1702,118 @@ mod tests {
             "Laboratório de Redes - Bloco B",
             starts_at,
             ends_at,
+            Some(2),
             registration,
         )
-        .expect("deve criar evento com capacidade limitada e prazo");
+        .expect("deve criar evento com capacidade limitada e janela");
 
+        // Capacidade vive só em Event; a policy carrega apenas enabled/opens_at/closes_at.
         assert_eq!(event.capacity(), Some(2));
-        assert_eq!(event.registration().remaining_spots(), Some(2));
+        assert!(event.registration_policy().enabled());
+        assert_eq!(event.registration_policy().opens_at(), None);
+        assert_eq!(event.registration().closes_at(), Some(closes_at));
+        assert_eq!(event.remaining_spots(0), Some(2));
+        assert!(event.has_available_spots(0));
 
-        // Tentativa após o prazo de inscrição deve ser recusada.
-        let after_deadline = deadline + chrono::Duration::minutes(1);
+        // Tentativa após o encerramento das inscrições deve ser recusada.
+        let after_closes = closes_at + chrono::Duration::minutes(1);
         assert_eq!(
-            event.register_participant(after_deadline),
+            event.register_participant(after_closes, 0),
             Err(EventDomainError::RegistrationDeadlinePassed {
-                deadline,
-                attempted_at: after_deadline,
+                deadline: closes_at,
+                attempted_at: after_closes,
             })
         );
 
-        let before_deadline = deadline - chrono::Duration::hours(1);
-        assert!(event.register_participant(before_deadline).is_ok());
-        assert!(event.register_participant(before_deadline).is_ok());
-        assert_eq!(event.registration().remaining_spots(), Some(0));
-        assert!(!event.registration().has_available_spots());
+        let before_closes = closes_at - chrono::Duration::hours(1);
+        let before_registration = event.clone();
+        // Contagem vem de fora (tabela event_registration); a validação não muta o evento/policy.
+        assert!(event.register_participant(before_closes, 0).is_ok());
+        assert!(event.register_participant(before_closes, 1).is_ok());
+        assert_eq!(event, before_registration);
+        assert_eq!(event.remaining_spots(2), Some(0));
+        assert!(!event.has_available_spots(2));
 
         assert_eq!(
-            event.register_participant(before_deadline),
+            event.register_participant(before_closes, 2),
             Err(EventDomainError::CapacityExceeded {
                 confirmed: 2,
                 max_capacity: 2,
             })
         );
+        assert_eq!(event, before_registration);
 
-        event.cancel_participant_registration();
-        assert_eq!(event.registration().remaining_spots(), Some(1));
+        assert_eq!(event.remaining_spots(1), Some(1));
+        assert!(event.has_available_spots(1));
+    }
+
+    #[test]
+    fn should_reject_registration_when_policy_disabled_or_not_yet_open() {
+        let (starts_at, ends_at) = sample_dates();
+        let opens_at = starts_at - chrono::Duration::hours(2);
+        let before_opens = opens_at - chrono::Duration::minutes(5);
+        let after_opens = opens_at + chrono::Duration::minutes(5);
+
+        let disabled = Event::create_published(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "Aviso institucional sem inscrição",
+            "Comunicado meramente informativo",
+            "Canal interno do CA",
+            starts_at,
+            ends_at,
+            None,
+            EventRegistrationPolicy::disabled(),
+        )
+        .expect("deve criar evento informativo");
+
+        assert_eq!(
+            disabled.register_participant(after_opens, 0),
+            Err(EventDomainError::RegistrationsClosed)
+        );
+
+        let gated = Event::create_published(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "Oficina com janela de inscrição",
+            "Vagas liberadas somente após abertura oficial",
+            "Laboratório de Redes - Bloco B",
+            starts_at,
+            ends_at,
+            Some(10),
+            EventRegistrationPolicy::unrestricted().with_opens_at(opens_at),
+        )
+        .expect("deve criar evento com abertura futura");
+
+        assert_eq!(
+            gated.register_participant(before_opens, 0),
+            Err(EventDomainError::RegistrationNotYetOpen {
+                opens_at,
+                attempted_at: before_opens,
+            })
+        );
+        assert!(gated.register_participant(after_opens, 0).is_ok());
+        // Ocupação não é desnormalizada na policy: a mesma contagem externa continua válida.
+        assert!(gated.register_participant(after_opens, 0).is_ok());
+        assert_eq!(gated.capacity(), Some(10));
+        assert_eq!(gated.registration_policy().opens_at(), Some(opens_at));
+    }
+
+    #[test]
+    fn registration_policy_json_omits_legacy_capacity_counter_fields() {
+        let policy = EventRegistrationPolicy::unrestricted()
+            .with_opens_at(Utc.with_ymd_and_hms(2026, 11, 1, 12, 0, 0).unwrap())
+            .with_closes_at(Utc.with_ymd_and_hms(2026, 11, 9, 12, 0, 0).unwrap());
+
+        let json = serde_json::to_value(&policy).expect("serializa policy");
+        let obj = json.as_object().expect("objeto JSON");
+        assert!(obj.contains_key("enabled"));
+        assert!(obj.contains_key("opens_at"));
+        assert!(obj.contains_key("closes_at"));
+        assert!(!obj.contains_key("requires_registration"));
+        assert!(!obj.contains_key("max_capacity"));
+        assert!(!obj.contains_key("confirmed_registrations"));
+        assert!(!obj.contains_key("registration_deadline"));
     }
 
     #[test]

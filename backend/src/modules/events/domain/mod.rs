@@ -12,7 +12,7 @@ pub use entities::{
     Event, EventDomainError, EventPeriod, EventPublicationStatus, EventRegistration,
     EventRegistrationInfo, EventRegistrationPolicy, EventRegistrationStatus, EventReview,
     EventStatus, MAX_EVENT_DESCRIPTION_LENGTH, MAX_EVENT_LOCATION_LENGTH, MAX_EVENT_TITLE_LENGTH,
-    PublicationReviewDecision, RegistrationStatus,
+    PublicationReviewDecision, RegistrationPolicy, RegistrationStatus,
 };
 pub use rules::{
     DIRECT_EVENT_MANAGEMENT_PERMISSION, validate_event_basic_fields, validate_event_period,
