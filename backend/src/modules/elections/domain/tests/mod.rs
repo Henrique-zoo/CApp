@@ -32,6 +32,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use uuid::Uuid;
 
 mod board_entries;
+mod board_snapshots;
 mod contracts;
 mod lifecycle;
 mod participation;

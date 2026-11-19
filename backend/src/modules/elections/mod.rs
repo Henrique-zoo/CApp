@@ -33,6 +33,10 @@
 //! desativem invariantes. Hashes de encerramento e agregado são referências
 //! independentes do resultado. A apuração confidencial exige o conjunto exato de
 //! contribuições verificadas; a identificada não exige esses artefatos.
+//! Cancelamento e encerramento confidenciais também preservam a origem do quadro
+//! vazio: sua cabeça é o digest do manifesto. Antes de existir manifesto, um
+//! cancelamento não pode afirmar cabeça ou participantes. As mesmas regras são
+//! aplicadas na reconstituição e na construção da fotografia de encerramento.
 //!
 //! [`domain::entities::participation::Participation`] representa o primeiro aceite
 //! por conta interna/eleição e o vínculo à chave pública, sem cadastro antecipado.
