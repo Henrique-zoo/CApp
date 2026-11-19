@@ -1,7 +1,10 @@
 //! Consulta um agregado eleitoral pelo seu identificador.
 
 use crate::modules::elections::{
-    application::{error::GetElectionError, ports::ElectionReader},
+    application::{
+        error::{ElectionReaderError, GetElectionError},
+        ports::ElectionReader,
+    },
     domain::{entities::election::Election, value_objects::identifiers::ElectionId},
 };
 
@@ -20,6 +23,7 @@ impl<'a> GetElection<'a> {
     ///
     /// A consulta não altera o agregado nem realiza decisões de autorização.
     /// Essas decisões pertencem à política de acesso da aplicação/API.
+    /// Recusa como dado persistido inválido uma eleição cujo ID diverge da consulta.
     pub async fn execute(&self, election_id: ElectionId) -> Result<Election, GetElectionError> {
         let versioned = self
             .reader
@@ -27,6 +31,9 @@ impl<'a> GetElection<'a> {
             .await?
             .ok_or(GetElectionError::NotFound)?;
 
+        if versioned.election().id() != election_id {
+            return Err(ElectionReaderError::InvalidStoredData.into());
+        }
         Ok(versioned.into_election())
     }
 }

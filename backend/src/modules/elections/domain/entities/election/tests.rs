@@ -223,7 +223,7 @@ fn cancels_open_election() {
         .cancel(
             actor,
             cancelled_at,
-            Some(fingerprint('b')),
+            Some(fingerprint('c')),
             VoterCount::try_new(5).unwrap(),
             "Irregularidade identificada",
         )
@@ -234,7 +234,7 @@ fn cancels_open_election() {
     assert_eq!(election.tally_status(), TallyStatus::Pending);
     assert!(cancellation.manifest_hash().is_some());
     assert_eq!(cancellation.schedule_hash(), Some(&fingerprint('a')));
-    assert_eq!(cancellation.head_hash(), Some(&fingerprint('b')));
+    assert_eq!(cancellation.head_hash(), Some(&fingerprint('c')));
     assert_eq!(cancellation.voter_count(), VoterCount::try_new(5).unwrap());
     assert_eq!(cancellation.requested_by(), actor);
     assert_eq!(cancellation.cancelled_at(), &cancelled_at);
@@ -281,7 +281,7 @@ fn accepts_cancellation_at_exact_opening_instant() {
         .cancel(
             actor,
             opened_at,
-            None,
+            election.manifest_hash().cloned(),
             VoterCount::try_new(0).unwrap(),
             "Cancelamento no instante da abertura",
         )
@@ -1487,7 +1487,7 @@ fn open_cancellation_snapshot_round_trips() {
         .cancel(
             actor,
             cancelled_at,
-            Some(fingerprint('b')),
+            Some(fingerprint('c')),
             VoterCount::try_new(5).unwrap(),
             "Irregularidade identificada",
         )

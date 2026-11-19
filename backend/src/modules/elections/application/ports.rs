@@ -157,6 +157,8 @@ pub trait ElectionReader: Send + Sync {
     ///
     /// `Ok(None)` representa ausência. Falhas técnicas ou dados inválidos
     /// devem ser retornados como erros tipados.
+    /// O agregado deve ser reconstituído pelos caminhos validados e seu ID deve
+    /// corresponder ao solicitado; divergências são `InvalidStoredData`.
     async fn find_by_id(
         &self,
         election_id: ElectionId,

@@ -723,7 +723,7 @@ fn empty_terminal_snapshot_cannot_reconstitute_a_participation() {
             .cancel(
                 actor(),
                 at(20, 12),
-                None,
+                cancelled.manifest_hash().cloned(),
                 VoterCount::try_new(0).unwrap(),
                 "Cancelamento",
             )

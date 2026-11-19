@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Timelike, Utc};
 
+use crate::modules::elections::domain::rules::board_snapshot::validate_confidential_board_snapshot;
 use crate::modules::elections::domain::value_objects::{
     fingerprint::Fingerprint, identifiers::ElectionId, modality::ElectionModality,
     voter_count::VoterCount,
@@ -24,13 +25,19 @@ pub struct ElectionClosure {
 /// Erros encontrados ao construir um encerramento eleitoral.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidElectionClosure {
+    /// A origem do quadro confidencial corresponde exatamente à contagem zero.
+    #[error("A cabeça do quadro é incompatível com a contagem de participantes")]
+    InvalidEmptyBoard,
     /// O instante do encerramento deve possuir precisão exata de segundos.
     #[error("O instante do encerramento deve ter precisão exata de segundos")]
     SubsecondPrecision,
 }
 
 impl ElectionClosure {
-    /// Constrói o registro imutável de encerramento.
+    /// Constrói o registro confidencial conferindo precisão e origem do quadro vazio.
+    ///
+    /// A aplicação fornece a fotografia confirmada. O agregado confere também
+    /// estado, referências ao calendário e prazo antes de aceitar o encerramento.
     pub fn try_new(
         election_id: ElectionId,
         manifest_hash: Fingerprint,
@@ -42,6 +49,8 @@ impl ElectionClosure {
         if closed_at.nanosecond() != 0 {
             return Err(InvalidElectionClosure::SubsecondPrecision);
         }
+        validate_confidential_board_snapshot(Some(&manifest_hash), Some(&head_hash), voter_count)
+            .map_err(|_| InvalidElectionClosure::InvalidEmptyBoard)?;
 
         Ok(Self {
             election_id,
@@ -180,13 +189,14 @@ mod tests {
             election_id(),
             fingerprint('a'),
             fingerprint('b'),
-            fingerprint('c'),
+            fingerprint('a'),
             VoterCount::try_new(0).unwrap(),
             closed_at(),
         )
         .unwrap();
 
         assert_eq!(closure.voter_count().value(), 0);
+        assert_eq!(closure.head_hash(), closure.manifest_hash());
     }
 
     #[test]

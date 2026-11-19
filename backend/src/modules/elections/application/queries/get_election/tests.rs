@@ -110,3 +110,17 @@ async fn preserves_storage_error() {
         Err(GetElectionError::Reader(ElectionReaderError::Internal))
     ));
 }
+
+#[tokio::test]
+async fn rejects_a_stored_election_with_another_identifier() {
+    let requested = ElectionId::try_from_uuid(Uuid::from_u128(99)).unwrap();
+    let store = FakeElectionStore {
+        result: Ok(Some(VersionedElection::new(sample_election(), 7))),
+    };
+    assert_eq!(
+        GetElection::new(&store).execute(requested).await,
+        Err(GetElectionError::Reader(
+            ElectionReaderError::InvalidStoredData
+        ))
+    );
+}
