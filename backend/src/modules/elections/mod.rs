@@ -6,9 +6,48 @@
 //! em `packages/api-contracts/elections/` fixa formatos, bytes, parâmetros e vetores
 //! antes de as quatro frentes implementarem seus próprios adaptadores.
 //!
+//! O [`domain`] modela as entidades e invariantes da #130.
 //! [`application::board`] define a porta transacional da #381. [`infrastructure`]
 //! persiste as evidências em PostgreSQL e [`api`] publica o quadro e os recibos.
 //! [`crypto_wire`] verifica os envelopes do contrato da #377.
+//!
+//! # Modelo implementado na #130
+//!
+//! A comissão escolhe [`domain::value_objects::modality::ElectionModality`] ao
+//! criar [`domain::entities::election::Election`]. O calendário existe antes da
+//! configuração. A identificada recebe opções validadas e associa a conta à
+//! escolha; a confidencial recebe manifesto verificado e conserva somente cifras.
+//! Nulo é opção própria; sua posição final é obrigatória no manifesto confidencial.
+//!
+//! A abertura congela configuração e revisão vigente. Reconstituição reproduz as
+//! mesmas transições, incluindo revisões anteriores ao manifesto, sem flags que
+//! desativem invariantes. Hashes de encerramento e agregado são referências
+//! independentes do resultado. A apuração confidencial exige o conjunto exato de
+//! contribuições verificadas; a identificada não exige esses artefatos.
+//!
+//! [`domain::entities::participation::Participation`] representa o primeiro aceite
+//! por conta interna/eleição e o vínculo à chave pública, sem cadastro antecipado.
+//! A repetição usa operação e digest do payload, recuperando o mesmo aceite até
+//! após o fim; não precisa da chave privada ou de nova elegibilidade. O repositório
+//! de #381 continua responsável por unicidade concorrente e commit conjunto de
+//! participação, cédula, quadro e recibo, conforme [`application::ballot_ports`].
+//!
+//! `VerifiedManifest`, `VerifiedBallot` e `VerifiedTally` representam verificações
+//! efetuadas nas portas de #378–#380/#139. Seus construtores de evidência são
+//! restritos ao crate. Não são algoritmos criptográficos nem atalhos públicos de
+//! construção. Os adaptadores verificam também os objetos persistidos antes de
+//! reconstituí-los. O domínio não implementa ElGamal, RSA-PSS, JCS ou auditoria.
+//!
+//! As entidades não implementam `Deserialize`: DTOs dos adaptadores devem chamar
+//! construtores validados. Nenhum tipo persistido contém segredos de autoridades,
+//! chave RSA privada do eleitor ou aleatoriedade de cifragem. A integridade de um
+//! histórico completo depende das assinaturas e do backend confiável da #377;
+//! reconstituição semântica não promete detectar uma reescrita integral maliciosa.
+//!
+//! Os testes unitários cobrem ambas as modalidades, participação, calendário,
+//! estados e snapshots adulterados, sem banco ou cloud. Leem os casos semânticos
+//! de `vectors.json`, incluindo a irregularidade compensada. Isso não substitui
+//! verificação criptográfica dos vetores ou automação funcional dos BDDs.
 //!
 //! # Participação no fluxo
 //!

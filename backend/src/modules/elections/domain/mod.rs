@@ -13,3 +13,6 @@ pub mod errors;
 pub mod events;
 pub mod rules;
 pub mod value_objects;
+
+#[cfg(test)]
+mod tests;

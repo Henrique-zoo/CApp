@@ -42,12 +42,12 @@ pub enum InvalidAuthority {
     #[error("Somente uma autoridade de chapa pode possuir slate_id")]
     UnexpectedSlateId,
 
-    /// O valor público 1 é proibido pelo perfil eleitoral.
-    #[error("O valor público da autoridade não pode ser 1")]
+    /// Os valores públicos zero e um são proibidos pelo perfil eleitoral.
+    #[error("O valor público da autoridade não pode ser zero ou um")]
     InvalidPublicValue,
 
-    /// O compromisso da prova de conhecimento não pode ser 1.
-    #[error("O compromisso da prova de conhecimento não pode ser 1")]
+    /// O compromisso da prova de conhecimento não pode ser zero ou um.
+    #[error("O compromisso da prova de conhecimento não pode ser zero ou um")]
     InvalidKeyProofCommitment,
 }
 
@@ -71,11 +71,11 @@ impl Authority {
             _ => {}
         }
 
-        if public_value.as_str() == "1" {
+        if matches!(public_value.as_str(), "0" | "1") {
             return Err(InvalidAuthority::InvalidPublicValue);
         }
 
-        if key_proof.commitment().as_str() == "1" {
+        if matches!(key_proof.commitment().as_str(), "0" | "1") {
             return Err(InvalidAuthority::InvalidKeyProofCommitment);
         }
 

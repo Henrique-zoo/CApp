@@ -5,8 +5,10 @@ use chrono::{DateTime, Timelike, Utc};
 use crate::modules::elections::domain::{
     entities::{
         closure::ElectionClosure,
-        manifest::Manifest,
+        configuration::ElectionConfiguration,
+        manifest::{Manifest, VerifiedManifest},
         result::{ElectionResult, ResultReason, ResultStatus},
+        tally::VerifiedTally,
     },
     rules::result_consistency::{CountConsistency, validate_result_counts},
     value_objects::{
@@ -14,6 +16,9 @@ use crate::modules::elections::domain::{
         election_period::ElectionPeriod,
         fingerprint::Fingerprint,
         identifiers::{AcademicCenterId, ActorId, ElectionId},
+        modality::ElectionModality,
+        option::ElectionOption,
+        options::ElectionOptions,
         schedule_change::ScheduleChange,
         voter_count::VoterCount,
     },
@@ -71,7 +76,7 @@ impl ElectionCancellation {
     }
 
     /// Retorna o hash do manifesto, quando disponível.
-    pub const fn manifest_hash(&self) -> Option<&Fingerprint> {
+    pub fn manifest_hash(&self) -> Option<&Fingerprint> {
         self.manifest_hash.as_ref()
     }
 
@@ -124,7 +129,6 @@ impl ElectionCancellation {
 pub struct AppliedScheduleChange {
     change: ScheduleChange,
     resulting_schedule_hash: Fingerprint,
-    was_open: bool,
 }
 
 impl AppliedScheduleChange {
@@ -145,29 +149,76 @@ impl AppliedScheduleChange {
 }
 
 /// Agregado raiz responsável pelas invariantes do ciclo de vida eleitoral.
+///
+/// # Exemplo
+///
+/// Uma eleição identificada pode abrir sem manifesto ou autoridades ElGamal:
+///
+/// ```
+/// use backend::modules::elections::domain::{entities::election::Election,
+///     value_objects::{calendar_origin::CalendarOrigin, election_period::ElectionPeriod,
+///     fingerprint::Fingerprint, identifiers::{AcademicCenterId, ElectionId, OptionId},
+///     modality::ElectionModality, option::{ElectionOption, OptionKind}, options::ElectionOptions}};
+/// use chrono::{TimeZone, Utc};
+/// use uuid::Uuid;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let id = ElectionId::try_from_uuid(Uuid::from_u128(1))?;
+/// let ca = AcademicCenterId::try_from_uuid(Uuid::from_u128(2))?;
+/// let start = Utc.with_ymd_and_hms(2026, 11, 20, 10, 0, 0).unwrap();
+/// let end = Utc.with_ymd_and_hms(2026, 11, 20, 18, 0, 0).unwrap();
+/// let origin = CalendarOrigin::new(id, ElectionPeriod::try_new(start, end)?);
+/// let mut election = Election::try_new(id, ca, ElectionModality::Identified,
+///     origin, Fingerprint::try_from_hex("a".repeat(64))?)?;
+/// election.configure_identified(ElectionOptions::try_new(vec![
+///     ElectionOption::try_new(OptionId::from_uuid(Uuid::from_u128(3)), OptionKind::Slate, "Aurora")?,
+///     ElectionOption::try_new(OptionId::from_uuid(Uuid::nil()), OptionKind::Null, "Nulo")?,
+/// ])?)?;
+/// election.open(start)?;
+/// assert!(election.manifest().is_none());
+/// # Ok(()) }
+/// ```
+///
+/// Desserialização direta não pode evitar os construtores:
+///
+/// ```compile_fail
+/// use backend::modules::elections::domain::entities::election::Election;
+/// let election: Election = serde_json::from_str("{}").unwrap();
+/// ```
+///
+/// O estado operacional também não pode ser alterado diretamente:
+///
+/// ```compile_fail
+/// use backend::modules::elections::domain::entities::election::{Election, ElectionStatus};
+/// fn bypass(election: &mut Election) { election.status = ElectionStatus::Open; }
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Election {
     id: ElectionId,
     academic_center_id: AcademicCenterId,
+    modality: ElectionModality,
     status: ElectionStatus,
     tally_status: TallyStatus,
     calendar_origin: CalendarOrigin,
     calendar_origin_hash: Fingerprint,
     current_period: ElectionPeriod,
     opened_at: Option<DateTime<Utc>>,
+    opening_schedule_revision: Option<u32>,
     current_schedule_hash: Fingerprint,
     schedule_revision: u32,
     schedule_changes: Vec<AppliedScheduleChange>,
-    manifest: Option<Manifest>,
-    manifest_hash: Option<Fingerprint>,
+    configuration: Option<ElectionConfiguration>,
     cancellation: Option<ElectionCancellation>,
     closure: Option<ElectionClosure>,
-    tally_result: Option<ElectionResult>,
+    closure_hash: Option<Fingerprint>,
+    tally_result: Option<VerifiedTally>,
 }
 
 /// Erros encontrados ao construir uma eleição.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidElection {
+    /// A configuração não corresponde à modalidade escolhida.
+    #[error("Configuração incompatível com a modalidade eleitoral")]
+    ModalityMismatch,
     /// A origem do calendário pertence a outra eleição.
     #[error("A origem do calendário pertence a outra eleição")]
     CalendarOriginElectionMismatch,
@@ -196,6 +247,26 @@ pub enum InvalidElection {
 /// Erros encontrados durante uma transição do ciclo de vida eleitoral.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ElectionTransitionError {
+    /// O agregado verificado diverge da fotografia ou do resultado.
+    #[error("Agregado incompatível com o encerramento")]
+    TallyAggregateMismatch,
+    /// As contribuições verificadas não correspondem às autoridades necessárias.
+    #[error("Contribuições incompatíveis com as autoridades do manifesto")]
+    TallyContributionsMismatch,
+
+    /// A modalidade ou a evidência não corresponde à configuração.
+    #[error("Operação incompatível com a modalidade eleitoral")]
+    ModalityMismatch,
+    /// A configuração de opções ainda não foi concluída.
+    #[error("A eleição não possui opções configuradas")]
+    ConfigurationRequired,
+    /// A abertura não pode ser antecipada por revisão de calendário.
+    #[error("Uma revisão não pode antecipar a abertura")]
+    StartCannotMoveEarlier,
+    /// Os fatos devem respeitar a ordem temporal do histórico.
+    #[error("O instante antecede uma alteração já registrada")]
+    NonChronologicalOperation,
+
     /// A operação não é permitida no estado operacional atual.
     #[error("A operação não é permitida no estado atual da eleição")]
     InvalidState,
@@ -311,13 +382,21 @@ pub enum ElectionTransitionError {
     /// Os dados do cancelamento divergem da fotografia de encerramento.
     #[error("Os dados do cancelamento divergem do encerramento registrado")]
     CancellationSnapshotMismatch,
+
+    /// A cabeça de um quadro vazio deve ser o hash do manifesto.
+    #[error("A fotografia do quadro vazio diverge do manifesto")]
+    InvalidEmptyBoard,
 }
 
 impl Election {
-    /// Cria uma eleição em preparação com seu calendário inicial validado.
+    /// Cria uma eleição em preparação com modalidade e calendário inicial.
+    ///
+    /// Recusa calendário de outra eleição. A configuração pode ser concluída
+    /// depois, sem exigir autoridades, cadastro ou chaves de eleitores aqui.
     pub fn try_new(
         id: ElectionId,
         academic_center_id: AcademicCenterId,
+        modality: ElectionModality,
         calendar_origin: CalendarOrigin,
         calendar_origin_hash: Fingerprint,
     ) -> Result<Self, InvalidElection> {
@@ -330,19 +409,21 @@ impl Election {
         Ok(Self {
             id,
             academic_center_id,
+            modality,
             status: ElectionStatus::Preparing,
             tally_status: TallyStatus::Pending,
             calendar_origin,
             calendar_origin_hash: calendar_origin_hash.clone(),
             current_period,
             opened_at: None,
+            opening_schedule_revision: None,
             current_schedule_hash: calendar_origin_hash,
             schedule_revision: 0,
             schedule_changes: Vec::new(),
-            manifest: None,
-            manifest_hash: None,
+            configuration: None,
             cancellation: None,
             closure: None,
+            closure_hash: None,
             tally_result: None,
         })
     }
@@ -393,8 +474,11 @@ impl Election {
     }
 
     /// Retorna o manifesto publicado, quando disponível.
-    pub const fn manifest(&self) -> Option<&Manifest> {
-        self.manifest.as_ref()
+    pub fn manifest(&self) -> Option<&Manifest> {
+        match &self.configuration {
+            Some(ElectionConfiguration::Confidential(verified)) => Some(verified.manifest()),
+            _ => None,
+        }
     }
 
     /// Retorna o registro de cancelamento, quando existente.
@@ -408,13 +492,16 @@ impl Election {
     }
 
     /// Retorna o último resultado publicado da apuração, quando existente.
-    pub const fn tally_result(&self) -> Option<&ElectionResult> {
-        self.tally_result.as_ref()
+    pub fn tally_result(&self) -> Option<&ElectionResult> {
+        self.tally_result.as_ref().map(VerifiedTally::result)
     }
 
     /// Retorna o hash do manifesto publicado, quando disponível.
-    pub const fn manifest_hash(&self) -> Option<&Fingerprint> {
-        self.manifest_hash.as_ref()
+    pub fn manifest_hash(&self) -> Option<&Fingerprint> {
+        match &self.configuration {
+            Some(ElectionConfiguration::Confidential(verified)) => Some(verified.hash()),
+            _ => None,
+        }
     }
 
     /// Retorna a última revisão do calendário.
@@ -429,49 +516,87 @@ impl Election {
         &self.schedule_changes
     }
 
-    /// Publica o manifesto e seu hash calculado pelo codec.
-    pub fn publish_manifest(
+    /// Retorna a modalidade escolhida na criação.
+    pub const fn modality(&self) -> ElectionModality {
+        self.modality
+    }
+
+    /// Retorna as opções prontas, sem exigir manifesto na modalidade identificada.
+    pub fn options(&self) -> Option<&[ElectionOption]> {
+        self.configuration
+            .as_ref()
+            .map(ElectionConfiguration::options)
+    }
+
+    /// Configura as opções identificadas durante a preparação.
+    ///
+    /// A aplicação fornece chapas aprovadas; a coleção valida limites e Nulo.
+    /// Depois da abertura nenhuma configuração pode ser alterada.
+    pub fn configure_identified(
         &mut self,
-        manifest: Manifest,
-        manifest_hash: Fingerprint,
+        options: ElectionOptions,
     ) -> Result<(), InvalidElection> {
         if self.status != ElectionStatus::Preparing {
             return Err(InvalidElection::ManifestPublicationAfterPreparation);
         }
+        if self.modality != ElectionModality::Identified {
+            return Err(InvalidElection::ModalityMismatch);
+        }
+        self.configuration = Some(ElectionConfiguration::Identified(options));
+        Ok(())
+    }
 
-        if self.manifest.is_some() {
+    /// Publica o manifesto após verificação pelas portas de criptografia e codec.
+    ///
+    /// Recusa modalidade identificada, referências divergentes e publicação após
+    /// preparação. Assinaturas, provas e digest não são calculados neste método.
+    pub fn publish_manifest(&mut self, verified: VerifiedManifest) -> Result<(), InvalidElection> {
+        if self.status != ElectionStatus::Preparing {
+            return Err(InvalidElection::ManifestPublicationAfterPreparation);
+        }
+        if self.modality != ElectionModality::Confidential {
+            return Err(InvalidElection::ModalityMismatch);
+        }
+        if self.configuration.is_some() {
             return Err(InvalidElection::ManifestAlreadyPublished);
         }
-
+        let manifest = verified.manifest();
         if manifest.election_id() != self.id {
             return Err(InvalidElection::ManifestElectionMismatch);
         }
-
         if manifest.academic_center_id() != self.academic_center_id {
             return Err(InvalidElection::ManifestAcademicCenterMismatch);
         }
-
         if manifest.calendar_origin_hash() != &self.calendar_origin_hash {
             return Err(InvalidElection::ManifestCalendarOriginMismatch);
         }
-
-        self.manifest = Some(manifest);
-        self.manifest_hash = Some(manifest_hash);
-
+        self.configuration = Some(ElectionConfiguration::Confidential(Box::new(verified)));
         Ok(())
     }
 
     /// Abre a eleição no instante fornecido pela camada de aplicação.
     ///
-    /// A abertura exige manifesto publicado e ocorre somente dentro do
-    /// período vigente, respeitando o intervalo [starts_at, ends_at).
+    /// Exige opções na identificada ou manifesto verificado na confidencial,
+    /// dentro do período vigente [starts_at, ends_at). Não exige eleitor ou chave
+    /// previamente cadastrado. Retorna erro se a preparação estiver incompleta,
+    /// se o estado for incompatível ou se o instante violar calendário/histórico.
     pub fn open(&mut self, opened_at: DateTime<Utc>) -> Result<(), ElectionTransitionError> {
         if self.status != ElectionStatus::Preparing {
             return Err(ElectionTransitionError::InvalidState);
         }
 
-        if self.manifest.is_none() {
-            return Err(ElectionTransitionError::ManifestRequired);
+        if self.configuration.is_none() {
+            return Err(match self.modality {
+                ElectionModality::Confidential => ElectionTransitionError::ManifestRequired,
+                ElectionModality::Identified => ElectionTransitionError::ConfigurationRequired,
+            });
+        }
+        if self
+            .schedule_changes
+            .last()
+            .is_some_and(|applied| applied.change.changed_at() > &opened_at)
+        {
+            return Err(ElectionTransitionError::NonChronologicalOperation);
         }
 
         if opened_at.nanosecond() != 0 {
@@ -487,6 +612,7 @@ impl Election {
         }
 
         self.opened_at = Some(opened_at);
+        self.opening_schedule_revision = Some(self.schedule_revision);
         self.status = ElectionStatus::Open;
 
         Ok(())
@@ -515,6 +641,9 @@ impl Election {
         if self.tally_status == TallyStatus::Final {
             return Err(ElectionTransitionError::InvalidState);
         }
+        if self.opened_at.is_none() && voter_count.value() != 0 {
+            return Err(ElectionTransitionError::CancellationSnapshotMismatch);
+        }
 
         if cancelled_at.nanosecond() != 0 {
             return Err(ElectionTransitionError::SubsecondPrecision);
@@ -532,13 +661,21 @@ impl Election {
                 return Err(ElectionTransitionError::CancellationBeforeClosure);
             }
 
-            if head_hash.as_ref() != Some(closure.head_hash())
-                || voter_count != closure.voter_count()
-            {
+            if head_hash.as_ref() != closure.head_hash() || voter_count != closure.voter_count() {
                 return Err(ElectionTransitionError::CancellationSnapshotMismatch);
             }
         }
 
+        if self
+            .schedule_changes
+            .last()
+            .is_some_and(|applied| applied.change.changed_at() > &cancelled_at)
+        {
+            return Err(ElectionTransitionError::NonChronologicalOperation);
+        }
+        if self.modality == ElectionModality::Identified && head_hash.is_some() {
+            return Err(ElectionTransitionError::ModalityMismatch);
+        }
         let reason = reason.into();
         let reason_length = reason.chars().count();
 
@@ -548,7 +685,7 @@ impl Election {
 
         self.cancellation = Some(ElectionCancellation {
             election_id: self.id,
-            manifest_hash: self.manifest_hash.clone(),
+            manifest_hash: self.manifest_hash().cloned(),
             schedule_hash: Some(self.current_schedule_hash.clone()),
             head_hash,
             voter_count,
@@ -563,19 +700,46 @@ impl Election {
             .ok_or(ElectionTransitionError::InvalidState)
     }
 
-    /// Encerra a votação e registra o snapshot imutável de encerramento.
+    /// Encerra a votação confidencial com a fotografia e digest fornecidos pelo codec.
     ///
-    /// O hash da última submissão e a quantidade de eleitores distintos
-    /// são fornecidos pela camada de aplicação, que deve obtê-los
-    /// atomicamente com o encerramento da votação.
-    ///
-    /// Chamadas repetidas após o encerramento retornam o registro existente,
-    /// sem substituir seus dados.
+    /// A aplicação obtém cabeça e participantes atomicamente (#381) e confere o
+    /// digest do encerramento (#380). Repetições recuperam a mesma fotografia.
     pub fn close(
         &mut self,
         closed_at: DateTime<Utc>,
         head_hash: Fingerprint,
         voter_count: VoterCount,
+        closure_hash: Fingerprint,
+    ) -> Result<&ElectionClosure, ElectionTransitionError> {
+        if self.modality != ElectionModality::Confidential {
+            return Err(ElectionTransitionError::ModalityMismatch);
+        }
+        self.close_snapshot(closed_at, Some(head_hash), voter_count, closure_hash)
+    }
+
+    /// Encerra a modalidade identificada sem quadro ou manifesto criptográfico.
+    ///
+    /// O digest identifica a fotografia imutável produzida pelo adaptador; não
+    /// impõe o formato JSON do encerramento confidencial à modalidade identificada.
+    pub fn close_identified(
+        &mut self,
+        closed_at: DateTime<Utc>,
+        voter_count: VoterCount,
+        closure_hash: Fingerprint,
+    ) -> Result<&ElectionClosure, ElectionTransitionError> {
+        if self.modality != ElectionModality::Identified {
+            return Err(ElectionTransitionError::ModalityMismatch);
+        }
+        self.close_snapshot(closed_at, None, voter_count, closure_hash)
+    }
+
+    /// Aplica as invariantes comuns de fechamento; dados de armazenamento vêm da aplicação.
+    fn close_snapshot(
+        &mut self,
+        closed_at: DateTime<Utc>,
+        head_hash: Option<Fingerprint>,
+        voter_count: VoterCount,
+        closure_hash: Fingerprint,
     ) -> Result<&ElectionClosure, ElectionTransitionError> {
         if self.status == ElectionStatus::Closed {
             return self
@@ -583,40 +747,83 @@ impl Election {
                 .as_ref()
                 .ok_or(ElectionTransitionError::InvalidState);
         }
-
         if self.status != ElectionStatus::Open {
             return Err(ElectionTransitionError::InvalidState);
         }
-
-        let manifest_hash = self
-            .manifest_hash
-            .clone()
-            .ok_or(ElectionTransitionError::ManifestRequired)?;
-
         if closed_at.nanosecond() != 0 {
             return Err(ElectionTransitionError::SubsecondPrecision);
         }
-
         if closed_at < *self.current_period.ends_at() {
             return Err(ElectionTransitionError::ClosingBeforeDeadline);
         }
-
-        let closure = ElectionClosure::try_new(
-            self.id,
-            manifest_hash,
-            self.current_schedule_hash.clone(),
-            head_hash,
-            voter_count,
-            closed_at,
-        )
+        if self.modality == ElectionModality::Confidential
+            && voter_count.value() == 0
+            && head_hash.as_ref() != self.manifest_hash()
+        {
+            return Err(ElectionTransitionError::InvalidEmptyBoard);
+        }
+        let closure = match (self.manifest_hash().cloned(), head_hash) {
+            (Some(manifest), Some(head)) => ElectionClosure::try_new(
+                self.id,
+                manifest,
+                self.current_schedule_hash.clone(),
+                head,
+                voter_count,
+                closed_at,
+            ),
+            (None, None) => ElectionClosure::try_identified(
+                self.id,
+                self.current_schedule_hash.clone(),
+                voter_count,
+                closed_at,
+            ),
+            _ => return Err(ElectionTransitionError::ModalityMismatch),
+        }
         .map_err(|_| ElectionTransitionError::SubsecondPrecision)?;
-
         self.closure = Some(closure);
+        self.closure_hash = Some(closure_hash);
         self.status = ElectionStatus::Closed;
-
         self.closure
             .as_ref()
             .ok_or(ElectionTransitionError::InvalidState)
+    }
+
+    /// Retorna o digest do encerramento, independente do resultado que o referencia.
+    pub const fn closure_hash(&self) -> Option<&Fingerprint> {
+        self.closure_hash.as_ref()
+    }
+
+    /// Retorna a situação pública sem confundir cancelamento com apuração.
+    ///
+    /// O resultado assinado de cancelamento será produzido pelo adaptador a partir
+    /// do registro preservado; não há contagem antecipada nessa projeção.
+    pub fn result_status(&self) -> Option<ResultStatus> {
+        if self.status == ElectionStatus::Cancelled {
+            Some(ResultStatus::Cancelled)
+        } else {
+            self.tally_result().map(ElectionResult::status)
+        }
+    }
+
+    /// Produz o resultado administrativo sem apurar, preservando a modalidade.
+    ///
+    /// O codec fornece o digest do registro de cancelamento assinado. Recusa
+    /// eleições que ainda não foram canceladas; não publica totais ou vencedor.
+    pub fn cancelled_result(
+        &self,
+        cancellation_hash: Fingerprint,
+    ) -> Result<ElectionResult, ElectionTransitionError> {
+        let record = self
+            .cancellation()
+            .ok_or(ElectionTransitionError::InvalidState)?;
+        ElectionResult::try_cancelled(
+            self.id,
+            self.modality,
+            self.manifest_hash().cloned(),
+            cancellation_hash,
+            record.voter_count(),
+        )
+        .map_err(|_| ElectionTransitionError::InvalidState)
     }
 
     /// Publica ou atualiza o resultado da apuração eleitoral.
@@ -629,9 +836,13 @@ impl Election {
     /// Uma apuração final é imutável; uma repetição idêntica é idempotente.
     pub fn publish_tally(
         &mut self,
-        result: ElectionResult,
-        closure_hash: &Fingerprint,
+        verified: VerifiedTally,
     ) -> Result<&ElectionResult, ElectionTransitionError> {
+        let result = verified.result();
+        let closure_hash = self
+            .closure_hash
+            .as_ref()
+            .ok_or(ElectionTransitionError::TallyBeforeClosure)?;
         if self.status != ElectionStatus::Closed {
             return Err(ElectionTransitionError::TallyBeforeClosure);
         }
@@ -645,42 +856,98 @@ impl Election {
             .as_ref()
             .ok_or(ElectionTransitionError::TallyBeforeClosure)?;
 
-        let manifest = self
-            .manifest
-            .as_ref()
-            .ok_or(ElectionTransitionError::ManifestRequired)?;
-
-        let manifest_hash = self
-            .manifest_hash
-            .as_ref()
-            .ok_or(ElectionTransitionError::ManifestRequired)?;
-
+        if result.modality() != self.modality {
+            return Err(ElectionTransitionError::ModalityMismatch);
+        }
         if result.election_id() != self.id || closure.election_id() != self.id {
             return Err(ElectionTransitionError::TallyElectionMismatch);
         }
-
-        if result.manifest_hash() != Some(manifest_hash) || closure.manifest_hash() != manifest_hash
+        if result.manifest_hash() != self.manifest_hash()
+            || closure.manifest_hash() != self.manifest_hash()
         {
             return Err(ElectionTransitionError::TallyManifestMismatch);
         }
-
         if result.closure_hash() != Some(closure_hash) {
             return Err(ElectionTransitionError::TallyClosureMismatch);
         }
-
+        let options = self
+            .options()
+            .ok_or(ElectionTransitionError::ConfigurationRequired)?;
         if result.voter_count() != closure.voter_count() {
             return Err(ElectionTransitionError::TallyVoterCountMismatch);
         }
 
         if result.status() == ResultStatus::Incomplete
             && result.missing_authorities().iter().any(|missing| {
-                !manifest
-                    .authorities()
-                    .iter()
-                    .any(|authority| authority.id() == *missing)
+                !self.manifest().is_some_and(|manifest| {
+                    manifest
+                        .authorities()
+                        .iter()
+                        .any(|authority| authority.id() == *missing)
+                })
             })
         {
             return Err(ElectionTransitionError::TallyAuthorityMismatch);
+        }
+
+        match self.modality {
+            ElectionModality::Confidential => {
+                let aggregate = verified
+                    .aggregate()
+                    .ok_or(ElectionTransitionError::TallyAggregateMismatch)?;
+                if aggregate.election_id() != self.id
+                    || Some(aggregate.manifest_hash()) != self.manifest_hash()
+                    || aggregate.closure_hash() != closure_hash
+                    || verified.aggregate_hash() != result.aggregate_hash()
+                    || !aggregate
+                        .ciphertexts()
+                        .iter()
+                        .map(|c| c.option_id())
+                        .eq(options.iter().map(|o| o.id()))
+                {
+                    return Err(ElectionTransitionError::TallyAggregateMismatch);
+                }
+                if self.tally_result.as_ref().is_some_and(|previous| {
+                    previous.aggregate() != verified.aggregate()
+                        || previous.aggregate_hash() != verified.aggregate_hash()
+                }) {
+                    return Err(ElectionTransitionError::TallyAggregateMismatch);
+                }
+                let manifest = self
+                    .manifest()
+                    .ok_or(ElectionTransitionError::ManifestRequired)?;
+                let contributions: std::collections::HashSet<_> = verified
+                    .contributing_authorities()
+                    .iter()
+                    .copied()
+                    .collect();
+                if contributions.len() != verified.contributing_authorities().len()
+                    || contributions
+                        .iter()
+                        .any(|id| !manifest.authorities().iter().any(|a| a.id() == *id))
+                {
+                    return Err(ElectionTransitionError::TallyContributionsMismatch);
+                }
+                let missing: std::collections::HashSet<_> = manifest
+                    .authorities()
+                    .iter()
+                    .map(|a| a.id())
+                    .filter(|id| !contributions.contains(id))
+                    .collect();
+                if missing != result.missing_authorities().iter().copied().collect() {
+                    return Err(ElectionTransitionError::TallyContributionsMismatch);
+                }
+            }
+            ElectionModality::Identified => {
+                if verified.aggregate().is_some()
+                    || verified.aggregate_hash().is_some()
+                    || !verified.contributing_authorities().is_empty()
+                    || result.aggregate_hash().is_some()
+                    || result.status() == ResultStatus::Incomplete
+                {
+                    return Err(ElectionTransitionError::ModalityMismatch);
+                }
+            }
         }
 
         match result.status() {
@@ -689,7 +956,7 @@ impl Election {
                     .counts()
                     .ok_or(ElectionTransitionError::TallyOptionsMismatch)?;
 
-                match validate_result_counts(manifest.options(), counts, closure.voter_count()) {
+                match validate_result_counts(options, counts, closure.voter_count()) {
                     Ok(CountConsistency::Consistent) => {}
                     Ok(CountConsistency::SumMismatch { .. }) => {
                         return Err(ElectionTransitionError::TallyReasonMismatch);
@@ -703,8 +970,7 @@ impl Election {
                         .counts()
                         .ok_or(ElectionTransitionError::TallyOptionsMismatch)?;
 
-                    match validate_result_counts(manifest.options(), counts, closure.voter_count())
-                    {
+                    match validate_result_counts(options, counts, closure.voter_count()) {
                         Ok(CountConsistency::SumMismatch { .. }) => {}
                         Ok(CountConsistency::Consistent) => {
                             return Err(ElectionTransitionError::TallyReasonMismatch);
@@ -728,10 +994,9 @@ impl Election {
         }
 
         if self.tally_status == TallyStatus::Final {
-            if self.tally_result.as_ref() == Some(&result) {
+            if self.tally_result() == Some(result) {
                 return self
-                    .tally_result
-                    .as_ref()
+                    .tally_result()
                     .ok_or(ElectionTransitionError::TallyAlreadyFinal);
             }
 
@@ -746,10 +1011,9 @@ impl Election {
             }
         };
 
-        self.tally_result = Some(result);
+        self.tally_result = Some(verified);
 
-        self.tally_result
-            .as_ref()
+        self.tally_result()
             .ok_or(ElectionTransitionError::InvalidState)
     }
 
@@ -772,7 +1036,7 @@ impl Election {
             return Err(ElectionTransitionError::ScheduleElectionMismatch);
         }
 
-        if change.manifest_hash() != self.manifest_hash.as_ref() {
+        if change.manifest_hash() != self.manifest_hash() {
             return Err(ElectionTransitionError::ScheduleManifestMismatch);
         }
 
@@ -797,6 +1061,13 @@ impl Election {
             return Err(ElectionTransitionError::SubsecondPrecision);
         }
 
+        if self
+            .schedule_changes
+            .last()
+            .is_some_and(|applied| applied.change.changed_at() > change.changed_at())
+        {
+            return Err(ElectionTransitionError::NonChronologicalOperation);
+        }
         let new_period = change.period();
 
         if new_period.ends_at() <= self.current_period.ends_at() {
@@ -805,7 +1076,9 @@ impl Election {
 
         match self.status {
             ElectionStatus::Preparing => {
-                // Durante a preparação, o contrato permite alterar a abertura.
+                if new_period.starts_at() < self.current_period.starts_at() {
+                    return Err(ElectionTransitionError::StartCannotMoveEarlier);
+                }
             }
             ElectionStatus::Open => {
                 if new_period.starts_at() != self.current_period.starts_at() {
@@ -835,7 +1108,6 @@ impl Election {
         self.schedule_changes.push(AppliedScheduleChange {
             change,
             resulting_schedule_hash: new_schedule_hash,
-            was_open: self.status == ElectionStatus::Open,
         });
 
         Ok(())
@@ -846,302 +1118,5 @@ impl Election {
 #[path = "election/tests.rs"]
 mod tests;
 
-impl Election {
-    /// Produz uma fotografia completa do estado persistido do agregado.
-    ///
-    /// O snapshot preserva os metadados internos necessários para validar
-    /// posteriormente o histórico e reconstituir o mesmo estado.
-    pub fn to_snapshot(&self) -> super::election_snapshot::ElectionSnapshot {
-        use super::election_snapshot::{
-            AppliedScheduleChangeSnapshot, ElectionCancellationSnapshot, ElectionSnapshot,
-        };
-
-        let schedule_changes = self
-            .schedule_changes
-            .iter()
-            .map(|applied| AppliedScheduleChangeSnapshot {
-                change: applied.change.clone(),
-                resulting_schedule_hash: applied.resulting_schedule_hash.clone(),
-                was_open: applied.was_open,
-            })
-            .collect();
-
-        let cancellation = self
-            .cancellation
-            .as_ref()
-            .map(|record| ElectionCancellationSnapshot {
-                election_id: record.election_id,
-                manifest_hash: record.manifest_hash.clone(),
-                schedule_hash: record.schedule_hash.clone(),
-                head_hash: record.head_hash.clone(),
-                voter_count: record.voter_count,
-                requested_by: record.requested_by,
-                cancelled_at: record.cancelled_at,
-                reason: record.reason.clone(),
-            });
-
-        ElectionSnapshot {
-            id: self.id,
-            academic_center_id: self.academic_center_id,
-            status: self.status,
-            tally_status: self.tally_status,
-            calendar_origin: self.calendar_origin.clone(),
-            calendar_origin_hash: self.calendar_origin_hash.clone(),
-            current_period: self.current_period.clone(),
-            opened_at: self.opened_at,
-            current_schedule_hash: self.current_schedule_hash.clone(),
-            schedule_revision: self.schedule_revision,
-            schedule_changes,
-            manifest: self.manifest.clone(),
-            manifest_hash: self.manifest_hash.clone(),
-            cancellation,
-            closure: self.closure.clone(),
-            tally_result: self.tally_result.clone(),
-        }
-    }
-
-    /// Reconstitui uma eleição persistida validando suas invariantes.
-    ///
-    /// O snapshot é tratado como entrada não confiável: suas referências,
-    /// histórico e estados são verificados antes da criação do agregado.
-    pub fn try_reconstitute(
-        snapshot: super::election_snapshot::ElectionSnapshot,
-    ) -> Result<Self, super::election_snapshot::ElectionReconstitutionError> {
-        use super::election_snapshot::ElectionReconstitutionError as ReconstitutionError;
-
-        if snapshot.calendar_origin.election_id() != snapshot.id {
-            return Err(ReconstitutionError::CalendarOriginElectionMismatch);
-        }
-
-        if snapshot.manifest.is_some() != snapshot.manifest_hash.is_some() {
-            return Err(ReconstitutionError::ManifestHashMismatch);
-        }
-
-        if let Some(manifest) = &snapshot.manifest
-            && (manifest.election_id() != snapshot.id
-                || manifest.academic_center_id() != snapshot.academic_center_id
-                || manifest.calendar_origin_hash() != &snapshot.calendar_origin_hash)
-        {
-            return Err(ReconstitutionError::ManifestReferenceMismatch);
-        }
-
-        if snapshot.schedule_revision as usize != snapshot.schedule_changes.len()
-            || snapshot.schedule_revision > crate::modules::elections::domain::value_objects::schedule_change::MAX_SCHEDULE_REVISION
-        {
-            return Err(ReconstitutionError::ScheduleRevisionMismatch);
-        }
-
-        let mut expected_previous_hash = snapshot.calendar_origin_hash.clone();
-        let mut expected_period = snapshot.calendar_origin.period().clone();
-
-        for (index, applied) in snapshot.schedule_changes.iter().enumerate() {
-            let change = &applied.change;
-            let expected_revision = (index + 1) as u32;
-
-            if change.election_id() != snapshot.id
-                || change.revision() != expected_revision
-                || change.previous_schedule_hash() != &expected_previous_hash
-            {
-                return Err(ReconstitutionError::InvalidScheduleHistory);
-            }
-
-            if change.manifest_hash() != snapshot.manifest_hash.as_ref()
-                && change.manifest_hash().is_some()
-            {
-                return Err(ReconstitutionError::InvalidScheduleHistory);
-            }
-
-            if applied.resulting_schedule_hash == expected_previous_hash
-                || change.period().ends_at() <= expected_period.ends_at()
-            {
-                return Err(ReconstitutionError::InvalidScheduleHistory);
-            }
-
-            if applied.was_open {
-                let opened_at = snapshot
-                    .opened_at
-                    .ok_or(ReconstitutionError::InvalidScheduleHistory)?;
-
-                if change.period().starts_at() != expected_period.starts_at()
-                    || change.changed_at() < &opened_at
-                    || change.changed_at() >= expected_period.ends_at()
-                {
-                    return Err(ReconstitutionError::InvalidScheduleHistory);
-                }
-            }
-
-            expected_previous_hash = applied.resulting_schedule_hash.clone();
-            expected_period = change.period().clone();
-        }
-
-        if expected_previous_hash != snapshot.current_schedule_hash {
-            return Err(ReconstitutionError::ScheduleHashChainMismatch);
-        }
-
-        if expected_period != snapshot.current_period {
-            return Err(ReconstitutionError::CurrentPeriodMismatch);
-        }
-
-        if snapshot.opened_at.is_some_and(|opened_at| {
-            opened_at.nanosecond() != 0 || !snapshot.current_period.contains(&opened_at)
-        }) {
-            return Err(ReconstitutionError::InvalidOpening);
-        }
-
-        match snapshot.status {
-            ElectionStatus::Preparing => {
-                if snapshot.opened_at.is_some()
-                    || snapshot.closure.is_some()
-                    || snapshot.cancellation.is_some()
-                    || snapshot.tally_status != TallyStatus::Pending
-                    || snapshot.tally_result.is_some()
-                {
-                    return Err(ReconstitutionError::InvalidLifecycleState);
-                }
-            }
-            ElectionStatus::Open => {
-                if snapshot.manifest.is_none()
-                    || snapshot.opened_at.is_none()
-                    || snapshot.closure.is_some()
-                    || snapshot.cancellation.is_some()
-                    || snapshot.tally_status != TallyStatus::Pending
-                    || snapshot.tally_result.is_some()
-                {
-                    return Err(ReconstitutionError::InvalidLifecycleState);
-                }
-            }
-            ElectionStatus::Closed => {
-                if snapshot.manifest.is_none()
-                    || snapshot.opened_at.is_none()
-                    || snapshot.closure.is_none()
-                    || snapshot.cancellation.is_some()
-                {
-                    return Err(ReconstitutionError::InvalidLifecycleState);
-                }
-            }
-            ElectionStatus::Cancelled => {
-                if snapshot.cancellation.is_none() || snapshot.tally_status == TallyStatus::Final {
-                    return Err(ReconstitutionError::InvalidLifecycleState);
-                }
-            }
-        }
-
-        if let Some(closure) = &snapshot.closure
-            && (snapshot.manifest_hash.as_ref() != Some(closure.manifest_hash())
-                || closure.election_id() != snapshot.id
-                || closure.schedule_hash() != &snapshot.current_schedule_hash
-                || closure.closed_at() < snapshot.current_period.ends_at()
-                || snapshot.opened_at.is_none())
-        {
-            return Err(ReconstitutionError::InvalidClosure);
-        }
-
-        let cancellation = snapshot.cancellation.map(|record| ElectionCancellation {
-            election_id: record.election_id,
-            manifest_hash: record.manifest_hash,
-            schedule_hash: record.schedule_hash,
-            head_hash: record.head_hash,
-            voter_count: record.voter_count,
-            requested_by: record.requested_by,
-            cancelled_at: record.cancelled_at,
-            reason: record.reason,
-        });
-
-        if let Some(record) = &cancellation {
-            if record.election_id != snapshot.id
-                || record.manifest_hash != snapshot.manifest_hash
-                || record.schedule_hash.as_ref() != Some(&snapshot.current_schedule_hash)
-                || record.cancelled_at.nanosecond() != 0
-                || !(1..=2_000).contains(&record.reason.chars().count())
-                || snapshot
-                    .opened_at
-                    .is_some_and(|opened_at| record.cancelled_at < opened_at)
-            {
-                return Err(ReconstitutionError::InvalidCancellation);
-            }
-
-            if let Some(closure) = &snapshot.closure
-                && (record.cancelled_at < *closure.closed_at()
-                    || record.head_hash.as_ref() != Some(closure.head_hash())
-                    || record.voter_count != closure.voter_count())
-            {
-                return Err(ReconstitutionError::InvalidCancellation);
-            }
-        }
-
-        if snapshot.status == ElectionStatus::Cancelled && cancellation.is_none() {
-            return Err(ReconstitutionError::InvalidCancellation);
-        }
-
-        let schedule_changes = snapshot
-            .schedule_changes
-            .into_iter()
-            .map(|applied| AppliedScheduleChange {
-                change: applied.change,
-                resulting_schedule_hash: applied.resulting_schedule_hash,
-                was_open: applied.was_open,
-            })
-            .collect();
-
-        let mut election = Self {
-            id: snapshot.id,
-            academic_center_id: snapshot.academic_center_id,
-            status: snapshot.status,
-            tally_status: TallyStatus::Pending,
-            calendar_origin: snapshot.calendar_origin,
-            calendar_origin_hash: snapshot.calendar_origin_hash,
-            current_period: snapshot.current_period,
-            opened_at: snapshot.opened_at,
-            current_schedule_hash: snapshot.current_schedule_hash,
-            schedule_revision: snapshot.schedule_revision,
-            schedule_changes,
-            manifest: snapshot.manifest,
-            manifest_hash: snapshot.manifest_hash,
-            cancellation,
-            closure: snapshot.closure,
-            tally_result: None,
-        };
-
-        match (snapshot.tally_status, snapshot.tally_result) {
-            (TallyStatus::Pending, None) => {}
-            (TallyStatus::Pending, Some(_)) => {
-                return Err(ReconstitutionError::InvalidTallyState);
-            }
-            (TallyStatus::Incomplete, Some(result)) | (TallyStatus::Final, Some(result)) => {
-                if election.closure.is_none()
-                    || election.manifest.is_none()
-                    || (election.status == ElectionStatus::Cancelled
-                        && snapshot.tally_status == TallyStatus::Final)
-                {
-                    return Err(ReconstitutionError::InvalidTallyState);
-                }
-
-                let closure_hash = result
-                    .closure_hash()
-                    .ok_or(ReconstitutionError::InvalidTallyResult)?
-                    .clone();
-
-                election.status = ElectionStatus::Closed;
-
-                election
-                    .publish_tally(result, &closure_hash)
-                    .map_err(|_| ReconstitutionError::InvalidTallyResult)?;
-
-                if election.tally_status != snapshot.tally_status {
-                    return Err(ReconstitutionError::InvalidTallyState);
-                }
-
-                if snapshot.status == ElectionStatus::Cancelled {
-                    election.status = ElectionStatus::Cancelled;
-                }
-            }
-            (TallyStatus::Incomplete | TallyStatus::Final, None) => {
-                return Err(ReconstitutionError::InvalidTallyState);
-            }
-        }
-
-        election.status = snapshot.status;
-
-        Ok(election)
-    }
-}
+#[path = "election/reconstitution.rs"]
+mod reconstitution;
