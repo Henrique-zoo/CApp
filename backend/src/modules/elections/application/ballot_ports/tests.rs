@@ -137,7 +137,7 @@ fn record_recovery_does_not_require_a_new_acceptance_after_closure() {
             *election.current_period().starts_at(),
         )
         .unwrap();
-    let record = RecordedBallot::try_new(participation, None).unwrap();
+    let record = RecordedBallot::try_new(participation, None, None).unwrap();
     election
         .close_identified(
             *election.current_period().ends_at(),
@@ -172,7 +172,7 @@ fn record_recovery_rejects_another_account_operation_or_payload() {
             *election.current_period().starts_at(),
         )
         .unwrap();
-    let record = RecordedBallot::try_new(participation, None).unwrap();
+    let record = RecordedBallot::try_new(participation, None, None).unwrap();
     assert_eq!(
         record.recover(context(election.id(), 99, 3).participation_key(), &ballot),
         Err(ParticipationError::IdentityMismatch)

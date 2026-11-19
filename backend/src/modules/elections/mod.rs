@@ -40,6 +40,11 @@
 //! após o fim; não precisa da chave privada ou de nova elegibilidade. O repositório
 //! de #381 continua responsável por unicidade concorrente e commit conjunto de
 //! participação, cédula, quadro e recibo, conforme [`application::ballot_ports`].
+//! [`domain::entities::board_entry::BoardEntry`] conserva a cédula original e sua
+//! posição encadeada. O aceite confidencial exige registro e recibo com a mesma
+//! cédula, índice e digest do registro; a identificada dispensa ambos. O modelo
+//! confere referências, enquanto o codec confere digests/assinaturas e o store
+//! confirma o conjunto atomicamente. Repetições devolvem as evidências originais.
 //!
 //! `VerifiedManifest`, `VerifiedBallot` e `VerifiedTally` representam verificações
 //! efetuadas nas portas de #378–#380/#139. Seus construtores de evidência
