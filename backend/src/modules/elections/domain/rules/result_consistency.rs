@@ -23,6 +23,9 @@ pub enum CountConsistency {
 /// Erros estruturais encontrados nas contagens eleitorais.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidCountConsistency {
+    /// Um total publicado está fora do intervalo da fotografia final.
+    #[error("Uma contagem excede o número de participantes")]
+    CountOutOfRange,
     /// A quantidade de contagens difere da quantidade de opções do manifesto.
     #[error("A quantidade de contagens difere da quantidade de opções do manifesto")]
     OptionCountMismatch,
@@ -51,6 +54,9 @@ pub fn validate_result_counts(
     for (option, count) in options.iter().zip(counts.iter()) {
         if option.id() != count.option_id() {
             return Err(InvalidCountConsistency::OptionOrderMismatch);
+        }
+        if count.count().value() > voter_count.value() {
+            return Err(InvalidCountConsistency::CountOutOfRange);
         }
     }
 

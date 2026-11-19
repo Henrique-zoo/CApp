@@ -1,3 +1,5 @@
+//! Regressões do agregado com evidências criptográficas sintéticas e relógio controlado.
+
 use super::*;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
@@ -69,7 +71,7 @@ fn valid_manifest(
             role,
             authority_slate_id,
             Base64Url::try_new(encoded_key(signing_key)).unwrap(),
-            BigUInt::try_from_decimal("123").unwrap(),
+            BigUInt::try_from_decimal((id_value + 100).to_string()).unwrap(),
             KeyProof::new(
                 BigUInt::try_from_decimal("456").unwrap(),
                 BigUInt::try_from_decimal("789").unwrap(),
@@ -101,12 +103,18 @@ fn election_with_manifest() -> Election {
     let center_id = academic_center_id();
     let origin_hash = fingerprint('a');
 
-    let mut election =
-        Election::try_new(id, center_id, calendar_origin(id), origin_hash.clone()).unwrap();
+    let mut election = Election::try_new(
+        id,
+        center_id,
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
+        calendar_origin(id),
+        origin_hash.clone(),
+    )
+    .unwrap();
 
     let manifest = valid_manifest(id, center_id, origin_hash);
     election
-        .publish_manifest(manifest, fingerprint('b'))
+        .publish_manifest(crate::modules::elections::domain::entities::manifest::VerifiedManifest::from_verified_parts(manifest, fingerprint('b')))
         .unwrap();
 
     election
@@ -168,6 +176,7 @@ fn cancels_election_during_preparation() {
     let mut election = Election::try_new(
         id,
         academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
         calendar_origin(id),
         fingerprint('a'),
     )
@@ -296,6 +305,7 @@ fn cancels_closed_election_preserving_closure() {
             closed_at,
             fingerprint('c'),
             VoterCount::try_new(10).unwrap(),
+            fingerprint('d'),
         )
         .unwrap();
 
@@ -330,6 +340,7 @@ fn rejects_closed_election_cancellation_with_different_head_hash() {
             closed_at,
             fingerprint('c'),
             VoterCount::try_new(10).unwrap(),
+            fingerprint('d'),
         )
         .unwrap();
 
@@ -364,6 +375,7 @@ fn rejects_closed_election_cancellation_with_different_voter_count() {
             closed_at,
             fingerprint('c'),
             VoterCount::try_new(10).unwrap(),
+            fingerprint('d'),
         )
         .unwrap();
 
@@ -398,6 +410,7 @@ fn rejects_cancellation_before_existing_closure() {
             closed_at,
             fingerprint('c'),
             VoterCount::try_new(10).unwrap(),
+            fingerprint('d'),
         )
         .unwrap();
 
@@ -426,6 +439,7 @@ fn repeated_cancellation_returns_existing_record_without_replacing_it() {
     let mut election = Election::try_new(
         id,
         academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
         calendar_origin(id),
         fingerprint('a'),
     )
@@ -439,7 +453,7 @@ fn repeated_cancellation_returns_existing_record_without_replacing_it() {
             actor,
             first_time,
             None,
-            VoterCount::try_new(3).unwrap(),
+            VoterCount::try_new(0).unwrap(),
             "Primeiro motivo",
         )
         .unwrap();
@@ -458,7 +472,7 @@ fn repeated_cancellation_returns_existing_record_without_replacing_it() {
     assert_eq!(result, Ok(&original));
     assert_eq!(election.cancellation(), Some(&original));
     assert_eq!(original.reason(), "Primeiro motivo");
-    assert_eq!(original.voter_count(), VoterCount::try_new(3).unwrap());
+    assert_eq!(original.voter_count(), VoterCount::try_new(0).unwrap());
     assert_eq!(original.head_hash(), None);
 }
 
@@ -468,6 +482,7 @@ fn rejects_cancellation_with_empty_reason() {
     let mut election = Election::try_new(
         id,
         academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
         calendar_origin(id),
         fingerprint('a'),
     )
@@ -498,6 +513,7 @@ fn rejects_cancellation_with_reason_longer_than_2000_characters() {
     let mut election = Election::try_new(
         id,
         academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
         calendar_origin(id),
         fingerprint('a'),
     )
@@ -528,6 +544,7 @@ fn rejects_cancellation_with_fractional_seconds() {
     let mut election = Election::try_new(
         id,
         academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
         calendar_origin(id),
         fingerprint('a'),
     )
@@ -562,7 +579,7 @@ fn rejects_closing_before_deadline() {
     let closed_at = Utc.with_ymd_and_hms(2026, 11, 20, 17, 59, 59).unwrap();
     let voter_count = VoterCount::try_new(10).unwrap();
 
-    let result = election.close(closed_at, fingerprint('c'), voter_count);
+    let result = election.close(closed_at, fingerprint('c'), voter_count, fingerprint('d'));
 
     assert_eq!(result, Err(ElectionTransitionError::ClosingBeforeDeadline));
     assert_eq!(election.status(), ElectionStatus::Open);
@@ -579,16 +596,16 @@ fn closes_election_at_exact_deadline() {
     let voter_count = VoterCount::try_new(10).unwrap();
 
     let closure = election
-        .close(closed_at, fingerprint('c'), voter_count)
+        .close(closed_at, fingerprint('c'), voter_count, fingerprint('d'))
         .unwrap()
         .clone();
 
     assert_eq!(election.status(), ElectionStatus::Closed);
     assert_eq!(election.tally_status(), TallyStatus::Pending);
     assert_eq!(closure.election_id(), election.id());
-    assert_eq!(closure.manifest_hash(), &fingerprint('b'));
+    assert_eq!(closure.manifest_hash(), Some(&fingerprint('b')));
     assert_eq!(closure.schedule_hash(), &fingerprint('a'));
-    assert_eq!(closure.head_hash(), &fingerprint('c'));
+    assert_eq!(closure.head_hash(), Some(&fingerprint('c')));
     assert_eq!(closure.voter_count(), voter_count);
     assert_eq!(closure.closed_at(), &closed_at);
     assert_eq!(election.closure(), Some(&closure));
@@ -600,7 +617,7 @@ fn rejects_closing_election_that_is_not_open() {
     let closed_at = *election.current_period().ends_at();
     let voter_count = VoterCount::try_new(10).unwrap();
 
-    let result = election.close(closed_at, fingerprint('c'), voter_count);
+    let result = election.close(closed_at, fingerprint('c'), voter_count, fingerprint('d'));
 
     assert_eq!(result, Err(ElectionTransitionError::InvalidState));
     assert_eq!(election.status(), ElectionStatus::Preparing);
@@ -620,7 +637,7 @@ fn rejects_closing_with_fractional_seconds() {
         .unwrap();
     let voter_count = VoterCount::try_new(10).unwrap();
 
-    let result = election.close(closed_at, fingerprint('c'), voter_count);
+    let result = election.close(closed_at, fingerprint('c'), voter_count, fingerprint('d'));
 
     assert_eq!(result, Err(ElectionTransitionError::SubsecondPrecision));
     assert_eq!(election.status(), ElectionStatus::Open);
@@ -637,7 +654,12 @@ fn repeated_close_returns_existing_closure_without_replacing_it() {
     let first_voter_count = VoterCount::try_new(10).unwrap();
 
     let first_closure = election
-        .close(first_closed_at, fingerprint('c'), first_voter_count)
+        .close(
+            first_closed_at,
+            fingerprint('c'),
+            first_voter_count,
+            fingerprint('d'),
+        )
         .unwrap()
         .clone();
 
@@ -645,7 +667,12 @@ fn repeated_close_returns_existing_closure_without_replacing_it() {
     let second_voter_count = VoterCount::try_new(20).unwrap();
 
     let second_closure = election
-        .close(second_closed_at, fingerprint('d'), second_voter_count)
+        .close(
+            second_closed_at,
+            fingerprint('d'),
+            second_voter_count,
+            fingerprint('d'),
+        )
         .unwrap();
 
     assert_eq!(second_closure, &first_closure);
@@ -694,6 +721,7 @@ fn rejects_opening_without_published_manifest() {
     let mut election = Election::try_new(
         id,
         academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
         calendar_origin(id),
         fingerprint('a'),
     )
@@ -741,7 +769,14 @@ fn creates_election_in_preparing_state() {
     let origin = calendar_origin(id);
     let origin_hash = fingerprint('a');
 
-    let election = Election::try_new(id, center_id, origin.clone(), origin_hash.clone()).unwrap();
+    let election = Election::try_new(
+        id,
+        center_id,
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
+        origin.clone(),
+        origin_hash.clone(),
+    )
+    .unwrap();
 
     assert_eq!(election.id(), id);
     assert_eq!(election.academic_center_id(), center_id);
@@ -762,7 +797,13 @@ fn rejects_calendar_origin_from_another_election() {
     let another_id = election_id(2);
     let origin = calendar_origin(another_id);
 
-    let result = Election::try_new(id, academic_center_id(), origin, fingerprint('a'));
+    let result = Election::try_new(
+        id,
+        academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
+        origin,
+        fingerprint('a'),
+    );
 
     assert_eq!(result, Err(InvalidElection::CalendarOriginElectionMismatch));
 }
@@ -775,6 +816,7 @@ fn preserves_initial_calendar_hash_as_current_schedule_hash() {
     let election = Election::try_new(
         id,
         academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
         calendar_origin(id),
         origin_hash.clone(),
     )
@@ -793,6 +835,7 @@ fn preparing_accepts_schedule_change_before_manifest() {
     let mut election = Election::try_new(
         id,
         academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
         calendar_origin(id),
         initial_hash.clone(),
     )
@@ -825,6 +868,7 @@ fn preparing_accepts_multiple_schedule_changes_with_new_start_dates() {
     let mut election = Election::try_new(
         id,
         academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
         calendar_origin(id),
         first_hash.clone(),
     )
@@ -886,8 +930,14 @@ fn preparing_rejects_schedule_change_with_wrong_previous_hash() {
     let id = election_id(1);
     let initial_hash = fingerprint('a');
 
-    let mut election =
-        Election::try_new(id, academic_center_id(), calendar_origin(id), initial_hash).unwrap();
+    let mut election = Election::try_new(
+        id,
+        academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
+        calendar_origin(id),
+        initial_hash,
+    )
+    .unwrap();
 
     let new_period = period_with(
         Utc.with_ymd_and_hms(2026, 11, 21, 10, 0, 0).unwrap(),
@@ -915,6 +965,7 @@ fn preparing_rejects_non_sequential_schedule_revision() {
     let mut election = Election::try_new(
         id,
         academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
         calendar_origin(id),
         initial_hash.clone(),
     )
@@ -945,6 +996,7 @@ fn preparing_rejects_schedule_change_without_extending_end() {
     let mut election = Election::try_new(
         id,
         academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
         calendar_origin(id),
         initial_hash.clone(),
     )
@@ -1127,6 +1179,7 @@ fn closed_election() -> (Election, Fingerprint) {
             closed_at,
             fingerprint('c'),
             VoterCount::try_new(10).unwrap(),
+            fingerprint('d'),
         )
         .unwrap();
 
@@ -1180,7 +1233,7 @@ fn publishes_valid_tally_and_marks_it_final() {
     let result = valid_tally(closure_hash.clone());
 
     let published = election
-        .publish_tally(result.clone(), &closure_hash)
+        .publish_tally(verified_tally(result.clone(), &closure_hash))
         .unwrap();
 
     assert_eq!(published, &result);
@@ -1204,7 +1257,7 @@ fn publishes_incomplete_tally_with_authority_from_manifest() {
     );
 
     election
-        .publish_tally(result.clone(), &closure_hash)
+        .publish_tally(verified_tally(result.clone(), &closure_hash))
         .unwrap();
 
     assert_eq!(election.tally_status(), TallyStatus::Incomplete);
@@ -1225,7 +1278,7 @@ fn rejects_incomplete_tally_with_authority_outside_manifest() {
         closure_hash.clone(),
     );
 
-    let publication = election.publish_tally(result, &closure_hash);
+    let publication = election.publish_tally(verified_tally(result, &closure_hash));
 
     assert_eq!(
         publication,
@@ -1249,12 +1302,14 @@ fn updates_incomplete_tally_to_valid_final_tally() {
         closure_hash.clone(),
     );
 
-    election.publish_tally(incomplete, &closure_hash).unwrap();
+    election
+        .publish_tally(verified_tally(incomplete, &closure_hash))
+        .unwrap();
 
     let valid = valid_tally(closure_hash.clone());
 
     election
-        .publish_tally(valid.clone(), &closure_hash)
+        .publish_tally(verified_tally(valid.clone(), &closure_hash))
         .unwrap();
 
     assert_eq!(election.tally_status(), TallyStatus::Final);
@@ -1274,7 +1329,7 @@ fn rejects_valid_tally_when_counts_do_not_sum_to_voter_count() {
         closure_hash.clone(),
     );
 
-    let publication = election.publish_tally(result, &closure_hash);
+    let publication = election.publish_tally(verified_tally(result, &closure_hash));
 
     assert_eq!(
         publication,
@@ -1289,7 +1344,7 @@ fn rejects_tally_with_wrong_closure_hash() {
     let (mut election, closure_hash) = closed_election();
     let result = valid_tally(fingerprint('f'));
 
-    let publication = election.publish_tally(result, &closure_hash);
+    let publication = election.publish_tally(verified_tally(result, &closure_hash));
 
     assert_eq!(
         publication,
@@ -1311,7 +1366,7 @@ fn rejects_tally_with_wrong_voter_count() {
         closure_hash.clone(),
     );
 
-    let publication = election.publish_tally(result, &closure_hash);
+    let publication = election.publish_tally(verified_tally(result, &closure_hash));
 
     assert_eq!(
         publication,
@@ -1334,7 +1389,7 @@ fn accepts_annulled_tally_when_counts_sum_does_not_match() {
     );
 
     election
-        .publish_tally(result.clone(), &closure_hash)
+        .publish_tally(verified_tally(result.clone(), &closure_hash))
         .unwrap();
 
     assert_eq!(election.tally_status(), TallyStatus::Final);
@@ -1347,11 +1402,11 @@ fn publishes_same_final_tally_idempotently() {
     let result = valid_tally(closure_hash.clone());
 
     election
-        .publish_tally(result.clone(), &closure_hash)
+        .publish_tally(verified_tally(result.clone(), &closure_hash))
         .unwrap();
 
     let repeated = election
-        .publish_tally(result.clone(), &closure_hash)
+        .publish_tally(verified_tally(result.clone(), &closure_hash))
         .unwrap();
 
     assert_eq!(repeated, &result);
@@ -1365,7 +1420,7 @@ fn rejects_replacing_final_tally_with_different_result() {
     let first_result = valid_tally(closure_hash.clone());
 
     election
-        .publish_tally(first_result.clone(), &closure_hash)
+        .publish_tally(verified_tally(first_result.clone(), &closure_hash))
         .unwrap();
 
     let different_result = build_tally_result(
@@ -1377,7 +1432,7 @@ fn rejects_replacing_final_tally_with_different_result() {
         closure_hash.clone(),
     );
 
-    let publication = election.publish_tally(different_result, &closure_hash);
+    let publication = election.publish_tally(verified_tally(different_result, &closure_hash));
 
     assert_eq!(publication, Err(ElectionTransitionError::TallyAlreadyFinal));
     assert_eq!(election.tally_result(), Some(&first_result));
@@ -1389,6 +1444,7 @@ fn preparing_cancellation_snapshot_round_trips() {
     let mut election = Election::try_new(
         id,
         academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
         calendar_origin(id),
         fingerprint('a'),
     )
@@ -1460,6 +1516,7 @@ fn closed_cancellation_snapshot_round_trips_preserving_closure() {
             closed_at,
             fingerprint('c'),
             VoterCount::try_new(10).unwrap(),
+            fingerprint('d'),
         )
         .unwrap();
 
@@ -1501,7 +1558,7 @@ fn incomplete_tally_snapshot_round_trips() {
     );
 
     election
-        .publish_tally(result.clone(), &closure_hash)
+        .publish_tally(verified_tally(result.clone(), &closure_hash))
         .unwrap();
 
     let snapshot = election.to_snapshot();
@@ -1514,15 +1571,17 @@ fn incomplete_tally_snapshot_round_trips() {
 }
 
 #[test]
-fn rejects_snapshot_with_manifest_without_hash() {
+fn rejects_snapshot_with_configuration_from_another_modality() {
     let election = election_with_manifest();
     let mut snapshot = election.to_snapshot();
 
-    snapshot.manifest_hash = None;
+    snapshot.configuration = Some(ElectionConfiguration::Identified(
+        ElectionOptions::try_new(election.options().unwrap().to_vec()).unwrap(),
+    ));
 
     assert_eq!(
         Election::try_reconstitute(snapshot),
-        Err(super::super::election_snapshot::ElectionReconstitutionError::ManifestHashMismatch)
+        Err(super::super::election_snapshot::ElectionReconstitutionError::InvalidConfiguration)
     );
 }
 
@@ -1548,7 +1607,7 @@ fn rejects_preparing_snapshot_with_opening_instant() {
 
     assert_eq!(
         Election::try_reconstitute(snapshot),
-        Err(super::super::election_snapshot::ElectionReconstitutionError::InvalidLifecycleState)
+        Err(super::super::election_snapshot::ElectionReconstitutionError::InvalidOpening)
     );
 }
 
@@ -1571,6 +1630,7 @@ fn rejects_snapshot_with_cancellation_from_another_election() {
     let mut election = Election::try_new(
         id,
         academic_center_id(),
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
         calendar_origin(id),
         fingerprint('a'),
     )
@@ -1615,45 +1675,28 @@ fn preparing_snapshot_round_trips_without_schedule_changes() {
 }
 
 #[test]
-fn preparing_schedule_change_after_future_opening_time_round_trips() {
-    let id = election_id(1);
+fn rejects_opening_before_last_preparation_change() {
     let mut election = election_with_manifest();
-
-    let new_period = period_with(
-        Utc.with_ymd_and_hms(2026, 11, 21, 10, 0, 0).unwrap(),
-        Utc.with_ymd_and_hms(2026, 11, 22, 20, 0, 0).unwrap(),
-    );
-
-    let changed_at = Utc.with_ymd_and_hms(2026, 11, 21, 12, 0, 0).unwrap();
-
     let change = schedule_change_at(
-        id,
+        election.id(),
         1,
         Some(fingerprint('b')),
         fingerprint('a'),
-        new_period,
-        changed_at,
+        period_with(
+            Utc.with_ymd_and_hms(2026, 11, 21, 10, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 11, 22, 20, 0, 0).unwrap(),
+        ),
+        Utc.with_ymd_and_hms(2026, 11, 21, 12, 0, 0).unwrap(),
     );
-
     election.change_schedule(change, fingerprint('c')).unwrap();
-
-    let opened_at = Utc.with_ymd_and_hms(2026, 11, 21, 11, 0, 0).unwrap();
-    election.open(opened_at).unwrap();
-
-    let snapshot = election.to_snapshot();
-
-    assert!(!snapshot.schedule_changes[0].was_open);
-
-    let restored = Election::try_reconstitute(snapshot).unwrap();
-
-    assert_eq!(restored, election);
-    assert_eq!(restored.status(), ElectionStatus::Open);
-    assert_eq!(restored.opened_at(), Some(opened_at));
-    assert!(!restored.schedule_changes()[0].was_open);
+    assert_eq!(
+        election.open(Utc.with_ymd_and_hms(2026, 11, 21, 11, 0, 0).unwrap()),
+        Err(ElectionTransitionError::NonChronologicalOperation)
+    );
 }
 
 #[test]
-fn open_schedule_change_round_trips_with_was_open_true() {
+fn open_schedule_change_round_trips_with_opening_revision() {
     let id = election_id(1);
     let mut election = election_with_manifest();
 
@@ -1680,13 +1723,13 @@ fn open_schedule_change_round_trips_with_was_open_true() {
 
     let snapshot = election.to_snapshot();
 
-    assert!(snapshot.schedule_changes[0].was_open);
+    assert_eq!(snapshot.opening_schedule_revision, Some(0));
 
     let restored = Election::try_reconstitute(snapshot).unwrap();
 
     assert_eq!(restored, election);
     assert_eq!(restored.status(), ElectionStatus::Open);
-    assert!(restored.schedule_changes()[0].was_open);
+    assert_eq!(restored.to_snapshot().opening_schedule_revision, Some(0));
 }
 
 #[test]
@@ -1694,7 +1737,9 @@ fn closed_election_with_final_tally_round_trips() {
     let (mut election, closure_hash) = closed_election();
     let result = valid_tally(closure_hash.clone());
 
-    election.publish_tally(result, &closure_hash).unwrap();
+    election
+        .publish_tally(verified_tally(result, &closure_hash))
+        .unwrap();
 
     let snapshot = election.to_snapshot();
     let restored = Election::try_reconstitute(snapshot).unwrap();
@@ -1704,4 +1749,31 @@ fn closed_election_with_final_tally_round_trips() {
     assert_eq!(restored.tally_status(), TallyStatus::Final);
     assert!(restored.closure().is_some());
     assert!(restored.tally_result().is_some());
+}
+
+/// Simula a porta criptográfica; os números não representam uma verificação real.
+fn verified_tally(result: ElectionResult, closure_hash: &Fingerprint) -> VerifiedTally {
+    use crate::modules::elections::domain::entities::{ballot::Ciphertext, tally::Aggregate};
+    let authorities = [31, 32, 33]
+        .into_iter()
+        .map(|id| AuthorityId::try_from_uuid(Uuid::from_u128(id)).unwrap())
+        .filter(|id| !result.missing_authorities().contains(id))
+        .collect();
+    let aggregate = Aggregate::try_new(
+        election_id(1),
+        fingerprint('b'),
+        closure_hash.clone(),
+        [30, 0]
+            .into_iter()
+            .map(|id| {
+                Ciphertext::new(
+                    OptionId::from_uuid(Uuid::from_u128(id)),
+                    BigUInt::try_from_decimal("1").unwrap(),
+                    BigUInt::try_from_decimal("1").unwrap(),
+                )
+            })
+            .collect(),
+    )
+    .unwrap();
+    VerifiedTally::from_verified_parts(result, aggregate, fingerprint('e'), authorities)
 }

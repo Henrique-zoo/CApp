@@ -56,7 +56,14 @@ fn sample_election() -> Election {
     let origin = CalendarOrigin::new(election_id, period);
     let origin_hash = Fingerprint::try_from_hex("a".repeat(64)).unwrap();
 
-    Election::try_new(election_id, center_id, origin, origin_hash).unwrap()
+    Election::try_new(
+        election_id,
+        center_id,
+        crate::modules::elections::domain::value_objects::modality::ElectionModality::Confidential,
+        origin,
+        origin_hash,
+    )
+    .unwrap()
 }
 
 #[tokio::test]

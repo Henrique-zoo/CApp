@@ -12,7 +12,7 @@ use crate::modules::{
         },
         domain::{
             entities::election::Election,
-            value_objects::identifiers::{ElectionId, VoterId},
+            value_objects::identifiers::{AccountId, ElectionId, VoterId},
         },
     },
     identity::application::services::authentication::AuthenticatedIdentity,
@@ -25,7 +25,7 @@ use crate::modules::{
 /// sem permitir correlação pública entre eleições.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuthenticatedElectorContext {
-    user_id: uuid::Uuid,
+    user_id: AccountId,
     voter_id: VoterId,
     election_id: ElectionId,
 }
@@ -40,7 +40,7 @@ impl AuthenticatedElectorContext {
         reason = "A implementação concreta de AuthenticatedElector será adicionada em etapa posterior; o construtor permanece restrito ao crate para proteger a criação do contexto autenticado."
     )]
     pub(crate) const fn new(
-        user_id: uuid::Uuid,
+        user_id: AccountId,
         voter_id: VoterId,
         election_id: ElectionId,
     ) -> Self {
@@ -52,7 +52,7 @@ impl AuthenticatedElectorContext {
     }
 
     /// Retorna o identificador interno da conta autenticada.
-    pub const fn user_id(&self) -> uuid::Uuid {
+    pub const fn user_id(&self) -> AccountId {
         self.user_id
     }
 
