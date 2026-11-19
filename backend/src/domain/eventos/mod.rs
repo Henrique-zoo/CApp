@@ -29,6 +29,6 @@ mod tests {
         )
         .expect("deve criar evento válido via reexportação");
 
-        assert_eq!(event.status, EventPublicationStatus::Published);
+        assert_eq!(event.status(), EventPublicationStatus::Published);
     }
 }
