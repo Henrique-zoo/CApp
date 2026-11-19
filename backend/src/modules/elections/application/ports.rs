@@ -35,6 +35,10 @@ impl AuthenticatedElectorContext {
     ///
     /// Os identificadores devem ser obtidos de fontes confiáveis.
     /// Nunca devem ser aceitos diretamente do corpo da requisição.
+    #[allow(
+        dead_code,
+        reason = "A implementação concreta de AuthenticatedElector será adicionada em etapa posterior; o construtor permanece restrito ao crate para proteger a criação do contexto autenticado."
+    )]
     pub(crate) const fn new(
         user_id: uuid::Uuid,
         voter_id: VoterId,
@@ -93,6 +97,10 @@ pub struct VersionedElection {
 
 impl VersionedElection {
     /// Cria uma fotografia versionada recuperada pelo adaptador.
+    #[allow(
+        dead_code,
+        reason = "A implementação de ElectionReader de produção será adicionada em etapa posterior; atualmente o construtor é utilizado pelo teste do caso de uso."
+    )]
     pub(crate) const fn new(election: Election, version: u64) -> Self {
         Self { election, version }
     }
