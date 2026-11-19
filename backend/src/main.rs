@@ -7,6 +7,9 @@
 //!   e sem espaços em branco. Não é verificada a existência externa do projeto.
 //! - `FIREBASE_PROJECT_NUMBER`: número do projeto usado no emissor/audiência App Check.
 //! - `FIREBASE_APP_CHECK_APP_IDS`: App IDs permitidos, separados por vírgula.
+//! - `HTTP_CONNECT_TIMEOUT_SECS`: timeout de conexão em segundos para integrações HTTP externas (padrão: 3).
+//! - `HTTP_REQUEST_TIMEOUT_SECS`: timeout total por requisição em segundos para integrações HTTP externas (padrão: 10).
+//! - `HTTP_MAX_RETRIES`: quantidade máxima de retentativas para falhas transitórias em integrações externas (padrão: 2).
 //! - `RUST_LOG`: filtro opcional do `tracing`; ausente ou inválido usa `info`.
 //! - Endereço HTTP: `0.0.0.0:3000`, fixo nesta implementação.
 //!
@@ -22,10 +25,7 @@
 //! router da biblioteca. Não há tratamento próprio de sinais ou configuração
 //! de encerramento gracioso nesta inicialização.
 
-use std::{
-    env::{self, VarError},
-    time::Duration,
-};
+use std::env::{self, VarError};
 
 use anyhow::Context;
 use backend::{
@@ -71,6 +71,8 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    let config = backend::config::Config::from_env().context("Configuração inválida")?;
+
     let db_url = env::var("DATABASE_URL").map_err(|e| match e {
         VarError::NotPresent => anyhow::anyhow!(e).context(
             "DATABASE_URL is not set or contains invalid characters ('=' or '\\0') in its name.",
@@ -80,22 +82,21 @@ async fn main() -> anyhow::Result<()> {
         }
     })?;
 
-    let http = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(3))
-        .timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
+    let http = config
+        .http
+        .build_client()
         .context("Não foi possível construir o cliente HTTP")?;
 
-    let firebase = FirebaseTokenVerifier::new(
+    let firebase = FirebaseTokenVerifier::with_config(
         env::var("FIREBASE_PROJECT_ID")
             .context("FIREBASE_PROJECT_ID não está definida ou é inválida")?,
         http.clone(),
+        config.http.clone(),
     )?;
 
-    let microsoft = MicrosoftGraphClient::new(http.clone());
+    let microsoft = MicrosoftGraphClient::with_config(http.clone(), config.http.clone());
 
-    let app_check = AppCheckVerifier::new(
+    let app_check = AppCheckVerifier::with_config(
         env::var("FIREBASE_PROJECT_NUMBER")
             .context("FIREBASE_PROJECT_NUMBER não está definida ou é inválida")?,
         env::var("FIREBASE_APP_CHECK_APP_IDS")
@@ -104,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
             .map(|id| id.trim().to_owned())
             .collect(),
         http.clone(),
+        config.http.clone(),
     )?;
     let clients = Clients::new(firebase, microsoft, app_check);
 

@@ -42,6 +42,11 @@ use reqwest::{
 };
 use tokio::sync::{Mutex, RwLock};
 
+use crate::config::{
+    HttpConfig, is_permanent_client_error, is_retryable_error, is_retryable_status,
+    parse_retry_after,
+};
+
 const REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 
 type Keys = HashMap<String, Arc<DecodingKey>>;
@@ -74,6 +79,7 @@ pub(super) struct JwksCache {
     http: Client,
     endpoint: String,
     policy: CachePolicy,
+    http_config: HttpConfig,
 
     cache: Arc<RwLock<KeyCache>>,
     refresh_lock: Arc<Mutex<()>>,
@@ -109,16 +115,26 @@ impl KeyCache {
 }
 
 impl JwksCache {
-    /// Recebe uma origem confiável escolhida pelo adaptador e um cliente reutilizável.
-    /// O cliente de produção deve recusar redirecionamentos. Cada busca tem timeout
-    /// de cinco segundos; não aceita um endereço retirado do cabeçalho de um JWT.
+    /// Recebe uma origem confiável escolhida pelo adaptador e um cliente reutilizável com timeouts padrão.
+    #[allow(dead_code)]
     pub(super) fn new(http: Client, endpoint: String, policy: CachePolicy) -> Self {
+        Self::with_config(http, endpoint, policy, HttpConfig::default())
+    }
+
+    /// Recebe uma origem confiável, cliente HTTP e configuração customizada de timeouts e retentativas.
+    pub(super) fn with_config(
+        http: Client,
+        endpoint: String,
+        policy: CachePolicy,
+        http_config: HttpConfig,
+    ) -> Self {
         let now = Instant::now();
 
         Self {
             http,
             endpoint,
             policy,
+            http_config,
             cache: Arc::new(RwLock::new(KeyCache {
                 keys: Keys::new(),
                 valid_until: now,
@@ -182,16 +198,68 @@ impl JwksCache {
     /// Prepara um conjunto completo antes de publicá-lo; resposta inválida não
     /// modifica o cache. Entradas incompatíveis são ignoradas e duplicatas de
     /// chaves utilizáveis são rejeitadas para evitar escolha dependente da ordem.
+    ///
+    /// Aplica política de retentativa segura para falhas transitórias (429, 502, 503, 504,
+    /// timeouts e falhas de transporte), rejeitando erros permanentes de cliente sem retentativa.
     async fn fetch_keys(&self) -> Result<(Keys, Duration), JwksError> {
-        let response = self
-            .http
-            .get(&self.endpoint)
-            .timeout(Duration::from_secs(5))
-            .send()
-            .await
-            .map_err(unavailable)?
-            .error_for_status()
-            .map_err(unavailable)?;
+        let mut retries = 0;
+
+        let response = loop {
+            let request = self
+                .http
+                .get(&self.endpoint)
+                .timeout(self.http_config.request_timeout);
+
+            match request.send().await {
+                Ok(response) => {
+                    let status = response.status();
+
+                    if is_permanent_client_error(status) {
+                        return Err(unavailable(format!(
+                            "JWKS endpoint retornou erro permanente do cliente: {status}"
+                        )));
+                    }
+
+                    if is_retryable_status(status) && retries < self.http_config.max_retries {
+                        retries += 1;
+                        let retry_after = parse_retry_after(response.headers());
+                        let delay = self.http_config.compute_backoff(retries, retry_after);
+                        tracing::warn!(
+                            %status,
+                            retries,
+                            delay_ms = delay.as_millis(),
+                            "Falha transitória ao buscar JWKS; aguardando retentativa"
+                        );
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+
+                    if !status.is_success() {
+                        return Err(unavailable(format!(
+                            "JWKS endpoint retornou status não esperado: {status}"
+                        )));
+                    }
+
+                    break response;
+                }
+                Err(error) => {
+                    if is_retryable_error(&error) && retries < self.http_config.max_retries {
+                        retries += 1;
+                        let delay = self.http_config.compute_backoff(retries, None);
+                        tracing::warn!(
+                            timeout = error.is_timeout(),
+                            retries,
+                            delay_ms = delay.as_millis(),
+                            "Falha de transporte/timeout ao buscar JWKS; aguardando retentativa"
+                        );
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+
+                    return Err(unavailable(error));
+                }
+            }
+        };
 
         let received_at = Instant::now();
         let ttl = cache_ttl(response.headers(), self.policy);
