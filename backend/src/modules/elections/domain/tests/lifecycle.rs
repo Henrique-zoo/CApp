@@ -18,7 +18,7 @@ fn identified_lifecycle_needs_no_confidential_artifacts() {
     )
     .unwrap();
     election
-        .publish_tally(VerifiedTally::identified(result))
+        .publish_tally(VerifiedTally::try_identified(result).unwrap())
         .unwrap();
     assert_eq!(election.result_status(), Some(ResultStatus::Valid));
     assert_eq!(election.tally_status(), TallyStatus::Final);
@@ -114,7 +114,7 @@ fn identified_count_mismatch_annuls_and_zero_votes_are_consistent() {
         )
         .unwrap();
         election
-            .publish_tally(VerifiedTally::identified(result))
+            .publish_tally(VerifiedTally::try_identified(result).unwrap())
             .unwrap();
         assert_eq!(election.result_status(), Some(expected));
     }
@@ -260,7 +260,7 @@ fn result_cannot_redefine_the_independent_closure_hash() {
     )
     .unwrap();
     assert_eq!(
-        election.publish_tally(VerifiedTally::identified(result)),
+        election.publish_tally(VerifiedTally::try_identified(result).unwrap()),
         Err(ElectionTransitionError::TallyClosureMismatch)
     );
     let mut snapshot = election.to_snapshot();
@@ -418,7 +418,7 @@ fn final_result_blocks_cancellation_and_any_reopening() {
     for mode in [ElectionModality::Identified, ElectionModality::Confidential] {
         let mut election = closed(mode, 2);
         let tally = match mode {
-            ElectionModality::Identified => VerifiedTally::identified(
+            ElectionModality::Identified => VerifiedTally::try_identified(
                 ElectionResult::try_identified(
                     eid(),
                     fp('d'),
@@ -426,7 +426,8 @@ fn final_result_blocks_cancellation_and_any_reopening() {
                     counts(1, 1),
                 )
                 .unwrap(),
-            ),
+            )
+            .unwrap(),
             ElectionModality::Confidential => confidential_tally(
                 &election,
                 ResultStatus::Valid,

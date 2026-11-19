@@ -6,11 +6,12 @@
 
 use super::{
     ballot::{Ciphertext, InvalidBallot, validate_ciphertexts},
-    result::ElectionResult,
+    result::{ElectionResult, ResultStatus},
 };
 use crate::modules::elections::domain::value_objects::{
     fingerprint::Fingerprint,
     identifiers::{AuthorityId, ElectionId},
+    modality::ElectionModality,
 };
 
 /// Agregado público vinculado a uma única fotografia de encerramento.
@@ -63,13 +64,24 @@ impl Aggregate {
 ///
 /// Não prova validade individual das cédulas. `valid` significa apenas contagem
 /// consistente sob as premissas aprovadas. Identificada não possui agregado nem
-/// contribuições criptográficas e usa [`Self::identified`].
+/// contribuições criptográficas e usa [`Self::try_identified`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedTally {
     result: ElectionResult,
     aggregate: Option<Aggregate>,
     aggregate_hash: Option<Fingerprint>,
     contributing_authorities: Vec<AuthorityId>,
+}
+
+/// Recusa ao tratar evidência confidencial ou cancelamento como contagem identificada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidIdentifiedTally {
+    /// A contagem confidencial precisa das verificações de agregado/contribuições.
+    #[error("Resultado confidencial exige evidências criptográficas")]
+    ConfidentialResult,
+    /// Cancelamento administrativo não constitui uma apuração.
+    #[error("Cancelamento administrativo não é uma contagem")]
+    AdministrativeCancellation,
 }
 
 impl VerifiedTally {
@@ -91,14 +103,23 @@ impl VerifiedTally {
             contributing_authorities,
         }
     }
-    /// Encapsula contagem identificada; o agregado ainda confere modalidade e fotografia.
-    pub fn identified(result: ElectionResult) -> Self {
-        Self {
+    /// Encapsula somente contagem identificada, sem dispensar a fotografia final.
+    ///
+    /// Recusa resultado confidencial ou cancelamento. O agregado continua
+    /// conferindo eleição, fotografia, ordem e consistência antes da publicação.
+    pub fn try_identified(result: ElectionResult) -> Result<Self, InvalidIdentifiedTally> {
+        if result.modality() != ElectionModality::Identified {
+            return Err(InvalidIdentifiedTally::ConfidentialResult);
+        }
+        if result.status() == ResultStatus::Cancelled {
+            return Err(InvalidIdentifiedTally::AdministrativeCancellation);
+        }
+        Ok(Self {
             result,
             aggregate: None,
             aggregate_hash: None,
             contributing_authorities: vec![],
-        }
+        })
     }
     /// Resultado contextual a publicar.
     pub const fn result(&self) -> &ElectionResult {

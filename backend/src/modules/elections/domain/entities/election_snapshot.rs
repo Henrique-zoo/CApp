@@ -32,6 +32,19 @@ pub struct AppliedScheduleChangeSnapshot {
     pub resulting_schedule_hash: Fingerprint,
 }
 
+/// Entrada não confiável de uma alteração de configuração na preparação.
+///
+/// Pertence ao armazenamento interno, não aos envelopes JSON da #377. Os
+/// manifestos públicos continuam passando pela porta de verificação antes de
+/// compor a configuração tipada; as referências são conferidas na reconstituição.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparationConfigurationChangeSnapshot {
+    /// Revisão de calendário vigente quando a configuração mudou.
+    pub after_schedule_revision: u32,
+    /// Configuração publicada, ou ausência após invalidação.
+    pub configuration: Option<ElectionConfiguration>,
+}
+
 /// Dados persistidos de um cancelamento eleitoral.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ElectionCancellationSnapshot {
@@ -64,6 +77,8 @@ pub struct ElectionSnapshot {
     pub modality: ElectionModality,
     /// Configuração pronta, quando existente.
     pub configuration: Option<ElectionConfiguration>,
+    /// Histórico ordenado de publicação e invalidação antes da abertura.
+    pub configuration_changes: Vec<PreparationConfigurationChangeSnapshot>,
     /// Estado operacional persistido.
     pub status: ElectionStatus,
     /// Situação persistida da apuração.
@@ -78,6 +93,9 @@ pub struct ElectionSnapshot {
     pub opened_at: Option<DateTime<Utc>>,
     /// Revisão vigente quando a votação foi aberta; separa preparação de prorrogação.
     pub opening_schedule_revision: Option<u32>,
+    /// Quantas alterações de configuração já estavam aplicadas na abertura.
+    /// Distingue mudanças na mesma revisão de calendário sem permitir edição posterior.
+    pub opening_configuration_count: Option<usize>,
     /// Hash do calendário atualmente vigente.
     pub current_schedule_hash: Fingerprint,
     /// Número da última revisão aplicada.
@@ -100,6 +118,10 @@ pub enum ElectionReconstitutionError {
     /// A modalidade diverge da configuração pública persistida.
     #[error("Configuração incompatível com a modalidade")]
     InvalidConfiguration,
+
+    /// As alterações de configuração não correspondem à preparação/calendário.
+    #[error("Histórico de configuração incompatível com a preparação")]
+    InvalidConfigurationHistory,
 
     /// A origem do calendário pertence a outra eleição.
     #[error("A origem do calendário pertence a outra eleição")]
