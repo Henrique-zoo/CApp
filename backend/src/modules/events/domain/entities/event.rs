@@ -181,9 +181,7 @@ pub enum EventDomainError {
     },
 
     /// O período de inscrição ainda não começou.
-    #[error(
-        "as inscrições abrem em {opens_at} (tentativa realizada em {attempted_at})"
-    )]
+    #[error("as inscrições abrem em {opens_at} (tentativa realizada em {attempted_at})")]
     RegistrationNotYetOpen {
         /// Instante de abertura das inscrições.
         opens_at: DateTime<Utc>,
@@ -1239,14 +1237,11 @@ impl Event {
 
     /// Retorna o número de vagas restantes quando o evento possui capacidade máxima.
     pub fn remaining_spots(&self, registered_count: u32) -> Option<u32> {
-        match self.capacity {
-            Some(limit) => Some(
-                u32::try_from(limit)
-                    .map(|limit| limit.saturating_sub(registered_count))
-                    .unwrap_or(0),
-            ),
-            None => None,
-        }
+        self.capacity.map(|limit| {
+            u32::try_from(limit)
+                .map(|limit| limit.saturating_sub(registered_count))
+                .unwrap_or(0)
+        })
     }
 
     /// Retorna o período estruturado do evento.
@@ -1428,7 +1423,8 @@ impl Event {
             });
         }
         if let Some(limit) = self.capacity {
-            let limit = u32::try_from(limit).map_err(|_| EventDomainError::InvalidMaxCapacity(0))?;
+            let limit =
+                u32::try_from(limit).map_err(|_| EventDomainError::InvalidMaxCapacity(0))?;
             if registered_count >= limit {
                 return Err(EventDomainError::CapacityExceeded {
                     confirmed: registered_count,
