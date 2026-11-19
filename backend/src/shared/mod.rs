@@ -1,4 +1,6 @@
-//! Espaço reservado para tipos e utilidades comuns aos módulos de negócio.
+//! Tipos e utilidades comuns aos domínios e camadas do backend CApp.
 //!
-//! Ainda não contém implementações. Erros compartilhados, paginação e outros
-//! tipos devem ser adicionados aqui quando houver um contrato comum concreto.
+//! Centraliza regras transversais de governança, conformidade com a LGPD,
+//! classificação de sensibilidade e retenção de dados sensíveis.
+
+pub mod retention;
