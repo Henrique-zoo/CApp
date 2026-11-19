@@ -17,11 +17,8 @@ use crate::modules::elections::domain::{
 /// Identificador do grupo criptográfico definido pelo protocolo v1.
 pub const ELECTION_GROUP_ID: &str = "rfc3526-modp14";
 
-/// Quantidade mínima de opções: uma chapa e a opção Nulo.
-pub const MIN_OPTIONS: usize = 2;
-
-/// Quantidade máxima de opções: 50 chapas e a opção Nulo.
-pub const MAX_OPTIONS: usize = 51;
+// Preserva o caminho público usado pelos consumidores do manifesto.
+pub use crate::modules::elections::domain::value_objects::options::{MAX_OPTIONS, MIN_OPTIONS};
 
 /// Quantidade mínima de autoridades: servidor, comissão e uma chapa.
 pub const MIN_AUTHORITIES: usize = 3;

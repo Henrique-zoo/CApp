@@ -451,6 +451,40 @@ fn confirmed_confidential_receipt_must_match_ballot_and_manifest() {
 }
 
 #[test]
+fn confidential_retry_preserves_the_exact_confirmed_receipt_after_closure() {
+    let mode = ElectionModality::Confidential;
+    let mut election = opened(mode);
+    let accepted = ballot(mode, 60, 'e', 'f');
+    let participation = Participation::try_accept(
+        &election,
+        account(50),
+        voter(40),
+        accepted.clone(),
+        at(20, 11),
+    )
+    .unwrap();
+    let key = participation.key();
+    let receipt = Receipt::try_new(eid(), fp('b'), fp('e'), 1, fp('c'), encoded("Yg")).unwrap();
+    let record = RecordedBallot::try_new(participation, Some(receipt.clone())).unwrap();
+    election
+        .close(
+            at(20, 18),
+            fp('c'),
+            VoterCount::try_new(1).unwrap(),
+            fp('d'),
+        )
+        .unwrap();
+    let recovered = record.recover(key, &accepted).unwrap();
+    assert_eq!(recovered.receipt(), Some(&receipt));
+    assert_eq!(recovered.receipt().unwrap().signature().as_str(), "Yg");
+    assert_eq!(recovered.receipt().unwrap().index(), 1);
+    assert_eq!(
+        record.recover(key, &ballot(mode, 60, 'd', 'f')),
+        Err(ParticipationError::SubmissionConflict)
+    );
+}
+
+#[test]
 fn receipt_indices_follow_profile_limits_and_identified_needs_no_secret_board() {
     for index in [0, 100001] {
         assert_eq!(

@@ -11,7 +11,11 @@ use crate::modules::{
             AuthenticatedElectorError, ClockError, ElectionReaderError, ElectionStoreError,
         },
         domain::{
-            entities::election::Election,
+            entities::{
+                ballot::VerifiedBallot,
+                election::Election,
+                participation::{Participation, ParticipationError, ParticipationKey},
+            },
             value_objects::identifiers::{AccountId, ElectionId, VoterId},
         },
     },
@@ -64,6 +68,29 @@ impl AuthenticatedElectorContext {
     /// Retorna a eleição para a qual a identidade foi resolvida.
     pub const fn election_id(&self) -> ElectionId {
         self.election_id
+    }
+
+    /// Combina os identificadores confiáveis usados na unicidade transacional.
+    pub const fn participation_key(&self) -> ParticipationKey {
+        ParticipationKey::new(self.election_id, self.user_id)
+    }
+
+    /// Prepara um novo aceite mantendo conta, eleitor público e eleição juntos.
+    ///
+    /// Recusa contexto de outra eleição antes de aplicar as regras do domínio.
+    /// A aplicação chama este método após reavaliar elegibilidade na transação.
+    /// Não grava dados nem confirma o voto; consultas de aceite anterior usam
+    /// `BallotStore::find_participation`, sem exigir nova elegibilidade.
+    pub fn prepare_participation(
+        &self,
+        election: &Election,
+        ballot: VerifiedBallot,
+        accepted_at: DateTime<Utc>,
+    ) -> Result<Participation, ParticipationError> {
+        if election.id() != self.election_id || ballot.ballot().election_id() != self.election_id {
+            return Err(ParticipationError::IdentityMismatch);
+        }
+        Participation::try_accept(election, self.user_id, self.voter_id, ballot, accepted_at)
     }
 }
 

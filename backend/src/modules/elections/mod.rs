@@ -19,6 +19,15 @@
 //! escolha; a confidencial recebe manifesto verificado e conserva somente cifras.
 //! Nulo é opção própria; sua posição final é obrigatória no manifesto confidencial.
 //!
+//! Na preparação, [`domain::entities::election::Election::invalidate_configuration`]
+//! retira a prontidão quando opções/autoridades/chaves precisam de revisão pela
+//! aplicação da #131. O histórico mantém cada configuração junto da revisão de
+//! calendário vigente, inclusive manifestos posteriormente invalidados. Uma nova
+//! publicação não modifica a origem ou as revisões assinadas que referenciam o
+//! manifesto antigo. Depois da abertura, publicação e invalidação são recusadas.
+//! Esse histórico pertence à persistência interna; não acrescenta mensagens aos
+//! schemas públicos nem implementa assinatura, auditoria ou a configuração HTTP.
+//!
 //! A abertura congela configuração e revisão vigente. Reconstituição reproduz as
 //! mesmas transições, incluindo revisões anteriores ao manifesto, sem flags que
 //! desativem invariantes. Hashes de encerramento e agregado são referências
@@ -33,10 +42,12 @@
 //! participação, cédula, quadro e recibo, conforme [`application::ballot_ports`].
 //!
 //! `VerifiedManifest`, `VerifiedBallot` e `VerifiedTally` representam verificações
-//! efetuadas nas portas de #378–#380/#139. Seus construtores de evidência são
-//! restritos ao crate. Não são algoritmos criptográficos nem atalhos públicos de
+//! efetuadas nas portas de #378–#380/#139. Seus construtores de evidência
+//! criptográfica são restritos ao crate. Não são algoritmos nem atalhos públicos de
 //! construção. Os adaptadores verificam também os objetos persistidos antes de
 //! reconstituí-los. O domínio não implementa ElGamal, RSA-PSS, JCS ou auditoria.
+//! A contagem identificada usa um construtor próprio que rejeita resultados
+//! confidenciais e cancelamentos administrativos.
 //!
 //! As entidades não implementam `Deserialize`: DTOs dos adaptadores devem chamar
 //! construtores validados. Nenhum tipo persistido contém segredos de autoridades,

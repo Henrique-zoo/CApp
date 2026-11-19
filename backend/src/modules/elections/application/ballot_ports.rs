@@ -8,7 +8,7 @@ use crate::modules::elections::domain::{
     entities::{
         ballot::{SignedBallot, VerifiedBallot},
         manifest::{Manifest, VerifiedManifest},
-        participation::{Participation, ParticipationKey},
+        participation::{Participation, ParticipationError, ParticipationKey},
     },
     value_objects::{base64_url::Base64Url, receipt::Receipt},
 };
@@ -88,6 +88,20 @@ impl RecordedBallot {
     pub const fn receipt(&self) -> Option<&Receipt> {
         self.receipt.as_ref()
     }
+
+    /// Recupera o mesmo registro/recibo quando operação e digest coincidem.
+    ///
+    /// Autenticar a conta antes da chamada. Não consulta estado atual, vínculo
+    /// acadêmico ou chave privada e não gera uma nova assinatura de recibo.
+    /// Uma nova operação ou payload conflitante recebe o erro de participação.
+    pub fn recover(
+        &self,
+        key: ParticipationKey,
+        ballot: &VerifiedBallot,
+    ) -> Result<&Self, ParticipationError> {
+        self.participation.retry(key, ballot)?;
+        Ok(self)
+    }
 }
 
 /// O store distingue gravação nova de recuperação sem efeitos adicionais.
@@ -127,6 +141,8 @@ pub enum RecordBallotError {
 /// chave, participação, cédula, índice, cadeia e recibo atomicamente. Encerramento,
 /// calendário e cancelamento usam a mesma ordem transacional. Não emite recibo
 /// para rollback e não aceita conta ou curso declarados no corpo da requisição.
+/// Use `RecordedBallot::recover` para repetição e
+/// `AuthenticatedElectorContext::prepare_participation` para novo aceite.
 #[async_trait::async_trait]
 pub trait BallotStore: Send + Sync {
     /// Confirma ou recupera uma submissão sem criar participação duplicada.
@@ -143,3 +159,7 @@ pub trait BallotStore: Send + Sync {
         key: ParticipationKey,
     ) -> Result<Option<RecordedBallot>, RecordBallotError>;
 }
+
+#[cfg(test)]
+#[path = "ballot_ports/tests.rs"]
+mod tests;

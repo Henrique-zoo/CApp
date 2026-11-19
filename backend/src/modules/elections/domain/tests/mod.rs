@@ -33,6 +33,8 @@ use uuid::Uuid;
 mod contracts;
 mod lifecycle;
 mod participation;
+mod preparation;
+mod reconstitution;
 
 /// Relógio controlado em UTC, sem infraestrutura externa.
 fn at(day: u32, hour: u32) -> DateTime<Utc> {
