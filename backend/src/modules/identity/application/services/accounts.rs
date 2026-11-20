@@ -140,30 +140,30 @@ pub async fn restore(
                 .and_then(|id| uuid::Uuid::parse_str(id).ok())
                 .ok_or(AuthenticationError::InvalidMicrosoftId)?;
 
-            if object_id != evidence.microsoft_object_id || evidence.user_id != user.id() {
+            if object_id != evidence.microsoft_object_id() || evidence.user_id() != user.id() {
                 return Err(AuthenticationError::IdentityMismatch);
             }
 
-            if evidence.expires_at <= chrono::Utc::now() {
+            if evidence.expires_at() <= chrono::Utc::now() {
                 None
             } else {
                 let institution = repositories
-                    .find_by_microsoft_tenant_id(evidence.microsoft_tenant_id)
+                    .find_by_microsoft_tenant_id(evidence.microsoft_tenant_id())
                     .await?
                     .ok_or(AuthenticationError::UnknownInstitution)?;
 
                 Some(InstitutionalVerificationResult {
                     profile: InstitutionalProfile {
-                        id: evidence.microsoft_object_id.to_string(),
-                        name: evidence.profile_name,
+                        id: evidence.microsoft_object_id().to_string(),
+                        name: evidence.profile_name().map(ToString::to_string),
                         mail: None,
                         affiliation: InstitutionalAffiliation::from_directory(
-                            evidence.student_membership_confirmed,
-                            evidence.course_name,
+                            evidence.student_membership_confirmed(),
+                            evidence.course_name().map(ToString::to_string),
                         ),
                     },
                     institution,
-                    expires_at: evidence.expires_at,
+                    expires_at: evidence.expires_at(),
                 })
             }
         }
@@ -276,11 +276,11 @@ pub async fn complete_profile(
         .and_then(|value| uuid::Uuid::parse_str(value).ok())
         .ok_or(AuthenticationError::InvalidMicrosoftId)?;
 
-    if evidence.microsoft_object_id != object_id || evidence.expires_at <= chrono::Utc::now() {
+    if evidence.microsoft_object_id() != object_id || evidence.expires_at() <= chrono::Utc::now() {
         return Err(AuthenticationError::InstitutionalVerificationRequired);
     }
 
-    if evidence.user_id != user.id() {
+    if evidence.user_id() != user.id() {
         return Err(AuthenticationError::IdentityMismatch);
     }
 
@@ -310,7 +310,7 @@ fn validate_supplements(
     data: &ProfileCompletion,
     evidence: &InstitutionalVerification,
 ) -> Result<(), AuthenticationError> {
-    if data.name.is_some() && evidence.profile_name.is_some() {
+    if data.name.is_some() && evidence.profile_name().is_some() {
         return Err(AuthenticationError::InvalidProfile);
     }
 

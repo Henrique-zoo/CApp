@@ -12,6 +12,8 @@
 //! A reconstituição PostgreSQL usa o mapeamento `sqlx::FromRow` adotado no projeto,
 //! e as restrições do banco complementam os caminhos de alteração da entidade.
 
+use std::{error::Error, fmt};
+
 use crate::modules::identity::domain::UserStatus;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -21,7 +23,7 @@ use uuid::Uuid;
 /// Os campos privados expõem leitura por métodos e alteração pelo caminho de
 /// conclusão validado. O curso pertence à evidência institucional; o e-mail aqui
 /// é o escolhido para a credencial interna, nunca um segundo contato do Graph.
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct User {
     id: Uuid,
     firebase_uid: String,
@@ -58,9 +60,16 @@ pub struct ProfileCompletion {
 }
 
 /// Uma alteração que não preservaria as regras da conta.
-#[derive(Debug, thiserror::Error)]
-#[error("Dados de perfil inválidos ou conta inativa")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InvalidProfile;
+
+impl fmt::Display for InvalidProfile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Dados de perfil inválidos ou conta inativa")
+    }
+}
+
+impl Error for InvalidProfile {}
 
 impl User {
     /// Identificador interno estável, independente dos provedores vinculados.
@@ -230,6 +239,38 @@ impl User {
             created_at: now,
             updated_at: now,
             last_login_at: Some(now),
+        }
+    }
+
+    /// Reconstrói a conta interna a partir de dados persistidos no banco.
+    #[allow(clippy::too_many_arguments)]
+    pub fn reconstitute(
+        id: Uuid,
+        firebase_uid: String,
+        name: Option<String>,
+        nickname: Option<String>,
+        email: Option<String>,
+        current_semester: Option<i32>,
+        institution_entry_semester: Option<String>,
+        status: UserStatus,
+        profile_completed_at: Option<DateTime<Utc>>,
+        created_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
+        last_login_at: Option<DateTime<Utc>>,
+    ) -> Self {
+        Self {
+            id,
+            firebase_uid,
+            name,
+            nickname,
+            email,
+            current_semester,
+            institution_entry_semester,
+            status,
+            profile_completed_at,
+            created_at,
+            updated_at,
+            last_login_at,
         }
     }
 }

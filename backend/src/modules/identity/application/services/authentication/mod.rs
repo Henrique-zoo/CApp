@@ -37,13 +37,26 @@ pub const VERIFICATION_TTL_DAYS: i64 = 120;
 /// Identidade autorizada por uma confirmação institucional ainda válida.
 ///
 /// Não contém credenciais nem depende de um usuário interno provisionado.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthenticatedIdentity {
     /// UID autenticado no Firebase.
     pub firebase_uid: String,
 
     /// Instituição cuja elegibilidade foi confirmada.
     pub institution_id: Uuid,
+
+    /// Indica se a participação no grupo e o curso foram confirmados como discente regular.
+    pub student_membership_confirmed: bool,
+
+    /// Curso associado, presente apenas para discente regular confirmado.
+    pub course_name: Option<String>,
+}
+
+impl AuthenticatedIdentity {
+    /// Indica se a identidade possui vínculo de estudante regular confirmado.
+    pub fn is_student(&self) -> bool {
+        self.student_membership_confirmed && self.course_name.is_some()
+    }
 }
 
 /// Resultado público após persistir a verificação de um estudante ou não estudante.
@@ -176,7 +189,7 @@ pub async fn verify_institutional_identity(
         .ok_or(AuthenticationError::UnknownInstitution)?;
 
     let is_student = directory
-        .is_student_member(microsoft_token, institution.microsoft_student_group_id)
+        .is_student_member(microsoft_token, institution.microsoft_student_group_id())
         .await?;
 
     let mut profile = directory.get_profile(microsoft_token, is_student).await?;
@@ -199,24 +212,28 @@ pub async fn verify_institutional_identity(
         return Err(AuthenticationError::AccountInactive);
     }
 
-    let verification = InstitutionalVerification {
-        user_id: user.id(),
-        profile_name: profile.name.clone(),
-        course_name: match &profile.affiliation {
-            InstitutionalAffiliation::Student { course_name } => Some(course_name.clone()),
-            InstitutionalAffiliation::NonStudent => None,
-        },
-        microsoft_object_id: actual_id,
-        institution_id: institution.id,
-        microsoft_tenant_id: tenant_id,
-        microsoft_student_group_id: institution.microsoft_student_group_id,
-        student_membership_confirmed: matches!(
-            profile.affiliation,
-            InstitutionalAffiliation::Student { .. }
-        ),
-        checked_at,
-        expires_at: checked_at + Duration::days(VERIFICATION_TTL_DAYS),
+    let is_student_confirmed = matches!(
+        profile.affiliation,
+        InstitutionalAffiliation::Student { .. }
+    );
+    let course_to_save = match &profile.affiliation {
+        InstitutionalAffiliation::Student { course_name } => Some(course_name.clone()),
+        InstitutionalAffiliation::NonStudent => None,
     };
+
+    let verification = InstitutionalVerification::new(
+        user.id(),
+        profile.name.clone(),
+        course_to_save,
+        institution.id(),
+        actual_id,
+        tenant_id,
+        institution.microsoft_student_group_id(),
+        is_student_confirmed,
+        checked_at,
+        checked_at + Duration::days(VERIFICATION_TTL_DAYS),
+    )
+    .map_err(|_| AuthenticationError::Internal)?;
 
     // Uma resposta negativa conclusiva também precisa substituir uma
     // confirmação estudantil anterior, atualizando o vínculo registrado.
@@ -235,13 +252,15 @@ pub async fn verify_institutional_identity(
         None
     };
 
+    let expires_at = verification.expires_at();
+
     Ok(InstitutionalAuthResult {
         suggested_email,
         user,
         verification: InstitutionalVerificationResult {
             profile,
             institution,
-            expires_at: verification.expires_at,
+            expires_at,
         },
     })
 }
@@ -300,13 +319,15 @@ pub async fn authenticate_institutional_request(
     // Não reutiliza evidência de uma identidade Microsoft diferente.
     // Confere também a expiração após a conclusão da consulta.
 
-    if verification.microsoft_object_id != object_id || verification.expires_at <= Utc::now() {
+    if verification.microsoft_object_id() != object_id || verification.expires_at() <= Utc::now() {
         return Err(AuthenticationError::InstitutionalVerificationRequired);
     }
 
     Ok(AuthenticatedIdentity {
         firebase_uid: identity.firebase_uid,
-        institution_id: verification.institution_id,
+        institution_id: verification.institution_id(),
+        student_membership_confirmed: verification.student_membership_confirmed(),
+        course_name: verification.course_name().map(ToString::to_string),
     })
 }
 

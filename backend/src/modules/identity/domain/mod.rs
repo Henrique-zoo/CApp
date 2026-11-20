@@ -1,15 +1,15 @@
-//! Modelos institucionais e evidências de elegibilidade persistidas.
+//! Modelos institucionais, dados acadêmicos e evidências de elegibilidade.
 //!
-//! [`entities`] contém instituição e resultado de verificação; [`CatalogStatus`]
-//! representa disponibilidade no catálogo. [`rules`] e [`events`] são reservados.
+//! [`entities`] contém instituição, usuário, dados acadêmicos e verificação institucional;
+//! [`rules`] encapsula as invariantes e validações de negócio;
+//! [`events`] declara fatos relevantes do domínio;
+//! [`status`] define os ciclos de vida e estados cadastrais.
 //!
-//! Os tipos não executam SQL nem conhecem HTTP. Os derives `sqlx::FromRow` e
-//! `sqlx::Type` constituem o acoplamento de mapeamento adotado pelo projeto;
-//! as consultas e o gerenciamento de conexões continuam na infraestrutura.
+//! A camada de domínio é pura, agnóstica a bancos de dados, frameworks ou formatos de serialização.
 
 pub mod entities;
 pub mod events;
 pub mod rules;
 mod status;
 
-pub use status::{CatalogStatus, UserStatus};
+pub use status::{CatalogStatus, CatalogStatusError, UserStatus, UserStatusError};

@@ -286,6 +286,21 @@ pub trait InstitutionalVerificationRepository: Send + Sync {
         firebase_uid: &str,
     ) -> Result<Option<InstitutionalVerification>, InstitutionalVerificationRepositoryError>;
 
+    /// Busca a evidência reutilizável para o identificador interno de um usuário.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `user_id`: identificador interno estável da conta (chave primária da evidência).
+    ///
+    /// # Retorno
+    ///
+    /// `Some` com a evidência se vigente e compatível com o cadastro da instituição;
+    /// `None` caso contrário.
+    async fn find_valid_by_user_id(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<InstitutionalVerification>, InstitutionalVerificationRepositoryError>;
+
     /// Registra uma resposta conclusiva, positiva ou negativa, por UID Firebase.
     ///
     /// # Parâmetros
