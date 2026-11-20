@@ -58,5 +58,6 @@ mock! {
     impl InstitutionalVerificationRepository for Repositories {
         async fn save(&self, verification: &InstitutionalVerification) -> Result<bool, InstitutionalVerificationRepositoryError>;
         async fn find_valid_by_firebase_uid(&self, firebase_uid: &str) -> Result<Option<InstitutionalVerification>, InstitutionalVerificationRepositoryError>;
+        async fn find_valid_by_user_id(&self, user_id: Uuid) -> Result<Option<InstitutionalVerification>, InstitutionalVerificationRepositoryError>;
     }
 }

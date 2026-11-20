@@ -1,10 +1,11 @@
-//! Entidades usadas na verificação institucional.
-//!
-//! [`institution`] configura o tenant e o grupo de estudantes.
-//! [`institutional_verification`] registra evidência por UID Firebase, independente
-//! de provisionamento de usuário interno. Os derives SQLx mapeiam linhas para esses
-//! tipos; não aplicam migrations nem consultam o banco.
+//! Entidades do domínio de identidade e dados acadêmicos.
 
+pub mod academic_data;
 pub mod institution;
 pub mod institutional_verification;
 pub mod user;
+
+pub use academic_data::*;
+pub use institution::*;
+pub use institutional_verification::*;
+pub use user::*;
