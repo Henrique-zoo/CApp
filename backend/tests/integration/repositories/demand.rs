@@ -639,3 +639,212 @@ async fn should_return_none_when_demand_not_found_in_postgres_repository() {
 
     db.close().await;
 }
+
+#[tokio::test]
+async fn should_list_and_filter_demands_with_ca_isolation_in_postgres_repository() {
+    use backend::modules::demands::{
+        application::ports::{DemandFilter, DemandRepository},
+        infrastructure::PostgresDemandRepository,
+    };
+
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "Universidade de Brasília").await;
+    let ca_1 = create_test_ca(
+        &db.pool,
+        institution_id,
+        "Centro Acadêmico de Computação",
+        "CACC",
+    )
+    .await;
+    let ca_2 = create_test_ca(
+        &db.pool,
+        institution_id,
+        "Centro Acadêmico de Matemática",
+        "CAMAT",
+    )
+    .await;
+
+    let author_1 = create_test_user(&db.pool, "author-user-1").await;
+    let author_2 = create_test_user(&db.pool, "author-user-2").await;
+
+    let repo = PostgresDemandRepository::new(db.pool.clone());
+    let now = chrono::DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).unwrap();
+
+    // Demanda 1: CA 1, autor 1, espaço físico, status open
+    let d1 = Demand::new(
+        Uuid::new_v4(),
+        ca_1,
+        author_1,
+        DemandForum::PhysicalSpace,
+        Some("Reparo da porta".to_string()),
+        "A porta da sala do CA está quebrada".to_string(),
+        Some("Infraestrutura".to_string()),
+        None,
+        now,
+    )
+    .unwrap();
+    repo.create(&d1).await.expect("d1 deve ser persistida");
+
+    // Demanda 2: CA 1, autor 2, espaço físico, status in_analysis
+    let d2 = Demand::new(
+        Uuid::new_v4(),
+        ca_1,
+        author_2,
+        DemandForum::PhysicalSpace,
+        Some("Troca da lâmpada".to_string()),
+        "Lâmpada queimada na sala de estudos".to_string(),
+        Some("Infraestrutura".to_string()),
+        None,
+        now + chrono::Duration::seconds(1),
+    )
+    .unwrap();
+    repo.create(&d2).await.expect("d2 deve ser persistida");
+    // Atualiza status de d2 para in_analysis
+    sqlx::query("UPDATE demand SET status = 'in_analysis' WHERE id = $1")
+        .bind(d2.id())
+        .execute(&db.pool)
+        .await
+        .expect("update status d2");
+
+    // Demanda 3: CA 1, autor 1, institucional, status open
+    let d3 = Demand::new(
+        Uuid::new_v4(),
+        ca_1,
+        author_1,
+        DemandForum::Institutional,
+        Some("Ajuste curricular".to_string()),
+        "Pré-requisitos de cálculo".to_string(),
+        Some("Pedagógico".to_string()),
+        Some("Ciência da Computação".to_string()),
+        now + chrono::Duration::seconds(2),
+    )
+    .unwrap();
+    repo.create(&d3).await.expect("d3 deve ser persistida");
+
+    // Demanda 4: CA 2, autor 1, espaço físico, status open (pertence a outro CA)
+    let d4 = Demand::new(
+        Uuid::new_v4(),
+        ca_2,
+        author_1,
+        DemandForum::PhysicalSpace,
+        Some("Pintura da sala".to_string()),
+        "Demanda do CA 2".to_string(),
+        Some("Infraestrutura".to_string()),
+        None,
+        now + chrono::Duration::seconds(3),
+    )
+    .unwrap();
+    repo.create(&d4).await.expect("d4 deve ser persistida");
+
+    // 1. Listagem geral do CA 1: retorna d3, d2, d1 em ordem decrescente de criação, e NUNCA d4 (isolamento de CA)
+    let list_ca1 = repo
+        .list(&DemandFilter {
+            academic_center_id: ca_1,
+            forum: None,
+            status: None,
+            author_id: None,
+            limit: None,
+            offset: None,
+        })
+        .await
+        .expect("listagem ca1 deve ter sucesso");
+
+    assert_eq!(list_ca1.len(), 3);
+    assert_eq!(list_ca1[0].id(), d3.id());
+    assert_eq!(list_ca1[1].id(), d2.id());
+    assert_eq!(list_ca1[2].id(), d1.id());
+    assert!(list_ca1.iter().all(|d| d.academic_center_id() == ca_1));
+
+    // 2. Filtro por fórum de espaço físico no CA 1
+    let list_ps = repo
+        .list(&DemandFilter {
+            academic_center_id: ca_1,
+            forum: Some(DemandForum::PhysicalSpace),
+            status: None,
+            author_id: None,
+            limit: None,
+            offset: None,
+        })
+        .await
+        .expect("filtro physical_space");
+    assert_eq!(list_ps.len(), 2);
+    assert_eq!(list_ps[0].id(), d2.id());
+    assert_eq!(list_ps[1].id(), d1.id());
+
+    // 3. Filtro por fórum institucional no CA 1
+    let list_inst = repo
+        .list(&DemandFilter {
+            academic_center_id: ca_1,
+            forum: Some(DemandForum::Institutional),
+            status: None,
+            author_id: None,
+            limit: None,
+            offset: None,
+        })
+        .await
+        .expect("filtro institutional");
+    assert_eq!(list_inst.len(), 1);
+    assert_eq!(list_inst[0].id(), d3.id());
+
+    // 4. Filtro por status in_analysis
+    let list_status = repo
+        .list(&DemandFilter {
+            academic_center_id: ca_1,
+            forum: None,
+            status: Some(DemandStatus::InAnalysis),
+            author_id: None,
+            limit: None,
+            offset: None,
+        })
+        .await
+        .expect("filtro status");
+    assert_eq!(list_status.len(), 1);
+    assert_eq!(list_status[0].id(), d2.id());
+
+    // 5. Filtro de autor (demandas próprias de autor_2)
+    let list_mine = repo
+        .list(&DemandFilter {
+            academic_center_id: ca_1,
+            forum: None,
+            status: None,
+            author_id: Some(author_2),
+            limit: None,
+            offset: None,
+        })
+        .await
+        .expect("filtro autor");
+    assert_eq!(list_mine.len(), 1);
+    assert_eq!(list_mine[0].id(), d2.id());
+
+    // 6. Paginação (limit e offset)
+    let page1 = repo
+        .list(&DemandFilter {
+            academic_center_id: ca_1,
+            forum: None,
+            status: None,
+            author_id: None,
+            limit: Some(2),
+            offset: Some(0),
+        })
+        .await
+        .expect("page 1");
+    assert_eq!(page1.len(), 2);
+    assert_eq!(page1[0].id(), d3.id());
+    assert_eq!(page1[1].id(), d2.id());
+
+    let page2 = repo
+        .list(&DemandFilter {
+            academic_center_id: ca_1,
+            forum: None,
+            status: None,
+            author_id: None,
+            limit: Some(2),
+            offset: Some(2),
+        })
+        .await
+        .expect("page 2");
+    assert_eq!(page2.len(), 1);
+    assert_eq!(page2[0].id(), d1.id());
+
+    db.close().await;
+}

@@ -99,6 +99,27 @@ async fn request(
     )
 }
 
+/// Envia uma requisição GET em memória e interpreta seu corpo e status code.
+async fn get_request(app: &Router, path: &str, token: Option<&str>) -> (StatusCode, Value) {
+    let builder = Request::builder().uri(path).method("GET");
+
+    let builder = if let Some(tok) = token {
+        builder.header("authorization", format!("Bearer {tok}"))
+    } else {
+        builder
+    };
+
+    let req = builder.body(Body::empty()).unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
 /// Helper para configurar o ambiente de banco e mock JWKS.
 async fn setup_app(db: &TestDatabase) -> (Router, MockServer) {
     let jwks = MockServer::start().await;
@@ -595,6 +616,553 @@ async fn should_reject_demand_with_empty_description_with_422() {
 
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["error"]["code"], "empty_description");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_list_physical_space_demands_for_student_of_another_course() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid_a = "student-course-cc";
+    let obj_a = Uuid::new_v4();
+    let (_inst_id, ca_id, _user_a_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid_a,
+        obj_a,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    // Usuário B é estudante de outro curso (Engenharia Mecânica)
+    let uid_b = "student-other-course";
+    let obj_b = Uuid::new_v4();
+    let user_b_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO app_user (id, firebase_uid) VALUES ($1, $2)")
+        .bind(user_b_id)
+        .bind(uid_b)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+    let expires_at = Utc::now() + chrono::Duration::days(120);
+    sqlx::query(
+        "INSERT INTO institutional_verification (user_id, student_membership_confirmed, course_name, expires_at) \
+         VALUES ($1, true, 'Engenharia Mecânica', $2)",
+    )
+    .bind(user_b_id)
+    .bind(expires_at)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    // Usuário A cria demanda de espaço físico no CA
+    let jwt_a = token(uid_a, obj_a);
+    let path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let create_payload = json!({
+        "forum": "physical_space",
+        "title": "Reparo da porta",
+        "description": "Porta da sala do CA está emperrada.",
+        "category": "Infraestrutura"
+    });
+    let (status, _created) = request(&app, &path, Some(&jwt_a), Some(create_payload)).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Usuário B (de outro curso) consulta demandas de espaço físico
+    let jwt_b = token(uid_b, obj_b);
+    let list_path = format!("/api/v1/academic-centers/{ca_id}/demands?forum=physical_space");
+    let (status, body) = get_request(&app, &list_path, Some(&jwt_b)).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let list = body.as_array().expect("deve retornar array");
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0]["title"], "Reparo da porta");
+    assert_eq!(list[0]["forum"], "physical_space");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_filter_own_demands_with_mine_param() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid_a = "student-mine-a";
+    let obj_a = Uuid::new_v4();
+    let (_inst_id, ca_id, _user_a_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid_a,
+        obj_a,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    let uid_b = "student-mine-b";
+    let obj_b = Uuid::new_v4();
+    let user_b_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO app_user (id, firebase_uid) VALUES ($1, $2)")
+        .bind(user_b_id)
+        .bind(uid_b)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+    let expires_at = Utc::now() + chrono::Duration::days(120);
+    sqlx::query(
+        "INSERT INTO institutional_verification (user_id, student_membership_confirmed, course_name, expires_at) \
+         VALUES ($1, true, 'Ciência da Computação', $2)",
+    )
+    .bind(user_b_id)
+    .bind(expires_at)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let jwt_a = token(uid_a, obj_a);
+    let jwt_b = token(uid_b, obj_b);
+    let post_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+
+    // Usuário A cria "Reparo da porta"
+    let (status_a, _) = request(
+        &app,
+        &post_path,
+        Some(&jwt_a),
+        Some(json!({
+            "forum": "physical_space",
+            "title": "Reparo da porta",
+            "description": "Demanda de A"
+        })),
+    )
+    .await;
+    assert_eq!(status_a, StatusCode::CREATED);
+
+    // Usuário B cria "Troca da lâmpada"
+    let (status_b, _) = request(
+        &app,
+        &post_path,
+        Some(&jwt_b),
+        Some(json!({
+            "forum": "physical_space",
+            "title": "Troca da lâmpada",
+            "description": "Demanda de B"
+        })),
+    )
+    .await;
+    assert_eq!(status_b, StatusCode::CREATED);
+
+    // Usuário A consulta somente as próprias demandas (mine=true)
+    let list_mine_path =
+        format!("/api/v1/academic-centers/{ca_id}/demands?forum=physical_space&mine=true");
+    let (status, body_mine) = get_request(&app, &list_mine_path, Some(&jwt_a)).await;
+    assert_eq!(status, StatusCode::OK, "{body_mine}");
+    let list_mine = body_mine.as_array().unwrap();
+    assert_eq!(list_mine.len(), 1);
+    assert_eq!(list_mine[0]["title"], "Reparo da porta");
+
+    // Usuário A remove o filtro das próprias demandas (sem mine=true) -> vê ambas
+    let list_all_path = format!("/api/v1/academic-centers/{ca_id}/demands?forum=physical_space");
+    let (status_all, body_all) = get_request(&app, &list_all_path, Some(&jwt_a)).await;
+    assert_eq!(status_all, StatusCode::OK, "{body_all}");
+    let list_all = body_all.as_array().unwrap();
+    assert_eq!(list_all.len(), 2);
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_filter_demands_by_forum_and_status() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-filter-fs";
+    let obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    let jwt = token(uid, obj);
+    let post_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+
+    // Cria demanda de espaço físico
+    let (status_ps, body_ps) = request(
+        &app,
+        &post_path,
+        Some(&jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "title": "Reparo da janela",
+            "description": "Janela quebrada"
+        })),
+    )
+    .await;
+    assert_eq!(status_ps, StatusCode::CREATED);
+    let ps_id: Uuid = body_ps["id"].as_str().unwrap().parse().unwrap();
+
+    // Cria demanda institucional
+    let (status_inst, _) = request(
+        &app,
+        &post_path,
+        Some(&jwt),
+        Some(json!({
+            "forum": "institutional",
+            "title": "Ajuste de grade",
+            "description": "Conflito de horários",
+            "courseName": "Ciência da Computação"
+        })),
+    )
+    .await;
+    assert_eq!(status_inst, StatusCode::CREATED);
+
+    // Atualiza status da demanda de espaço físico para in_analysis
+    sqlx::query("UPDATE demand SET status = 'in_analysis' WHERE id = $1")
+        .bind(ps_id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+    // Filtra por fórum institucional
+    let list_inst_path = format!("/api/v1/academic-centers/{ca_id}/demands?forum=institutional");
+    let (status, body_inst) = get_request(&app, &list_inst_path, Some(&jwt)).await;
+    assert_eq!(status, StatusCode::OK);
+    let arr_inst = body_inst.as_array().unwrap();
+    assert_eq!(arr_inst.len(), 1);
+    assert_eq!(arr_inst[0]["forum"], "institutional");
+    assert_eq!(arr_inst[0]["title"], "Ajuste de grade");
+
+    // Filtra por status in_analysis
+    let list_status_path = format!("/api/v1/academic-centers/{ca_id}/demands?status=in_analysis");
+    let (status, body_status) = get_request(&app, &list_status_path, Some(&jwt)).await;
+    assert_eq!(status, StatusCode::OK);
+    let arr_status = body_status.as_array().unwrap();
+    assert_eq!(arr_status.len(), 1);
+    assert_eq!(arr_status[0]["status"], "in_analysis");
+    assert_eq!(arr_status[0]["title"], "Reparo da janela");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_isolate_demands_between_different_academic_centers() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-multi-ca";
+    let obj = Uuid::new_v4();
+    let (inst_id, ca_1, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    let ca_2 = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, name, acronym, description, status) \
+         VALUES ($1, $2, 'Centro Acadêmico de Matemática', 'CAMAT', 'CA MAT', 'active')",
+    )
+    .bind(ca_2)
+    .bind(inst_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let jwt = token(uid, obj);
+
+    // Demanda no CA 1
+    let post_ca1 = format!("/api/v1/academic-centers/{ca_1}/demands");
+    request(
+        &app,
+        &post_ca1,
+        Some(&jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "title": "Reparo da porta",
+            "description": "Demanda no CA 1"
+        })),
+    )
+    .await;
+
+    // Demanda no CA 2
+    let post_ca2 = format!("/api/v1/academic-centers/{ca_2}/demands");
+    request(
+        &app,
+        &post_ca2,
+        Some(&jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "title": "Pintura da sala",
+            "description": "Demanda no CA 2"
+        })),
+    )
+    .await;
+
+    // Consulta CA 1: vê "Reparo da porta" e NÃO vê "Pintura da sala"
+    let list_ca1_path = format!("/api/v1/academic-centers/{ca_1}/demands?forum=physical_space");
+    let (status_1, body_1) = get_request(&app, &list_ca1_path, Some(&jwt)).await;
+    assert_eq!(status_1, StatusCode::OK);
+    let arr_1 = body_1.as_array().unwrap();
+    assert_eq!(arr_1.len(), 1);
+    assert_eq!(arr_1[0]["title"], "Reparo da porta");
+
+    // Consulta CA 2: vê "Pintura da sala" e NÃO vê "Reparo da porta"
+    let list_ca2_path = format!("/api/v1/academic-centers/{ca_2}/demands?forum=physical_space");
+    let (status_2, body_2) = get_request(&app, &list_ca2_path, Some(&jwt)).await;
+    assert_eq!(status_2, StatusCode::OK);
+    let arr_2 = body_2.as_array().unwrap();
+    assert_eq!(arr_2.len(), 1);
+    assert_eq!(arr_2[0]["title"], "Pintura da sala");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_return_empty_list_when_no_demands_exist_in_ca() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-empty-list";
+    let obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    let jwt = token(uid, obj);
+    let list_path = format!("/api/v1/academic-centers/{ca_id}/demands?forum=physical_space");
+    let (status, body) = get_request(&app, &list_path, Some(&jwt)).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let list = body.as_array().unwrap();
+    assert!(list.is_empty());
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_listing_unauthenticated_request_with_401() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let ca_id = Uuid::new_v4();
+    let list_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (status, _body) = get_request(&app, &list_path, None).await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_listing_when_ca_does_not_exist_with_404() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-ca-404";
+    let obj = Uuid::new_v4();
+    let (_inst_id, _ca_id, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    let jwt = token(uid, obj);
+    let non_existent_ca = Uuid::new_v4();
+    let list_path = format!("/api/v1/academic-centers/{non_existent_ca}/demands");
+    let (status, body) = get_request(&app, &list_path, Some(&jwt)).await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"]["code"], "academic_center_not_found");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_listing_when_ca_is_inactive_with_422() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-ca-inactive";
+    let obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "inactive", // CA inativo
+    )
+    .await;
+
+    let jwt = token(uid, obj);
+    let list_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (status, body) = get_request(&app, &list_path, Some(&jwt)).await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "academic_center_inactive");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_listing_when_student_membership_not_active_with_403() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-no-membership";
+    let obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        false, // Sem vínculo estudantil ativo
+        None,
+        false,
+        "active",
+    )
+    .await;
+
+    let jwt = token(uid, obj);
+    let list_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (status, body) = get_request(&app, &list_path, Some(&jwt)).await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "student_membership_required");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_institutional_listing_when_student_not_in_course_or_management_with_403() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-mec-eng";
+    let obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Engenharia Mecânica"), // Curso divergente
+        false,
+        "active",
+    )
+    .await;
+
+    let jwt = token(uid, obj);
+    let list_path = format!("/api/v1/academic-centers/{ca_id}/demands?forum=institutional");
+    let (status, body) = get_request(&app, &list_path, Some(&jwt)).await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "user_not_permitted_in_ca");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_listing_with_invalid_forum_query_param_with_400() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-valid";
+    let obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    let jwt = token(uid, obj);
+    let list_path = format!("/api/v1/academic-centers/{ca_id}/demands?forum=forum_invalido");
+    let (status, body) = get_request(&app, &list_path, Some(&jwt)).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "invalid_forum");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_listing_with_invalid_status_query_param_with_400() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-valid-status";
+    let obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    let jwt = token(uid, obj);
+    let list_path = format!("/api/v1/academic-centers/{ca_id}/demands?status=status_invalido");
+    let (status, body) = get_request(&app, &list_path, Some(&jwt)).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "invalid_status");
 
     db.close().await;
 }

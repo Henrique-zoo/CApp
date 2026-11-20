@@ -111,6 +111,19 @@ impl crate::modules::demands::application::ports::DemandRepository for PgDatabas
         );
         repo.find_by_id(id).await
     }
+
+    async fn list(
+        &self,
+        filter: &crate::modules::demands::application::ports::DemandFilter,
+    ) -> Result<
+        Vec<crate::modules::demands::domain::entities::Demand>,
+        crate::modules::demands::application::error::DemandRepositoryError,
+    > {
+        let repo = crate::modules::demands::infrastructure::PostgresDemandRepository::new(
+            self.pool.clone(),
+        );
+        repo.list(filter).await
+    }
 }
 
 #[async_trait::async_trait]
