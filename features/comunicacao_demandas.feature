@@ -1,3 +1,4 @@
+@pending
 # language: pt
 
 # Referência: Relatório de Features do Projeto, seções 5.1, 5.2 e 5.3.
