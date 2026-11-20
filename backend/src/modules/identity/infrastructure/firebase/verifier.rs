@@ -188,6 +188,7 @@ impl FirebaseTokenVerifier {
     }
 
     /// Constrói um verificador com JWKS local exclusivamente para testes.
+    #[allow(dead_code)]
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn new_with_endpoint(
         project_id: String,

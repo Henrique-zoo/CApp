@@ -23,6 +23,8 @@ use crate::{
 /// criptográfica e o cache Firebase permanecem ativos. O cliente HTTP deve recusar
 /// redirecionamentos para não encaminhar credenciais a outras origens.
 ///
+/// Utiliza a configuração determinística rápida de testes ([`crate::config::HttpConfig::default_for_test`]).
+///
 /// # Erros
 ///
 /// Propaga a rejeição de um identificador de projeto Firebase inválido.
@@ -32,13 +34,45 @@ pub fn local_identity_clients(
     jwks_url: String,
     graph_url: String,
 ) -> anyhow::Result<Clients> {
+    local_identity_clients_with_config(
+        project_id,
+        http,
+        jwks_url,
+        graph_url,
+        crate::config::HttpConfig::default_for_test(),
+    )
+}
+
+/// Constrói clientes reais apontando para os servidores HTTP locais da suíte com
+/// parâmetros explícitos de timeout e política de retentativa segura.
+///
+/// # Erros
+///
+/// Propaga a rejeição de um identificador de projeto Firebase inválido.
+pub fn local_identity_clients_with_config(
+    project_id: String,
+    http: reqwest::Client,
+    jwks_url: String,
+    graph_url: String,
+    http_config: crate::config::HttpConfig,
+) -> anyhow::Result<Clients> {
     Ok(Clients::new(
-        FirebaseTokenVerifier::new_with_endpoint(project_id, http.clone(), jwks_url)?,
-        MicrosoftGraphClient::new_with_base_url(http.clone(), graph_url),
-        AppCheckVerifier::new(
+        FirebaseTokenVerifier::new_with_endpoint_and_config(
+            project_id,
+            http.clone(),
+            jwks_url,
+            http_config.clone(),
+        )?,
+        MicrosoftGraphClient::new_with_base_url_and_config(
+            http.clone(),
+            graph_url,
+            http_config.clone(),
+        ),
+        AppCheckVerifier::with_config(
             "1234567890".into(),
             vec!["1:1234567890:android:capp".into()],
             http,
+            http_config,
         )?,
     ))
 }
