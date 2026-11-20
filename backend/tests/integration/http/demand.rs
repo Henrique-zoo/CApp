@@ -627,7 +627,7 @@ async fn should_list_physical_space_demands_for_student_of_another_course() {
 
     let uid_a = "student-course-cc";
     let obj_a = Uuid::new_v4();
-    let (_inst_id, ca_id, _user_a_id) = create_test_context(
+    let (inst_id, ca_id, _user_a_id) = create_test_context(
         &db.pool,
         "Centro Acadêmico de Computação",
         "CACC",
@@ -644,19 +644,26 @@ async fn should_list_physical_space_demands_for_student_of_another_course() {
     let uid_b = "student-other-course";
     let obj_b = Uuid::new_v4();
     let user_b_id = Uuid::new_v4();
-    sqlx::query("INSERT INTO app_user (id, firebase_uid) VALUES ($1, $2)")
+    sqlx::query("INSERT INTO app_user (id, firebase_uid, status) VALUES ($1, $2, 'incomplete')")
         .bind(user_b_id)
         .bind(uid_b)
         .execute(&db.pool)
         .await
         .unwrap();
 
-    let expires_at = Utc::now() + chrono::Duration::days(120);
+    let now = Utc::now();
+    let expires_at = now + chrono::Duration::days(120);
     sqlx::query(
-        "INSERT INTO institutional_verification (user_id, student_membership_confirmed, course_name, expires_at) \
-         VALUES ($1, true, 'Engenharia Mecânica', $2)",
+        "INSERT INTO institutional_verification (
+            user_id, institution_id, microsoft_object_id, microsoft_tenant_id,
+            microsoft_student_group_id, student_membership_confirmed, course_name,
+            checked_at, expires_at
+         ) VALUES ($1, $2, $3, gen_random_uuid(), gen_random_uuid(), true, 'Engenharia Mecânica', $4, $5)",
     )
     .bind(user_b_id)
+    .bind(inst_id)
+    .bind(obj_b)
+    .bind(now)
     .bind(expires_at)
     .execute(&db.pool)
     .await
@@ -695,7 +702,7 @@ async fn should_filter_own_demands_with_mine_param() {
 
     let uid_a = "student-mine-a";
     let obj_a = Uuid::new_v4();
-    let (_inst_id, ca_id, _user_a_id) = create_test_context(
+    let (inst_id, ca_id, _user_a_id) = create_test_context(
         &db.pool,
         "Centro Acadêmico de Computação",
         "CACC",
@@ -711,19 +718,26 @@ async fn should_filter_own_demands_with_mine_param() {
     let uid_b = "student-mine-b";
     let obj_b = Uuid::new_v4();
     let user_b_id = Uuid::new_v4();
-    sqlx::query("INSERT INTO app_user (id, firebase_uid) VALUES ($1, $2)")
+    sqlx::query("INSERT INTO app_user (id, firebase_uid, status) VALUES ($1, $2, 'incomplete')")
         .bind(user_b_id)
         .bind(uid_b)
         .execute(&db.pool)
         .await
         .unwrap();
 
-    let expires_at = Utc::now() + chrono::Duration::days(120);
+    let now = Utc::now();
+    let expires_at = now + chrono::Duration::days(120);
     sqlx::query(
-        "INSERT INTO institutional_verification (user_id, student_membership_confirmed, course_name, expires_at) \
-         VALUES ($1, true, 'Ciência da Computação', $2)",
+        "INSERT INTO institutional_verification (
+            user_id, institution_id, microsoft_object_id, microsoft_tenant_id,
+            microsoft_student_group_id, student_membership_confirmed, course_name,
+            checked_at, expires_at
+         ) VALUES ($1, $2, $3, gen_random_uuid(), gen_random_uuid(), true, 'Ciência da Computação', $4, $5)",
     )
     .bind(user_b_id)
+    .bind(inst_id)
+    .bind(obj_b)
+    .bind(now)
     .bind(expires_at)
     .execute(&db.pool)
     .await
@@ -1033,7 +1047,7 @@ async fn should_reject_listing_when_ca_is_inactive_with_422() {
         true,
         Some("Ciência da Computação"),
         false,
-        "inactive", // CA inativo
+        "archived", // CA arquivado / inativo
     )
     .await;
 
