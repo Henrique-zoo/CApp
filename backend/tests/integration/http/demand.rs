@@ -231,6 +231,60 @@ async fn create_test_context(
     (institution_id, ca_id, user_id)
 }
 
+/// Cria e vincula um estudante adicional com verificação institucional válida à mesma instituição.
+async fn create_test_student(
+    pool: &PgPool,
+    institution_id: Uuid,
+    firebase_uid: &str,
+    object_id: Uuid,
+    is_student: bool,
+    course_name: Option<&str>,
+) -> Uuid {
+    let institution = sqlx::query(
+        "SELECT microsoft_tenant_id, microsoft_student_group_id FROM institution WHERE id = $1",
+    )
+    .bind(institution_id)
+    .fetch_one(pool)
+    .await
+    .expect("should find institution");
+
+    let tenant_id: Uuid = institution.get("microsoft_tenant_id");
+    let group_id: Uuid = institution.get("microsoft_student_group_id");
+
+    let user_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO app_user (id, firebase_uid, status) VALUES ($1, $2, 'incomplete')")
+        .bind(user_id)
+        .bind(firebase_uid)
+        .execute(pool)
+        .await
+        .expect("should insert app_user");
+
+    let now = Utc::now();
+    let expires = now + chrono::Duration::days(30);
+
+    sqlx::query(
+        "INSERT INTO institutional_verification (
+            user_id, institution_id, microsoft_object_id, microsoft_tenant_id,
+            microsoft_student_group_id, student_membership_confirmed, course_name,
+            checked_at, expires_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+    )
+    .bind(user_id)
+    .bind(institution_id)
+    .bind(object_id)
+    .bind(tenant_id)
+    .bind(group_id)
+    .bind(is_student)
+    .bind(course_name)
+    .bind(now)
+    .bind(expires)
+    .execute(pool)
+    .await
+    .expect("should insert institutional_verification");
+
+    user_id
+}
+
 #[tokio::test]
 async fn should_create_physical_space_demand_successfully() {
     let db = TestDatabase::new().await;
@@ -643,31 +697,15 @@ async fn should_list_physical_space_demands_for_student_of_another_course() {
     // Usuário B é estudante de outro curso (Engenharia Mecânica)
     let uid_b = "student-other-course";
     let obj_b = Uuid::new_v4();
-    let user_b_id = Uuid::new_v4();
-    sqlx::query("INSERT INTO app_user (id, firebase_uid, status) VALUES ($1, $2, 'incomplete')")
-        .bind(user_b_id)
-        .bind(uid_b)
-        .execute(&db.pool)
-        .await
-        .unwrap();
-
-    let now = Utc::now();
-    let expires_at = now + chrono::Duration::days(120);
-    sqlx::query(
-        "INSERT INTO institutional_verification (
-            user_id, institution_id, microsoft_object_id, microsoft_tenant_id,
-            microsoft_student_group_id, student_membership_confirmed, course_name,
-            checked_at, expires_at
-         ) VALUES ($1, $2, $3, gen_random_uuid(), gen_random_uuid(), true, 'Engenharia Mecânica', $4, $5)",
+    let _user_b_id = create_test_student(
+        &db.pool,
+        inst_id,
+        uid_b,
+        obj_b,
+        true,
+        Some("Engenharia Mecânica"),
     )
-    .bind(user_b_id)
-    .bind(inst_id)
-    .bind(obj_b)
-    .bind(now)
-    .bind(expires_at)
-    .execute(&db.pool)
-    .await
-    .unwrap();
+    .await;
 
     // Usuário A cria demanda de espaço físico no CA
     let jwt_a = token(uid_a, obj_a);
@@ -682,7 +720,7 @@ async fn should_list_physical_space_demands_for_student_of_another_course() {
     assert_eq!(status, StatusCode::CREATED);
 
     // Usuário B (de outro curso) consulta demandas de espaço físico
-    let jwt_b = token(uid_b, obj_b);
+    let jwt_b = token_with_email(uid_b, obj_b, "241098766@aluno.unb.br");
     let list_path = format!("/api/v1/academic-centers/{ca_id}/demands?forum=physical_space");
     let (status, body) = get_request(&app, &list_path, Some(&jwt_b)).await;
 
@@ -717,34 +755,18 @@ async fn should_filter_own_demands_with_mine_param() {
 
     let uid_b = "student-mine-b";
     let obj_b = Uuid::new_v4();
-    let user_b_id = Uuid::new_v4();
-    sqlx::query("INSERT INTO app_user (id, firebase_uid, status) VALUES ($1, $2, 'incomplete')")
-        .bind(user_b_id)
-        .bind(uid_b)
-        .execute(&db.pool)
-        .await
-        .unwrap();
-
-    let now = Utc::now();
-    let expires_at = now + chrono::Duration::days(120);
-    sqlx::query(
-        "INSERT INTO institutional_verification (
-            user_id, institution_id, microsoft_object_id, microsoft_tenant_id,
-            microsoft_student_group_id, student_membership_confirmed, course_name,
-            checked_at, expires_at
-         ) VALUES ($1, $2, $3, gen_random_uuid(), gen_random_uuid(), true, 'Ciência da Computação', $4, $5)",
+    let _user_b_id = create_test_student(
+        &db.pool,
+        inst_id,
+        uid_b,
+        obj_b,
+        true,
+        Some("Ciência da Computação"),
     )
-    .bind(user_b_id)
-    .bind(inst_id)
-    .bind(obj_b)
-    .bind(now)
-    .bind(expires_at)
-    .execute(&db.pool)
-    .await
-    .unwrap();
+    .await;
 
     let jwt_a = token(uid_a, obj_a);
-    let jwt_b = token(uid_b, obj_b);
+    let jwt_b = token_with_email(uid_b, obj_b, "241098766@aluno.unb.br");
     let post_path = format!("/api/v1/academic-centers/{ca_id}/demands");
 
     // Usuário A cria "Reparo da porta"
