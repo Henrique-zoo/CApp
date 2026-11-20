@@ -1,8 +1,15 @@
-//! Camada de casos de uso prevista para o módulo de demandas.
+//! Camada de aplicação do módulo de demandas.
 //!
-//! [`commands`] agrupará alterações de estado, [`queries`] consultas e
-//! [`services`] a coordenação dessas operações. Ainda não há implementações.
+//! Reúne casos de uso, comandos, contratos abstratos (ports) e erros
+//! para gerenciamento de demandas acadêmicas e de espaço físico.
 
 pub mod commands;
+pub mod error;
+pub mod ports;
 pub mod queries;
 pub mod services;
+
+pub use commands::*;
+pub use error::*;
+pub use ports::*;
+pub use services::*;
