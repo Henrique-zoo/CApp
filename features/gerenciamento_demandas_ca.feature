@@ -1,9 +1,8 @@
-@pending
 # language: pt
 
 # Referência: Relatório de Features do Projeto, seções 2.4, 5.1, 5.2 e 5.4.
 # Rastreabilidade: Issue #148 — Especificar cenários BDD de gerenciamento pelo CA.
-@pending_backend @pending_mobile
+@pending @pending_backend @pending_mobile
 Funcionalidade: Gerenciamento de demandas pelo Centro Acadêmico
 
   Como integrante da gestão do Centro Acadêmico

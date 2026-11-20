@@ -32,8 +32,12 @@ final sharedSteps = <StepDefinition>[
   pendingStep(r'^o CA "([^"]*)" deixa de possuir o cargo "([^"]*)"$'),
   pendingStep(r'^o CA "([^"]*)" mantém o cargo "([^"]*)"$'),
   pendingStep(
+    r'^o CA "([^"]*)" possui os cargos "([^"]*)" e "([^"]*)"$',
+  ),
+  pendingStep(
     r'^o CA "([^"]*)" possui os cargos "([^"]*)", "([^"]*)" e "([^"]*)"$',
   ),
+  pendingStep(r'^o CA ativo é "([^"]*)"$'),
   pendingStep(r'^o Centro Acadêmico "([^"]*)" está cadastrado na UnB$'),
   pendingStep(
     r'^o cargo "([^"]*)" de "([^"]*)" não possui integrante vinculado$',
@@ -53,6 +57,7 @@ final sharedSteps = <StepDefinition>[
   ),
   pendingStep(r'^o integrante possui a permissão "([^"]*)" nesse CA$'),
   pendingStep(r'^possuo a permissão "([^"]*)" nesse CA$'),
+  pendingStep(r'^que estou autenticado como "([^"]*)"$'),
   pendingStep(r'^que estou autenticado no CApp$'),
   pendingStep(r'^que o CA ativo é "([^"]*)"$'),
   pendingStep(r'^que o Centro Acadêmico "([^"]*)" está cadastrado na UnB$'),
@@ -74,6 +79,7 @@ final sharedSteps = <StepDefinition>[
   pendingStep(r'^"([^"]*)" continua podendo acessar "([^"]*)" como estudante$'),
   pendingStep(r'^"([^"]*)" deixa de integrar a gestão de "([^"]*)"$'),
   pendingStep(r'^"([^"]*)" não passa a integrar a gestão de "([^"]*)"$'),
+  pendingStep(r'^"([^"]*)" não possui cargo de gestão em "([^"]*)"$'),
   pendingStep(
     r'^"([^"]*)" permanece com a permissão de "([^"]*)" em "([^"]*)"$',
   ),

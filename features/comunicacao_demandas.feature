@@ -1,9 +1,8 @@
-@pending
 # language: pt
 
 # Referência: Relatório de Features do Projeto, seções 5.1, 5.2 e 5.3.
 # Rastreabilidade: Issue #149 — Especificar cenários BDD de comunicação entre estudante e CA.
-@pending_backend @pending_mobile
+@pending @pending_backend @pending_mobile
 Funcionalidade: Comunicação e comentários entre estudante e Centro Acadêmico
 
   Como estudante ou integrante da gestão do Centro Acadêmico
