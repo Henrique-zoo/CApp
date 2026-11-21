@@ -69,6 +69,7 @@ fn map_application_error(error: EventApplicationError) -> Response {
             EventDomainError::InvalidMaxCapacity(_) => {
                 (StatusCode::BAD_REQUEST, "invalid_max_capacity")
             }
+            EventDomainError::CapacityExceeded { .. } => (StatusCode::CONFLICT, "event_full"),
             EventDomainError::EventNotPublished => {
                 (StatusCode::UNPROCESSABLE_ENTITY, "event_not_available")
             }
@@ -84,6 +85,7 @@ fn map_application_error(error: EventApplicationError) -> Response {
         EventApplicationError::ActiveRegistrationNotFound { .. } => {
             (StatusCode::CONFLICT, "no_active_registration")
         }
+        EventApplicationError::EventFull { .. } => (StatusCode::CONFLICT, "event_full"),
         EventApplicationError::PermissionDenied => (StatusCode::FORBIDDEN, "permission_denied"),
         EventApplicationError::Repository(_) => {
             (StatusCode::INTERNAL_SERVER_ERROR, "internal_error")
@@ -1218,6 +1220,194 @@ mod tests {
             let body = to_bytes(bad_update.into_body(), usize::MAX).await.unwrap();
             let err: EventErrorResponse = serde_json::from_slice(&body).unwrap();
             assert_eq!(err.code, "invalid_max_capacity");
+        }
+    }
+
+    #[tokio::test]
+    async fn registration_endpoints_enforce_capacity_spot_release_and_concurrency() {
+        let ca_cc = Uuid::new_v4();
+        let now = Utc::now();
+        let starts_at = now + Duration::hours(24);
+        let ends_at = starts_at + Duration::hours(2);
+
+        let limited_event = Event {
+            id: Uuid::new_v4(),
+            academic_center_id: ca_cc,
+            author_id: Uuid::new_v4(),
+            title: "Palestra de IA".to_string(),
+            description: "Evento com 2 vagas".to_string(),
+            location: "Auditório 1".to_string(),
+            starts_at,
+            ends_at,
+            status: EventPublicationStatus::Published,
+            registration: EventRegistrationInfo::with_capacity(2).unwrap(),
+            published_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let unlimited_event = Event {
+            id: Uuid::new_v4(),
+            academic_center_id: ca_cc,
+            author_id: Uuid::new_v4(),
+            title: "Semana Acadêmica".to_string(),
+            description: "Evento sem limite".to_string(),
+            location: "Anfiteatro".to_string(),
+            starts_at,
+            ends_at,
+            status: EventPublicationStatus::Published,
+            registration: EventRegistrationInfo::unrestricted(),
+            published_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let repo = Arc::new(InMemoryEventRepository::with_events(vec![
+            limited_event.clone(),
+            unlimited_event.clone(),
+        ]));
+        let app = test_read_router(repo.clone());
+
+        let student_1 = Uuid::new_v4();
+        let student_2 = Uuid::new_v4();
+        let student_3 = Uuid::new_v4();
+
+        // 1. student_1 ocupa a primeira vaga
+        let res_1 = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
+                        limited_event.id
+                    ))
+                    .header("X-User-Id", student_1.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res_1.status(), StatusCode::CREATED);
+
+        // 2. Repetir inscrição de student_1 é recusado com 409 ("already_registered") sem ocupar a 2ª vaga
+        let dup_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
+                        limited_event.id
+                    ))
+                    .header("X-User-Id", student_1.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(dup_res.status(), StatusCode::CONFLICT);
+        let body = to_bytes(dup_res.into_body(), usize::MAX).await.unwrap();
+        let dup_err: EventErrorResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(dup_err.code, "already_registered");
+
+        // 3. student_2 e student_3 disputam simultaneamente a última vaga restante via HTTP
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let mut handles = Vec::new();
+        for candidate in [student_2, student_3] {
+            let router = app.clone();
+            let bar = barrier.clone();
+            let event_id = limited_event.id;
+            handles.push(tokio::spawn(async move {
+                bar.wait().await;
+                let response = router
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri(format!(
+                                "/api/v1/academic-centers/{ca_cc}/events/{event_id}/registrations"
+                            ))
+                            .header("X-User-Id", candidate.to_string())
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let status = response.status();
+                let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+                (candidate, status, bytes)
+            }));
+        }
+
+        let mut created_count = 0;
+        let mut full_candidate = None;
+        for handle in handles {
+            let (candidate, status, bytes) = handle.await.unwrap();
+            if status == StatusCode::CREATED {
+                created_count += 1;
+            } else {
+                assert_eq!(status, StatusCode::CONFLICT);
+                let err: EventErrorResponse = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(err.code, "event_full");
+                full_candidate = Some(candidate);
+            }
+        }
+        assert_eq!(created_count, 1);
+        let waiting_candidate = full_candidate.expect("um dos candidatos deve receber event_full");
+
+        // 4. Cancelamento de student_1 libera 1 vaga e permite que waiting_candidate se inscreva
+        let cancel_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
+                        limited_event.id
+                    ))
+                    .header("X-User-Id", student_1.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(cancel_res.status(), StatusCode::OK);
+
+        let retry_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
+                        limited_event.id
+                    ))
+                    .header("X-User-Id", waiting_candidate.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(retry_res.status(), StatusCode::CREATED);
+
+        // 5. Evento sem limite de vagas aceita inscrições sem bloqueio de capacidade
+        for _ in 0..5 {
+            let res_unlim = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!(
+                            "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
+                            unlimited_event.id
+                        ))
+                        .header("X-User-Id", Uuid::new_v4().to_string())
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res_unlim.status(), StatusCode::CREATED);
         }
     }
 }
