@@ -394,6 +394,11 @@ impl RegistrationStatus {
             Self::Waitlisted => "waitlisted",
         }
     }
+
+    /// Indica se a inscrição encontra-se ativa (confirmada).
+    pub const fn is_active(&self) -> bool {
+        matches!(self, Self::Confirmed)
+    }
 }
 
 impl fmt::Display for RegistrationStatus {
@@ -414,6 +419,35 @@ impl FromStr for RegistrationStatus {
                 other.to_string(),
             )),
         }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for RegistrationStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for RegistrationStatus {
+    fn decode(
+        value: sqlx::postgres::PgValueRef<'r>,
+    ) -> Result<Self, Box<dyn std::error::Error + 'static + Send + Sync>> {
+        let text = <&'r str as sqlx::Decode<'r, sqlx::Postgres>>::decode(value)?;
+        text.parse()
+            .map_err(|err: EventDomainError| Box::new(err) as _)
+    }
+}
+
+impl<'q> sqlx::Encode<'q, sqlx::Postgres> for RegistrationStatus {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + 'static + Send + Sync>> {
+        <&str as sqlx::Encode<'q, sqlx::Postgres>>::encode_by_ref(&self.as_str(), buf)
     }
 }
 
@@ -452,6 +486,18 @@ impl EventRegistration {
             registered_at: Utc::now(),
             cancelled_at: None,
         })
+    }
+
+    /// Indica se a inscrição está atualmente ativa (`Confirmed`).
+    pub const fn is_active(&self) -> bool {
+        self.status.is_active()
+    }
+
+    /// Reativa uma inscrição previamente cancelada pelo participante.
+    pub fn reactivate(&mut self) {
+        self.status = RegistrationStatus::Confirmed;
+        self.registered_at = Utc::now();
+        self.cancelled_at = None;
     }
 
     /// Cancela a inscrição registrando o instante do cancelamento.
