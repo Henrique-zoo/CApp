@@ -127,10 +127,10 @@ final electionManagementSteps = <StepDefinition>[
   pendingStep(
     r'^o manifesto contém uma autoridade do servidor, uma da comissão e uma para cada chapa$',
   ),
+  pendingStep(r'^o manifesto é publicado com a assinatura do servidor$'),
   pendingStep(
-    r'^o manifesto é assinado pelo servidor e permanece imutável após a abertura$',
+    r'^que o manifesto oficial da eleição foi publicado e ainda não houve votos$',
   ),
-  pendingStep(r'^que a eleição foi aberta e possui manifesto publicado$'),
   pendingStep(r'^a comissão tenta alterar as chapas ou a ordem das opções$'),
   pendingStep(r'^a alteração da configuração eleitoral é recusada$'),
   pendingStep(r'^o manifesto publicado permanece inalterado$'),

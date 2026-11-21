@@ -440,16 +440,16 @@ fn then_manifesto_contem_autoridades_independentes(_world: &mut AppWorld) {
     );
 }
 
-/// Pendente: o manifesto é assinado pelo servidor e permanece imutável após a abertura.
-#[then(regex = r#"^o manifesto é assinado pelo servidor e permanece imutável após a abertura$"#)]
-fn then_manifesto_assinado_e_immutavel(_world: &mut AppWorld) {
-    pending_step("o manifesto é assinado pelo servidor e permanece imutável após a abertura");
+/// Pendente: o manifesto é publicado com a assinatura do servidor.
+#[then(regex = r#"^o manifesto é publicado com a assinatura do servidor$"#)]
+fn then_manifesto_publicado_com_assinatura_servidor(_world: &mut AppWorld) {
+    pending_step("o manifesto é publicado com a assinatura do servidor");
 }
 
-/// Pendente: que a eleição foi aberta e possui manifesto publicado.
-#[given(regex = r#"^que a eleição foi aberta e possui manifesto publicado$"#)]
-fn given_eleicao_aberta_manifesto_publicado(_world: &mut AppWorld) {
-    pending_step("que a eleição foi aberta e possui manifesto publicado");
+/// Pendente: que o manifesto oficial da eleição foi publicado e ainda não houve votos.
+#[given(regex = r#"^que o manifesto oficial da eleição foi publicado e ainda não houve votos$"#)]
+fn given_manifesto_oficial_publicado_sem_votos(_world: &mut AppWorld) {
+    pending_step("que o manifesto oficial da eleição foi publicado e ainda não houve votos");
 }
 
 /// Pendente: a comissão tenta alterar as chapas ou a ordem das opções.
