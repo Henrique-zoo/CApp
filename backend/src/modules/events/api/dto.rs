@@ -80,15 +80,69 @@ pub struct PublishEventRequest {
     pub actor_id: Option<Uuid>,
 }
 
-/// Parâmetros de query string para listagem de eventos de um Centro Acadêmico.
+/// Parâmetros de query string para listagem e consulta de detalhes de eventos de um Centro Acadêmico.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ListEventsQueryParams {
-    /// Quando `true`, retorna somente os eventos publicados na agenda oficial do CA.
-    #[serde(default)]
-    pub only_published: bool,
+    /// Identificador do Centro Acadêmico ativo (`?ca_id=...` ou `?academic_center_id=...`).
+    #[serde(alias = "academic_center_id")]
+    pub ca_id: Option<Uuid>,
+    /// Define se apenas eventos publicados devem ser retornados.
+    /// Quando omitido nas consultas públicas da agenda, assume `true` por padrão.
+    pub only_published: Option<bool>,
 }
 
-/// Representação JSON de um evento retornada pela API.
+impl ListEventsQueryParams {
+    /// Retorna se a consulta deve filtrar exclusivamente eventos publicados (`true` por padrão).
+    pub const fn should_filter_only_published(&self) -> bool {
+        match self.only_published {
+            Some(flag) => flag,
+            None => true,
+        }
+    }
+}
+
+/// Representação resumida de um evento publicado na listagem da agenda do CA ativo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventSummaryResponse {
+    /// Identificador único do evento.
+    pub id: Uuid,
+    /// Identificador do Centro Acadêmico responsável.
+    pub academic_center_id: Uuid,
+    /// Título do evento.
+    pub title: String,
+    /// Local do evento.
+    pub location: String,
+    /// Data/hora de início.
+    pub starts_at: DateTime<Utc>,
+    /// Data/hora de término.
+    pub ends_at: DateTime<Utc>,
+    /// Situação de publicação do evento.
+    pub status: EventPublicationStatus,
+    /// Indica se o evento aceita novas inscrições diretas no momento.
+    pub has_available_spots: bool,
+    /// Número de vagas restantes quando há limite configurado (`None` para eventos sem limite).
+    pub remaining_spots: Option<u32>,
+}
+
+impl From<Event> for EventSummaryResponse {
+    fn from(event: Event) -> Self {
+        let remaining_spots = event.registration.remaining_spots();
+        let has_available_spots = event.registration.has_available_spots();
+        Self {
+            id: event.id,
+            academic_center_id: event.academic_center_id,
+            title: event.title,
+            location: event.location,
+            starts_at: event.starts_at,
+            ends_at: event.ends_at,
+            status: event.status,
+            has_available_spots,
+            remaining_spots,
+        }
+    }
+}
+
+/// Representação completa JSON de um evento retornada pela API (listagem e detalhes).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventResponse {
     /// Identificador único do evento.
@@ -99,7 +153,7 @@ pub struct EventResponse {
     pub author_id: Uuid,
     /// Título do evento.
     pub title: String,
-    /// Descrição do evento.
+    /// Descrição detalhada do evento.
     pub description: String,
     /// Local do evento.
     pub location: String,
@@ -128,6 +182,9 @@ pub struct EventResponse {
     /// Data/hora da última atualização.
     pub updated_at: DateTime<Utc>,
 }
+
+/// Alias semântico para a resposta de detalhes de um evento publicado.
+pub type EventDetailResponse = EventResponse;
 
 impl From<Event> for EventResponse {
     fn from(event: Event) -> Self {

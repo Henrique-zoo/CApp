@@ -14,18 +14,21 @@ pub mod dto;
 pub mod handlers;
 
 pub use dto::{
-    CreateEventRequest, EventErrorResponse, EventResponse, ListEventsQueryParams,
-    PublishEventRequest, UpdateEventRequest,
+    CreateEventRequest, EventDetailResponse, EventErrorResponse, EventResponse,
+    EventSummaryResponse, ListEventsQueryParams, PublishEventRequest, UpdateEventRequest,
 };
 pub use handlers::{
-    create_event_handler, get_event_handler, list_ca_events_handler, publish_event_handler,
-    update_event_handler,
+    create_event_handler, get_ca_event_detail_handler, get_event_handler, list_ca_events_handler,
+    list_published_events_handler, publish_event_handler, update_event_handler,
 };
 
 /// Constrói o roteador HTTP do módulo de eventos sob `/api/v1`.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/v1/events", post(create_event_handler))
+        .route(
+            "/api/v1/events",
+            get(list_published_events_handler).post(create_event_handler),
+        )
         .route(
             "/api/v1/events/{id}",
             get(get_event_handler).put(update_event_handler),
@@ -34,5 +37,9 @@ pub fn router() -> Router<AppState> {
         .route(
             "/api/v1/academic-centers/{ca_id}/events",
             get(list_ca_events_handler),
+        )
+        .route(
+            "/api/v1/academic-centers/{ca_id}/events/{id}",
+            get(get_ca_event_detail_handler),
         )
 }

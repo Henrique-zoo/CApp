@@ -5,7 +5,10 @@
 //! por meio de [`EventAuthorizationPort`] e aplicando as validações do domínio ([`Event`])
 //! antes de persistir no repositório.
 
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+};
 
 use async_trait::async_trait;
 use thiserror::Error;
@@ -13,7 +16,10 @@ use uuid::Uuid;
 
 use super::{
     commands::{CreateEventCommand, PublishEventCommand, UpdateEventCommand},
-    queries::{GetEventByIdQuery, ListCaEventsQuery},
+    queries::{
+        GetEventByIdQuery, GetPublishedEventDetailQuery, ListCaEventsQuery,
+        ListPublishedEventsByCaQuery,
+    },
 };
 use crate::modules::events::domain::{Event, EventDomainError};
 
@@ -24,7 +30,7 @@ pub enum EventApplicationError {
     #[error(transparent)]
     Domain(#[from] EventDomainError),
 
-    /// O evento solicitado não foi encontrado.
+    /// O evento solicitado não foi encontrado ou não está disponível no contexto consultado.
     #[error("evento '{0}' não encontrado")]
     NotFound(Uuid),
 
@@ -53,8 +59,94 @@ pub trait EventRepository: Send + Sync {
         only_published: bool,
     ) -> Result<Vec<Event>, EventApplicationError>;
 
+    /// Lista exclusivamente os eventos publicados na agenda oficial de um Centro Acadêmico.
+    async fn find_published_by_ca(
+        &self,
+        academic_center_id: Uuid,
+    ) -> Result<Vec<Event>, EventApplicationError> {
+        let events = self
+            .list_by_academic_center(academic_center_id, true)
+            .await?;
+        Ok(events
+            .into_iter()
+            .filter(|event| event.academic_center_id == academic_center_id && event.is_published())
+            .collect())
+    }
+
     /// Atualiza os dados de um evento existente no armazenamento.
     async fn update(&self, event: &Event) -> Result<Event, EventApplicationError>;
+}
+
+/// Repositório de eventos em memória para testes unitários e de contrato HTTP.
+#[derive(Debug, Clone, Default)]
+pub struct InMemoryEventRepository {
+    events: Arc<Mutex<Vec<Event>>>,
+}
+
+impl InMemoryEventRepository {
+    /// Cria um repositório em memória vazio.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Cria um repositório em memória pré-populado com a coleção de eventos informada.
+    pub fn with_events(events: impl IntoIterator<Item = Event>) -> Self {
+        Self {
+            events: Arc::new(Mutex::new(events.into_iter().collect())),
+        }
+    }
+}
+
+#[async_trait]
+impl EventRepository for InMemoryEventRepository {
+    async fn create(&self, event: &Event) -> Result<Event, EventApplicationError> {
+        self.events.lock().unwrap().push(event.clone());
+        Ok(event.clone())
+    }
+
+    async fn find_by_id(&self, id: Uuid) -> Result<Option<Event>, EventApplicationError> {
+        Ok(self
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|event| event.id == id)
+            .cloned())
+    }
+
+    async fn update(&self, event: &Event) -> Result<Event, EventApplicationError> {
+        let mut guard = self.events.lock().unwrap();
+        if let Some(existing) = guard.iter_mut().find(|item| item.id == event.id) {
+            *existing = event.clone();
+            Ok(event.clone())
+        } else {
+            Err(EventApplicationError::NotFound(event.id))
+        }
+    }
+
+    async fn list_by_academic_center(
+        &self,
+        academic_center_id: Uuid,
+        only_published: bool,
+    ) -> Result<Vec<Event>, EventApplicationError> {
+        let mut results: Vec<Event> = self
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| {
+                event.academic_center_id == academic_center_id
+                    && (!only_published || event.is_published())
+            })
+            .cloned()
+            .collect();
+        results.sort_by(|a, b| {
+            a.starts_at
+                .cmp(&b.starts_at)
+                .then_with(|| a.created_at.cmp(&b.created_at))
+        });
+        Ok(results)
+    }
 }
 
 /// Contrato de controle de acesso para verificar permissões administrativas sobre eventos no CA.
@@ -286,7 +378,8 @@ where
     /// Obtém os detalhes de um evento pelo seu identificador.
     ///
     /// Quando `query.only_published` for `true`, eventos não publicados retornam
-    /// [`EventApplicationError::NotFound`].
+    /// [`EventApplicationError::NotFound`]. Quando `query.academic_center_id` for
+    /// informado, eventos pertencentes a outro CA também retornam [`EventApplicationError::NotFound`].
     pub async fn get_event_by_id(
         &self,
         query: GetEventByIdQuery,
@@ -297,6 +390,12 @@ where
             .await?
             .ok_or(EventApplicationError::NotFound(query.event_id))?;
 
+        if let Some(active_ca_id) = query.academic_center_id
+            && event.academic_center_id != active_ca_id
+        {
+            return Err(EventApplicationError::NotFound(query.event_id));
+        }
+
         if query.only_published && !event.is_published() {
             return Err(EventApplicationError::NotFound(query.event_id));
         }
@@ -304,75 +403,92 @@ where
         Ok(event)
     }
 
+    /// Obtém os detalhes de um evento publicado, garantindo que eventos não publicados
+    /// (rascunho, pendente de homologação, rejeitado ou cancelado) ou pertencentes a
+    /// outro CA não sejam disponibilizados.
+    pub async fn get_published_event_detail(
+        &self,
+        query: GetPublishedEventDetailQuery,
+    ) -> Result<Event, EventApplicationError> {
+        self.get_event_by_id(GetEventByIdQuery {
+            event_id: query.event_id,
+            academic_center_id: query.academic_center_id,
+            only_published: true,
+        })
+        .await
+    }
+
     /// Lista os eventos de um Centro Acadêmico (todos ou somente os publicados na agenda).
     pub async fn list_ca_events(
         &self,
         query: ListCaEventsQuery,
     ) -> Result<Vec<Event>, EventApplicationError> {
-        self.repository
+        let events = self
+            .repository
             .list_by_academic_center(query.academic_center_id, query.only_published)
+            .await?;
+
+        Ok(events
+            .into_iter()
+            .filter(|event| {
+                event.academic_center_id == query.academic_center_id
+                    && (!query.only_published || event.is_published())
+            })
+            .collect())
+    }
+
+    /// Lista exclusivamente os eventos publicados do Centro Acadêmico ativo.
+    pub async fn list_published_events_by_ca(
+        &self,
+        query: ListPublishedEventsByCaQuery,
+    ) -> Result<Vec<Event>, EventApplicationError> {
+        self.repository
+            .find_published_by_ca(query.academic_center_id)
             .await
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
     use chrono::{Duration, Utc};
 
     use super::*;
-    use crate::modules::events::domain::{EventPublicationStatus, EventRegistrationInfo};
+    use crate::modules::events::{
+        application::queries::{GetPublishedEventDetailUseCase, ListPublishedEventsByCaUseCase},
+        domain::{EventPublicationStatus, EventRegistrationInfo},
+    };
 
-    #[derive(Clone, Default)]
-    struct InMemoryEventRepository {
-        events: Arc<Mutex<Vec<Event>>>,
-    }
-
-    #[async_trait]
-    impl EventRepository for InMemoryEventRepository {
-        async fn create(&self, event: &Event) -> Result<Event, EventApplicationError> {
-            self.events.lock().unwrap().push(event.clone());
-            Ok(event.clone())
-        }
-
-        async fn find_by_id(&self, id: Uuid) -> Result<Option<Event>, EventApplicationError> {
-            Ok(self
-                .events
-                .lock()
-                .unwrap()
-                .iter()
-                .find(|event| event.id == id)
-                .cloned())
-        }
-
-        async fn update(&self, event: &Event) -> Result<Event, EventApplicationError> {
-            let mut guard = self.events.lock().unwrap();
-            if let Some(existing) = guard.iter_mut().find(|item| item.id == event.id) {
-                *existing = event.clone();
-                Ok(event.clone())
-            } else {
-                Err(EventApplicationError::NotFound(event.id))
-            }
-        }
-
-        async fn list_by_academic_center(
-            &self,
-            academic_center_id: Uuid,
-            only_published: bool,
-        ) -> Result<Vec<Event>, EventApplicationError> {
-            Ok(self
-                .events
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|event| {
-                    event.academic_center_id == academic_center_id
-                        && (!only_published || event.is_published())
-                })
-                .cloned()
-                .collect())
-        }
+    fn make_event_with_status(
+        ca_id: Uuid,
+        author_id: Uuid,
+        title: &str,
+        description: &str,
+        status: EventPublicationStatus,
+    ) -> Event {
+        let now = Utc::now();
+        let starts_at = now + Duration::days(3);
+        let ends_at = starts_at + Duration::hours(2);
+        let published_at = if status == EventPublicationStatus::Published {
+            Some(now)
+        } else {
+            None
+        };
+        Event::new(
+            Uuid::new_v4(),
+            ca_id,
+            author_id,
+            title,
+            description,
+            "Auditório 2",
+            starts_at,
+            ends_at,
+            status,
+            EventRegistrationInfo::unrestricted(),
+            published_at,
+            now,
+            now,
+        )
+        .expect("evento de teste deve ser válido")
     }
 
     #[tokio::test]
@@ -433,5 +549,188 @@ mod tests {
             .expect("autorizado deve publicar diretamente");
         assert_eq!(published.status, EventPublicationStatus::Published);
         assert!(published.published_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn lists_only_published_events_from_active_academic_center() {
+        let ca_computacao = Uuid::new_v4();
+        let ca_matematica = Uuid::new_v4();
+        let author_id = Uuid::new_v4();
+
+        let semana_academica = make_event_with_status(
+            ca_computacao,
+            author_id,
+            "Semana Acadêmica",
+            "Ciclo de palestras de computação",
+            EventPublicationStatus::Published,
+        );
+        let palestra_ia = make_event_with_status(
+            ca_computacao,
+            author_id,
+            "Palestra de IA",
+            "Introdução a modelos fundacionais",
+            EventPublicationStatus::Published,
+        );
+        let hackathon_em_analise = make_event_with_status(
+            ca_computacao,
+            author_id,
+            "Hackathon em análise",
+            "Proposta aguardando homologação",
+            EventPublicationStatus::PendingApproval,
+        );
+        let encontro_rascunho = make_event_with_status(
+            ca_computacao,
+            author_id,
+            "Encontro em rascunho",
+            "Rascunho interno da gestão",
+            EventPublicationStatus::Draft,
+        );
+        let evento_rejeitado = make_event_with_status(
+            ca_computacao,
+            author_id,
+            "Evento rejeitado",
+            "Proposta recusada",
+            EventPublicationStatus::Rejected,
+        );
+        let semana_matematica = make_event_with_status(
+            ca_matematica,
+            author_id,
+            "Semana de Matemática",
+            "Evento de outro CA",
+            EventPublicationStatus::Published,
+        );
+
+        let repo = Arc::new(InMemoryEventRepository::with_events([
+            semana_academica,
+            palestra_ia,
+            hackathon_em_analise,
+            encontro_rascunho,
+            evento_rejeitado,
+            semana_matematica,
+        ]));
+
+        let use_case = ListPublishedEventsByCaUseCase::new(repo.clone());
+        let events_computacao = use_case
+            .execute(ListPublishedEventsByCaQuery::new(ca_computacao))
+            .await
+            .expect("deve listar eventos publicados do CA de Computação");
+
+        let titles: Vec<&str> = events_computacao.iter().map(|e| e.title.as_str()).collect();
+        assert_eq!(titles, vec!["Semana Acadêmica", "Palestra de IA"]);
+
+        // Alternar o CA ativo para CA de Matemática deve retornar apenas os eventos desse CA.
+        let events_matematica = use_case
+            .execute(ListPublishedEventsByCaQuery::new(ca_matematica))
+            .await
+            .expect("deve listar eventos publicados do CA de Matemática");
+
+        let titles_mat: Vec<&str> = events_matematica.iter().map(|e| e.title.as_str()).collect();
+        assert_eq!(titles_mat, vec!["Semana de Matemática"]);
+    }
+
+    #[tokio::test]
+    async fn returns_empty_list_when_active_ca_has_no_published_events() {
+        let ca_computacao = Uuid::new_v4();
+        let author_id = Uuid::new_v4();
+
+        let rascunho = make_event_with_status(
+            ca_computacao,
+            author_id,
+            "Encontro em rascunho",
+            "Não publicado",
+            EventPublicationStatus::Draft,
+        );
+        let pendente = make_event_with_status(
+            ca_computacao,
+            author_id,
+            "Hackathon em análise",
+            "Aguardando homologação",
+            EventPublicationStatus::PendingApproval,
+        );
+
+        let repo = Arc::new(InMemoryEventRepository::with_events([rascunho, pendente]));
+        let use_case = ListPublishedEventsByCaUseCase::new(repo);
+
+        let events = use_case
+            .execute(ListPublishedEventsByCaQuery::new(ca_computacao))
+            .await
+            .expect("deve retornar sucesso com lista vazia");
+
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn returns_published_event_details_and_rejects_unpublished_or_other_ca() {
+        let ca_computacao = Uuid::new_v4();
+        let ca_matematica = Uuid::new_v4();
+        let author_id = Uuid::new_v4();
+
+        let publicado = make_event_with_status(
+            ca_computacao,
+            author_id,
+            "Mudança de sala",
+            "A palestra acontecerá no auditório 2.",
+            EventPublicationStatus::Published,
+        );
+        let pendente = make_event_with_status(
+            ca_computacao,
+            author_id,
+            "Hackathon em análise",
+            "Proposta não homologada",
+            EventPublicationStatus::PendingApproval,
+        );
+        let rascunho = make_event_with_status(
+            ca_computacao,
+            author_id,
+            "Rascunho interno",
+            "Ainda em edição",
+            EventPublicationStatus::Draft,
+        );
+        let cancelado = make_event_with_status(
+            ca_computacao,
+            author_id,
+            "Evento cancelado",
+            "Cancelado pela organização",
+            EventPublicationStatus::Cancelled,
+        );
+
+        let repo = Arc::new(InMemoryEventRepository::with_events([
+            publicado.clone(),
+            pendente.clone(),
+            rascunho.clone(),
+            cancelado.clone(),
+        ]));
+        let detail_use_case = GetPublishedEventDetailUseCase::new(repo);
+
+        // Detalhes de evento publicado no CA ativo devem ser retornados.
+        let detail = detail_use_case
+            .execute(GetPublishedEventDetailQuery::for_academic_center(
+                publicado.id,
+                ca_computacao,
+            ))
+            .await
+            .expect("deve retornar detalhes do evento publicado");
+        assert_eq!(detail.title, "Mudança de sala");
+        assert_eq!(detail.description, "A palestra acontecerá no auditório 2.");
+
+        // Detalhes do mesmo evento quando o CA ativo é outro devem ser recusados (isolamento de CA).
+        let wrong_ca = detail_use_case
+            .execute(GetPublishedEventDetailQuery::for_academic_center(
+                publicado.id,
+                ca_matematica,
+            ))
+            .await;
+        assert_eq!(wrong_ca, Err(EventApplicationError::NotFound(publicado.id)));
+
+        // Eventos não publicados não devem ter seus detalhes disponibilizados.
+        for unpublished in [&pendente, &rascunho, &cancelado] {
+            let res = detail_use_case
+                .execute(GetPublishedEventDetailQuery::for_academic_center(
+                    unpublished.id,
+                    ca_computacao,
+                ))
+                .await;
+            assert_eq!(res, Err(EventApplicationError::NotFound(unpublished.id)));
+        }
     }
 }
