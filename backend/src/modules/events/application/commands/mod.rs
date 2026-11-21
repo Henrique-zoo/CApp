@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::services::{EventApplicationError, EventRepository};
-use crate::modules::events::domain::{EventDomainError, EventRegistration, EventRegistrationInfo};
+use crate::modules::events::domain::{EventRegistration, EventRegistrationInfo};
 
 /// Comando para criar um novo evento (em rascunho ou publicado diretamente) em um Centro Acadêmico.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,59 +162,18 @@ where
     /// - [`EventApplicationError::NotFound`] se o evento não existir ou pertencer a outro CA.
     /// - [`EventApplicationError::EventNotAvailableForRegistration`] se o evento não estiver publicado.
     /// - [`EventApplicationError::AlreadyRegistered`] se o usuário já possuir inscrição ativa no evento.
+    /// - [`EventApplicationError::EventFull`] se o evento tiver atingido o limite máximo de vagas configurado.
     pub async fn execute(
         &self,
         command: RegisterInEventCommand,
     ) -> Result<EventRegistration, EventApplicationError> {
-        if command.participant_id.is_nil() {
-            return Err(EventApplicationError::Domain(
-                EventDomainError::InvalidParticipantId,
-            ));
-        }
-
-        let mut event = self
-            .repository
-            .find_by_id(command.event_id)
-            .await?
-            .ok_or(EventApplicationError::NotFound(command.event_id))?;
-
-        if let Some(active_ca_id) = command.academic_center_id
-            && event.academic_center_id != active_ca_id
-        {
-            return Err(EventApplicationError::NotFound(command.event_id));
-        }
-
-        if !event.is_published() {
-            return Err(EventApplicationError::EventNotAvailableForRegistration(
+        self.repository
+            .register_participant_atomically(
                 command.event_id,
-            ));
-        }
-
-        let registration = match self
-            .repository
-            .find_registration(command.event_id, command.participant_id)
-            .await?
-        {
-            Some(existing) if existing.is_active() => {
-                return Err(EventApplicationError::AlreadyRegistered {
-                    event_id: command.event_id,
-                    participant_id: command.participant_id,
-                });
-            }
-            Some(mut cancelled_registration) => {
-                cancelled_registration.reactivate();
-                cancelled_registration
-            }
-            None => EventRegistration::new_confirmed(command.event_id, command.participant_id)?,
-        };
-
-        let saved = self.repository.save_registration(&registration).await?;
-        event.registration.confirmed_registrations =
-            event.registration.confirmed_registrations.saturating_add(1);
-        event.updated_at = Utc::now();
-        self.repository.update(&event).await?;
-
-        Ok(saved)
+                command.participant_id,
+                command.academic_center_id,
+            )
+            .await
     }
 }
 
@@ -247,39 +206,12 @@ where
         &self,
         command: CancelEventRegistrationCommand,
     ) -> Result<EventRegistration, EventApplicationError> {
-        if command.participant_id.is_nil() {
-            return Err(EventApplicationError::Domain(
-                EventDomainError::InvalidParticipantId,
-            ));
-        }
-
-        let mut event = self
-            .repository
-            .find_by_id(command.event_id)
-            .await?
-            .ok_or(EventApplicationError::NotFound(command.event_id))?;
-
-        if let Some(active_ca_id) = command.academic_center_id
-            && event.academic_center_id != active_ca_id
-        {
-            return Err(EventApplicationError::NotFound(command.event_id));
-        }
-
-        let mut registration = self
-            .repository
-            .find_registration(command.event_id, command.participant_id)
-            .await?
-            .filter(EventRegistration::is_active)
-            .ok_or(EventApplicationError::ActiveRegistrationNotFound {
-                event_id: command.event_id,
-                participant_id: command.participant_id,
-            })?;
-
-        registration.cancel();
-        let saved = self.repository.save_registration(&registration).await?;
-        event.cancel_participant_registration();
-        self.repository.update(&event).await?;
-
-        Ok(saved)
+        self.repository
+            .cancel_registration_atomically(
+                command.event_id,
+                command.participant_id,
+                command.academic_center_id,
+            )
+            .await
     }
 }
