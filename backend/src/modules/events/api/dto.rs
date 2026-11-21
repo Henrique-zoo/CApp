@@ -4,7 +4,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::modules::events::domain::{Event, EventPublicationStatus, EventRegistrationInfo};
+use crate::modules::events::domain::{
+    Event, EventPublicationStatus, EventRegistration, EventRegistrationInfo, RegistrationStatus,
+};
 
 /// Dados do formulário para criação de um novo evento (rascunho ou publicação direta).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +211,63 @@ impl From<Event> for EventResponse {
             published_at: event.published_at,
             created_at: event.created_at,
             updated_at: event.updated_at,
+        }
+    }
+}
+
+/// Representação JSON de uma inscrição (ativa ou cancelada) de um participante em um evento.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventRegistrationResponse {
+    /// Identificador único da inscrição.
+    pub id: Uuid,
+    /// Identificador do evento.
+    pub event_id: Uuid,
+    /// Identificador do participante inscrito.
+    pub participant_id: Uuid,
+    /// Situação atual da inscrição (`confirmed`, `cancelled`, `waitlisted`).
+    pub status: RegistrationStatus,
+    /// Data/hora em que a inscrição foi realizada.
+    pub registered_at: DateTime<Utc>,
+    /// Data/hora do cancelamento, quando aplicável.
+    pub cancelled_at: Option<DateTime<Utc>>,
+    /// Mensagem informativa sobre o resultado da operação.
+    pub message: String,
+}
+
+impl EventRegistrationResponse {
+    /// Constrói a resposta para uma inscrição confirmada com sucesso.
+    pub fn confirmed(registration: EventRegistration) -> Self {
+        Self {
+            id: registration.id,
+            event_id: registration.event_id,
+            participant_id: registration.participant_id,
+            status: registration.status,
+            registered_at: registration.registered_at,
+            cancelled_at: registration.cancelled_at,
+            message: "Inscrição realizada com sucesso.".to_string(),
+        }
+    }
+
+    /// Constrói a resposta para o cancelamento de inscrição realizado com sucesso.
+    pub fn cancelled(registration: EventRegistration) -> Self {
+        Self {
+            id: registration.id,
+            event_id: registration.event_id,
+            participant_id: registration.participant_id,
+            status: registration.status,
+            registered_at: registration.registered_at,
+            cancelled_at: registration.cancelled_at,
+            message: "Cancelamento realizado com sucesso.".to_string(),
+        }
+    }
+}
+
+impl From<EventRegistration> for EventRegistrationResponse {
+    fn from(registration: EventRegistration) -> Self {
+        if registration.is_active() {
+            Self::confirmed(registration)
+        } else {
+            Self::cancelled(registration)
         }
     }
 }

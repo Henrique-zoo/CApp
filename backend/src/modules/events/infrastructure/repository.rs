@@ -8,7 +8,8 @@ use uuid::Uuid;
 use crate::modules::events::{
     application::{EventApplicationError, EventAuthorizationPort, EventRepository},
     domain::{
-        DIRECT_EVENT_MANAGEMENT_PERMISSION, Event, EventPublicationStatus, EventRegistrationInfo,
+        DIRECT_EVENT_MANAGEMENT_PERMISSION, Event, EventPublicationStatus, EventRegistration,
+        EventRegistrationInfo,
     },
 };
 
@@ -296,6 +297,95 @@ impl EventRepository for PostgresEventRepository {
 
         row.map(Event::from)
             .ok_or(EventApplicationError::NotFound(event.id))
+    }
+
+    async fn find_registration(
+        &self,
+        event_id: Uuid,
+        participant_id: Uuid,
+    ) -> Result<Option<EventRegistration>, EventApplicationError> {
+        let row: Option<EventRegistration> = sqlx::query_as(
+            "SELECT
+                id,
+                event_id,
+                participant_id,
+                status,
+                registered_at,
+                cancelled_at
+             FROM event_registrations
+             WHERE event_id = $1 AND participant_id = $2",
+        )
+        .bind(event_id)
+        .bind(participant_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        Ok(row)
+    }
+
+    async fn save_registration(
+        &self,
+        registration: &EventRegistration,
+    ) -> Result<EventRegistration, EventApplicationError> {
+        let row: EventRegistration = sqlx::query_as(
+            "INSERT INTO event_registrations (
+                id,
+                event_id,
+                participant_id,
+                status,
+                registered_at,
+                cancelled_at
+             )
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (event_id, participant_id)
+             DO UPDATE SET
+                status = EXCLUDED.status,
+                registered_at = EXCLUDED.registered_at,
+                cancelled_at = EXCLUDED.cancelled_at
+             RETURNING
+                id,
+                event_id,
+                participant_id,
+                status,
+                registered_at,
+                cancelled_at",
+        )
+        .bind(registration.id)
+        .bind(registration.event_id)
+        .bind(registration.participant_id)
+        .bind(registration.status)
+        .bind(registration.registered_at)
+        .bind(registration.cancelled_at)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        Ok(row)
+    }
+
+    async fn list_registrations_by_event(
+        &self,
+        event_id: Uuid,
+    ) -> Result<Vec<EventRegistration>, EventApplicationError> {
+        let rows: Vec<EventRegistration> = sqlx::query_as(
+            "SELECT
+                id,
+                event_id,
+                participant_id,
+                status,
+                registered_at,
+                cancelled_at
+             FROM event_registrations
+             WHERE event_id = $1
+             ORDER BY registered_at ASC",
+        )
+        .bind(event_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        Ok(rows)
     }
 }
 

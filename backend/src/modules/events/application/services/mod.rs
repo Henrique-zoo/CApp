@@ -15,13 +15,16 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use super::{
-    commands::{CreateEventCommand, PublishEventCommand, UpdateEventCommand},
+    commands::{
+        CancelEventRegistrationCommand, CreateEventCommand, PublishEventCommand,
+        RegisterInEventCommand, UpdateEventCommand,
+    },
     queries::{
         GetEventByIdQuery, GetPublishedEventDetailQuery, ListCaEventsQuery,
         ListPublishedEventsByCaQuery,
     },
 };
-use crate::modules::events::domain::{Event, EventDomainError};
+use crate::modules::events::domain::{Event, EventDomainError, EventRegistration};
 
 /// Erros produzidos pelos casos de uso da camada de aplicação de eventos.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -34,6 +37,28 @@ pub enum EventApplicationError {
     #[error("evento '{0}' não encontrado")]
     NotFound(Uuid),
 
+    /// O evento não está disponível para receber inscrições (ex.: não publicado ou não homologado).
+    #[error("o evento '{0}' não está disponível para inscrição")]
+    EventNotAvailableForRegistration(Uuid),
+
+    /// O usuário já possui uma inscrição ativa (confirmada) no evento informado.
+    #[error("o usuário '{participant_id}' já está inscrito no evento '{event_id}'")]
+    AlreadyRegistered {
+        /// Identificador do evento.
+        event_id: Uuid,
+        /// Identificador do participante.
+        participant_id: Uuid,
+    },
+
+    /// O usuário solicitou o cancelamento, mas não há inscrição ativa para cancelar no evento.
+    #[error("não há inscrição ativa para cancelar no evento '{event_id}'")]
+    ActiveRegistrationNotFound {
+        /// Identificador do evento.
+        event_id: Uuid,
+        /// Identificador do participante.
+        participant_id: Uuid,
+    },
+
     /// O usuário não possui permissão para gerenciar ou publicar eventos diretamente no Centro Acadêmico informado.
     #[error("operação recusada por falta de permissão no Centro Acadêmico")]
     PermissionDenied,
@@ -43,7 +68,7 @@ pub enum EventApplicationError {
     Repository(String),
 }
 
-/// Contrato de persistência para o repositório de eventos.
+/// Contrato de persistência para o repositório de eventos e inscrições.
 #[async_trait]
 pub trait EventRepository: Send + Sync {
     /// Persiste um novo evento no armazenamento.
@@ -75,12 +100,32 @@ pub trait EventRepository: Send + Sync {
 
     /// Atualiza os dados de um evento existente no armazenamento.
     async fn update(&self, event: &Event) -> Result<Event, EventApplicationError>;
+
+    /// Busca a inscrição de um participante em um evento específico.
+    async fn find_registration(
+        &self,
+        event_id: Uuid,
+        participant_id: Uuid,
+    ) -> Result<Option<EventRegistration>, EventApplicationError>;
+
+    /// Persiste (cria ou atualiza) a inscrição de um participante em um evento.
+    async fn save_registration(
+        &self,
+        registration: &EventRegistration,
+    ) -> Result<EventRegistration, EventApplicationError>;
+
+    /// Lista todas as inscrições associadas a um evento.
+    async fn list_registrations_by_event(
+        &self,
+        event_id: Uuid,
+    ) -> Result<Vec<EventRegistration>, EventApplicationError>;
 }
 
-/// Repositório de eventos em memória para testes unitários e de contrato HTTP.
+/// Repositório de eventos e inscrições em memória para testes unitários e de contrato HTTP.
 #[derive(Debug, Clone, Default)]
 pub struct InMemoryEventRepository {
     events: Arc<Mutex<Vec<Event>>>,
+    registrations: Arc<Mutex<Vec<EventRegistration>>>,
 }
 
 impl InMemoryEventRepository {
@@ -93,6 +138,7 @@ impl InMemoryEventRepository {
     pub fn with_events(events: impl IntoIterator<Item = Event>) -> Self {
         Self {
             events: Arc::new(Mutex::new(events.into_iter().collect())),
+            registrations: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -146,6 +192,51 @@ impl EventRepository for InMemoryEventRepository {
                 .then_with(|| a.created_at.cmp(&b.created_at))
         });
         Ok(results)
+    }
+
+    async fn find_registration(
+        &self,
+        event_id: Uuid,
+        participant_id: Uuid,
+    ) -> Result<Option<EventRegistration>, EventApplicationError> {
+        Ok(self
+            .registrations
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|item| item.event_id == event_id && item.participant_id == participant_id)
+            .cloned())
+    }
+
+    async fn save_registration(
+        &self,
+        registration: &EventRegistration,
+    ) -> Result<EventRegistration, EventApplicationError> {
+        let mut guard = self.registrations.lock().unwrap();
+        if let Some(existing) = guard.iter_mut().find(|item| {
+            item.event_id == registration.event_id
+                && item.participant_id == registration.participant_id
+        }) {
+            *existing = registration.clone();
+            Ok(existing.clone())
+        } else {
+            guard.push(registration.clone());
+            Ok(registration.clone())
+        }
+    }
+
+    async fn list_registrations_by_event(
+        &self,
+        event_id: Uuid,
+    ) -> Result<Vec<EventRegistration>, EventApplicationError> {
+        Ok(self
+            .registrations
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|item| item.event_id == event_id)
+            .cloned()
+            .collect())
     }
 }
 
@@ -446,6 +537,116 @@ where
             .find_published_by_ca(query.academic_center_id)
             .await
     }
+
+    /// Inscreve um usuário autenticado em um evento publicado.
+    ///
+    /// # Erros
+    ///
+    /// - [`EventApplicationError::Domain`] se `participant_id` for nulo.
+    /// - [`EventApplicationError::NotFound`] se o evento não existir ou pertencer a outro CA.
+    /// - [`EventApplicationError::EventNotAvailableForRegistration`] se o evento não estiver publicado.
+    /// - [`EventApplicationError::AlreadyRegistered`] se o usuário já possuir inscrição ativa no evento.
+    pub async fn register_in_event(
+        &self,
+        command: RegisterInEventCommand,
+    ) -> Result<EventRegistration, EventApplicationError> {
+        if command.participant_id.is_nil() {
+            return Err(EventApplicationError::Domain(
+                EventDomainError::InvalidParticipantId,
+            ));
+        }
+
+        let mut event = self
+            .repository
+            .find_by_id(command.event_id)
+            .await?
+            .ok_or(EventApplicationError::NotFound(command.event_id))?;
+
+        if let Some(active_ca_id) = command.academic_center_id
+            && event.academic_center_id != active_ca_id
+        {
+            return Err(EventApplicationError::NotFound(command.event_id));
+        }
+
+        if !event.is_published() {
+            return Err(EventApplicationError::EventNotAvailableForRegistration(
+                command.event_id,
+            ));
+        }
+
+        let registration = match self
+            .repository
+            .find_registration(command.event_id, command.participant_id)
+            .await?
+        {
+            Some(existing) if existing.is_active() => {
+                return Err(EventApplicationError::AlreadyRegistered {
+                    event_id: command.event_id,
+                    participant_id: command.participant_id,
+                });
+            }
+            Some(mut cancelled_registration) => {
+                cancelled_registration.reactivate();
+                cancelled_registration
+            }
+            None => EventRegistration::new_confirmed(command.event_id, command.participant_id)?,
+        };
+
+        let saved = self.repository.save_registration(&registration).await?;
+        event.registration.confirmed_registrations =
+            event.registration.confirmed_registrations.saturating_add(1);
+        event.updated_at = chrono::Utc::now();
+        self.repository.update(&event).await?;
+
+        Ok(saved)
+    }
+
+    /// Cancela a inscrição ativa de um usuário autenticado em um evento.
+    ///
+    /// # Erros
+    ///
+    /// - [`EventApplicationError::Domain`] se `participant_id` for nulo.
+    /// - [`EventApplicationError::NotFound`] se o evento não existir ou pertencer a outro CA.
+    /// - [`EventApplicationError::ActiveRegistrationNotFound`] se o usuário não possuir inscrição ativa no evento.
+    pub async fn cancel_registration(
+        &self,
+        command: CancelEventRegistrationCommand,
+    ) -> Result<EventRegistration, EventApplicationError> {
+        if command.participant_id.is_nil() {
+            return Err(EventApplicationError::Domain(
+                EventDomainError::InvalidParticipantId,
+            ));
+        }
+
+        let mut event = self
+            .repository
+            .find_by_id(command.event_id)
+            .await?
+            .ok_or(EventApplicationError::NotFound(command.event_id))?;
+
+        if let Some(active_ca_id) = command.academic_center_id
+            && event.academic_center_id != active_ca_id
+        {
+            return Err(EventApplicationError::NotFound(command.event_id));
+        }
+
+        let mut registration = self
+            .repository
+            .find_registration(command.event_id, command.participant_id)
+            .await?
+            .filter(EventRegistration::is_active)
+            .ok_or(EventApplicationError::ActiveRegistrationNotFound {
+                event_id: command.event_id,
+                participant_id: command.participant_id,
+            })?;
+
+        registration.cancel();
+        let saved = self.repository.save_registration(&registration).await?;
+        event.cancel_participant_registration();
+        self.repository.update(&event).await?;
+
+        Ok(saved)
+    }
 }
 
 #[cfg(test)]
@@ -732,5 +933,182 @@ mod tests {
                 .await;
             assert_eq!(res, Err(EventApplicationError::NotFound(unpublished.id)));
         }
+    }
+
+    #[tokio::test]
+    async fn registers_and_cancels_participation_in_published_event() {
+        let ca_computacao = Uuid::new_v4();
+        let author = Uuid::new_v4();
+        let student = Uuid::new_v4();
+
+        let palestra_ia = make_event_with_status(
+            ca_computacao,
+            author,
+            "Palestra de IA",
+            "Debate sobre modelos generativos",
+            EventPublicationStatus::Published,
+        );
+
+        let repo = InMemoryEventRepository::with_events(vec![palestra_ia.clone()]);
+        let service = EventService::new(repo.clone());
+
+        // 1. Inscrição em evento publicado é registrada como confirmada
+        let registration = service
+            .register_in_event(RegisterInEventCommand::for_academic_center(
+                palestra_ia.id,
+                student,
+                ca_computacao,
+            ))
+            .await
+            .expect("deve registrar inscrição em evento publicado");
+        assert_eq!(registration.event_id, palestra_ia.id);
+        assert_eq!(registration.participant_id, student);
+        assert!(registration.is_active());
+        assert!(registration.cancelled_at.is_none());
+
+        let updated_event = repo.find_by_id(palestra_ia.id).await.unwrap().unwrap();
+        assert_eq!(updated_event.registration.confirmed_registrations, 1);
+
+        // 2. Tentativa de inscrição duplicada no mesmo evento é recusada mantendo inscrição única
+        let duplicate = service
+            .register_in_event(RegisterInEventCommand::for_academic_center(
+                palestra_ia.id,
+                student,
+                ca_computacao,
+            ))
+            .await;
+        assert_eq!(
+            duplicate,
+            Err(EventApplicationError::AlreadyRegistered {
+                event_id: palestra_ia.id,
+                participant_id: student,
+            })
+        );
+        let registrations = repo
+            .list_registrations_by_event(palestra_ia.id)
+            .await
+            .unwrap();
+        assert_eq!(registrations.len(), 1);
+
+        // 3. Cancelamento da inscrição ativa pelo próprio estudante desativa a inscrição
+        let cancelled = service
+            .cancel_registration(CancelEventRegistrationCommand::for_academic_center(
+                palestra_ia.id,
+                student,
+                ca_computacao,
+            ))
+            .await
+            .expect("deve cancelar inscrição ativa");
+        assert!(!cancelled.is_active());
+        assert!(cancelled.cancelled_at.is_some());
+
+        let event_after_cancel = repo.find_by_id(palestra_ia.id).await.unwrap().unwrap();
+        assert_eq!(event_after_cancel.registration.confirmed_registrations, 0);
+
+        // 4. Tentativa de cancelar novamente sem inscrição ativa é informada com erro semântico
+        let second_cancel = service
+            .cancel_registration(CancelEventRegistrationCommand::for_academic_center(
+                palestra_ia.id,
+                student,
+                ca_computacao,
+            ))
+            .await;
+        assert_eq!(
+            second_cancel,
+            Err(EventApplicationError::ActiveRegistrationNotFound {
+                event_id: palestra_ia.id,
+                participant_id: student,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_registration_for_unpublished_or_other_ca_and_cancellation_without_active_registration()
+     {
+        let ca_computacao = Uuid::new_v4();
+        let ca_fisica = Uuid::new_v4();
+        let author = Uuid::new_v4();
+        let student = Uuid::new_v4();
+
+        let publicado_cc = make_event_with_status(
+            ca_computacao,
+            author,
+            "Palestra de IA",
+            "Debate sobre modelos generativos",
+            EventPublicationStatus::Published,
+        );
+        let pendente_cc = make_event_with_status(
+            ca_computacao,
+            author,
+            "Hackathon em análise",
+            "Proposta aguardando homologação",
+            EventPublicationStatus::PendingApproval,
+        );
+        let rascunho_cc = make_event_with_status(
+            ca_computacao,
+            author,
+            "Oficina interna",
+            "Rascunho ainda não publicado",
+            EventPublicationStatus::Draft,
+        );
+
+        let repo = InMemoryEventRepository::with_events(vec![
+            publicado_cc.clone(),
+            pendente_cc.clone(),
+            rascunho_cc.clone(),
+        ]);
+        let service = EventService::new(repo.clone());
+
+        // 1. Não permite inscrição em proposta não homologada ou rascunho
+        for unpublished in [&pendente_cc, &rascunho_cc] {
+            let res = service
+                .register_in_event(RegisterInEventCommand::for_academic_center(
+                    unpublished.id,
+                    student,
+                    ca_computacao,
+                ))
+                .await;
+            assert_eq!(
+                res,
+                Err(EventApplicationError::EventNotAvailableForRegistration(
+                    unpublished.id
+                ))
+            );
+            assert!(
+                repo.find_registration(unpublished.id, student)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+        }
+
+        // 2. Não permite inscrição quando o evento pertence a outro CA
+        let wrong_ca = service
+            .register_in_event(RegisterInEventCommand::for_academic_center(
+                publicado_cc.id,
+                student,
+                ca_fisica,
+            ))
+            .await;
+        assert_eq!(
+            wrong_ca,
+            Err(EventApplicationError::NotFound(publicado_cc.id))
+        );
+
+        // 3. Informa tentativa de cancelar quando o estudante nunca se inscreveu no evento
+        let cancel_without_registration = service
+            .cancel_registration(CancelEventRegistrationCommand::for_academic_center(
+                publicado_cc.id,
+                student,
+                ca_computacao,
+            ))
+            .await;
+        assert_eq!(
+            cancel_without_registration,
+            Err(EventApplicationError::ActiveRegistrationNotFound {
+                event_id: publicado_cc.id,
+                participant_id: student,
+            })
+        );
     }
 }
