@@ -9,7 +9,7 @@
 //! Este módulo conserva os espaços de [`api`], [`application`], [`domain`] e
 //! [`infrastructure`]. Os contratos da issue #377 não implementam endpoints,
 //! entidades, persistência ou telas: essas entregas pertencem às issues consumidoras.
-//! A CLI que confere fixtures não é um servidor de votação nem o auditor do produto.
+//! O validador das fixtures é uma ferramenta de teste do contrato.
 //!
 //! # Participação no fluxo
 //!
@@ -31,9 +31,10 @@
 //! conta autenticada. O pacote assinado permite repetição após falha de transporte;
 //! consulta de participação/recibo em outro dispositivo dispensa a chave privada.
 //!
-//! O armazenamento deve confirmar voto, participação, índice, cadeia e recibo de
-//! forma consistente, com unicidade por conta/eleição. O mesmo envio recupera o
-//! aceite mesmo depois do encerramento; outro envio não cria nova participação.
+//! O armazenamento deve confirmar voto, participação, índice, cadeia, recibo e
+//! atualização do acumulador de cifras na mesma transação, com unicidade por
+//! conta/eleição. O mesmo envio recupera o aceite mesmo depois do encerramento,
+//! sem atualizar o acumulador novamente. Outro envio não cria nova participação.
 //! Trocar dispositivo ou chave não altera a identidade usada nessa restrição.
 //!
 //! # Objetos e bytes do protocolo
@@ -62,9 +63,30 @@
 //! O grupo é MODP 14 da RFC 3526: primo de 2048 bits, ordem q=(p-1)/2 e g=2.
 //! Conferir faixa/subgrupo, rejeitar chave individual ou conjunta igual a 1 e
 //! verificar as provas das autoridades. Segredos e nonces reais vêm de CSPRNG;
-//! nonces não se repetem entre posições ou provas. As fixtures são públicas e
-//! sintéticas: seus parâmetros de produção são reais, mas seu material de teste
-//! jamais pode ser reutilizado em eleições reais.
+//! nonces não se repetem entre posições ou provas. O app sorteia outro nonce
+//! se `b` for `1` ou `g`, valores que revelariam o bit nesse perfil. Um produto
+//! de cifras pode chegar à identidade, inclusive em uma eleição sem votos.
+//! As fixtures são públicas e sintéticas: seus parâmetros de produção são
+//! reais, mas seu material de teste jamais pode ser reutilizado em eleições reais.
+//!
+//! # Publicação do manifesto
+//!
+//! Na votação secreta, a comissão pode ajustar chapas, autoridades e chaves
+//! enquanto o manifesto oficial ainda não foi publicado. Após validar essa
+//! configuração, o servidor assina e publica o único manifesto oficial do
+//! `electionId`. A publicação torna o manifesto imutável, mesmo que a eleição
+//! ainda não tenha recebido cédulas. Se for preciso alterar a configuração
+//! publicada, a comissão cancela a eleição e cria outra com um novo ID.
+//!
+//! As chaves públicas ElGamal das autoridades e a chave conjunta `h` só são
+//! divulgadas no manifesto assinado, após validar as chaves e as provas de
+//! conhecimento. Durante a preparação, os valores provisórios ficam no backend.
+//!
+//! Se o produto das chaves públicas der `h = 1`, o fator `h^r` deixa de ocultar
+//! o voto. Antes de publicar o manifesto, o servidor descarta somente o próprio
+//! par ElGamal, sorteia outro e gera uma nova prova de conhecimento. As demais
+//! autoridades mantêm seus pares e suas provas. O servidor recalcula e valida
+//! a chave conjunta, repetindo o sorteio se o produto ainda for `1`.
 //!
 //! # Calendário e estados
 //!
@@ -74,13 +96,14 @@
 //! somente o fim pode ser prorrogado, antes de vencer o prazo vigente. Não há
 //! encerramento antecipado válido nem reabertura de uma eleição encerrada.
 //!
-//! O manifesto já usado nas cédulas não muda. O calendário inicial é um objeto
-//! assinado independente, disponível antes de as chaves estarem prontas. O manifesto
-//! referencia sua origem; revisões numeradas e assinadas encadeiam os adiamentos.
-//! Uma revisão anterior ao manifesto pode ter manifestHash nulo.
-//! O encerramento referencia o calendário efetivo e congela cabeça do quadro e
-//! contagem. Voto, prorrogação, encerramento e cancelamento concorrentes devem
-//! observar uma ordem transacional consistente no adaptador de persistência.
+//! O calendário inicial é um objeto assinado independente, disponível antes de
+//! as chaves estarem prontas. O manifesto referencia sua origem. Revisões
+//! numeradas e assinadas encadeiam os adiamentos sem modificar o manifesto
+//! publicado. Uma revisão anterior à publicação pode ter `manifestHash` nulo.
+//! O encerramento referencia o calendário efetivo e congela a cabeça do quadro,
+//! a contagem e o acumulador de cifras. Voto, prorrogação, encerramento e
+//! cancelamento concorrentes devem observar uma ordem transacional consistente
+//! no adaptador de persistência.
 //!
 //! A comissão pode cancelar uma eleição não terminal, inclusive por criação
 //! equivocada em preparação. O backend registra ator, motivo e instante, conserva
@@ -91,10 +114,12 @@
 //!
 //! # Apuração e limites deliberados
 //!
-//! As opções de chapa seguem a ordem publicada no manifesto e Nulo fica por último,
-//! com UUID zero reservado. Toda cédula produzida corretamente contém exatamente um 1: uma chapa
-//! ou Nulo. Não existe opção de branco. O servidor agrega as cifras da fotografia
-//! fechada; todas as autoridades contribuem para o mesmo agregado, sem revelar x.
+//! As escolhas da cédula são as chapas na ordem publicada no manifesto e Nulo,
+//! que tem UUID zero e ocupa a última posição. Uma cédula produzida corretamente
+//! cifra um único `1` para a chapa escolhida ou para Nulo. A cada novo aceite,
+//! o caso de uso multiplica as cifras da cédula no acumulador da eleição. Após
+//! o encerramento, cada autoridade usa o agregado final para produzir sua
+//! contribuição de decifração e mantém seu segredo `x` sob custódia.
 //! As provas verificam conhecimento do segredo e correção da contribuição de
 //! decifração. Não são provas de que o conteúdo da cédula é 0/1 e tem soma 1.
 //!
@@ -150,8 +175,9 @@
 //! A frente A implementa criptografia/autoridades; B, domínio e coordenação; C,
 //! assinatura, registro e cliente; D, auditor e testes adversariais. As quatro usam
 //! os mesmos schemas/vetores e podem começar sem o servidor inteiro pronto.
-//! O auditor de produto deverá produzir seu próprio veredito; o validador de
-//! fixtures não substitui sua implementação ou a validação funcional dos BDDs.
+//! A auditoria no CApp deverá verificar as evidências públicas no dispositivo
+//! e produzir seu próprio veredito. Os testes de fixtures verificam o contrato
+//! e a automação dos BDDs verifica o fluxo no aplicativo.
 //!
 //! A CI confere schemas, JCS, hashes, RSA-PSS e relações dos vetores públicos por
 //! `scripts/test_election_contracts.py`. Consumidores Rust/Dart devem ler os mesmos

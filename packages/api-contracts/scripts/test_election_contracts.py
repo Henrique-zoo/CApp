@@ -187,6 +187,20 @@ class ElectionContractTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             self.relations(value)
 
+    def test_ballots_and_decryption_shares_cannot_cross_elections(self):
+        """Formato e ordem compatíveis não permitem reaproveitar artefatos de outra eleição."""
+        entry = self.payload("valid/entry-0")
+        entry["ballot"] = self.payload("excess/entry-0")["ballot"]
+        with self.assertRaisesRegex(ContractError, "Cédula de outro manifesto"):
+            self.relations(entry)
+
+        share = self.payload("valid/share-0")
+        foreign = self.cases["excess/aggregate"]
+        share["aggregateHash"] = foreign["sha256"]
+        share["closureHash"] = foreign["payload"]["closureHash"]
+        with self.assertRaisesRegex(ContractError, "Agregado de outro manifesto"):
+            self.relations(share)
+
     def test_snapshot_rejects_broken_chain(self):
         """A fotografia do encerramento deve alcançar a gênese com índices consecutivos."""
         value = self.payload("valid/entry-1")

@@ -126,16 +126,16 @@ Funcionalidade: Gerenciamento de eleições de Centros Acadêmicos
       E o manifesto publicado contém as duas chapas na ordem definida
       E o manifesto publicado contém a opção Nulo uma única vez na última posição
       E o manifesto contém uma autoridade do servidor, uma da comissão e uma para cada chapa
-      E o manifesto é assinado pelo servidor e permanece imutável após a abertura
+      E o manifesto é publicado com a assinatura do servidor
 
   @seguranca_computacional
-  Regra: Na votação secreta, o manifesto permanece imutável após a abertura
+  Regra: Na votação secreta, o manifesto é imutável desde a publicação
 
     Contexto:
       Dado que a eleição está configurada para votação secreta
 
-    Cenário: Recusar alteração das opções após a abertura
-      Dado que a eleição foi aberta e possui manifesto publicado
+    Cenário: Recusar alteração das opções após publicar o manifesto mesmo sem votos
+      Dado que o manifesto oficial da eleição foi publicado e ainda não houve votos
       Quando a comissão tenta alterar as chapas ou a ordem das opções
       Então a alteração da configuração eleitoral é recusada
       E o manifesto publicado permanece inalterado

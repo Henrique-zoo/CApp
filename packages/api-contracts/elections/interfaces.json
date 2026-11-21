@@ -29,7 +29,7 @@
         381,
         382
       ],
-      "responsibility": "Codecs, assinatura, registro transacional, recibos e adaptação ao aplicativo. Integra o Firebase existente; cliente CLI independente não é pré-requisito."
+      "responsibility": "Codecs, assinatura, registro transacional, recibos e votação no aplicativo CApp com Firebase Auth e App Check. A cifragem da cédula acontece no dispositivo do eleitor."
     },
     {
       "id": "D",
@@ -39,7 +39,7 @@
         143,
         144
       ],
-      "responsibility": "Auditor independente e testes adversariais. Usa formatos/vetores e referências públicas; não reutiliza um veredito booleano do servidor."
+      "responsibility": "Verificação independente no aplicativo CApp e testes adversariais. O app recalcula o veredito no dispositivo a partir das evidências e âncoras públicas."
     }
   ],
   "ports": [
@@ -117,7 +117,8 @@
           "input": [
             "userId autenticado",
             "SignedBallot",
-            "manifesto/calendário esperados"
+            "manifesto/calendário esperados",
+            "acumulador atualizado e revisão da eleição esperada para votação secreta"
           ],
           "output": [
             "aceite com BoardEntry e Receipt persistidos",
@@ -127,11 +128,11 @@
           "invariants": [
             "UNIQUE(electionId,userId).",
             "Mesmo submissionId com payload diferente é recusado.",
-            "Mesmo voto/operação recupera recibo existente inclusive depois do encerramento.",
+            "Mesmo voto/operação recupera recibo existente inclusive depois do encerramento, sem alterar o acumulador.",
             "Outro submissionId depois de um voto aceito não registra voto novo.",
-            "Índice, encadeamento, voto, participação e recibo são confirmados juntos.",
+            "Índice, encadeamento, voto, participação, recibo e acumulador são confirmados juntos.",
             "Sem recibo para gravação abortada.",
-            "Novo voto revalida estado e prazo vigente na operação atômica."
+            "Novo voto revalida estado, prazo vigente e revisão do acumulador na operação atômica."
           ]
         },
         {
@@ -161,12 +162,13 @@
             "revisão vigente"
           ],
           "output": [
-            "Closure com cabeça e número final de participantes"
+            "Closure com cabeça e número final de participantes, com o acumulador final congelado para apuração"
           ],
           "invariants": [
             "Não fechar antes do fim vigente.",
             "Fechamento, último voto, prorrogação e cancelamento são serializados.",
-            "Não admitir novos votos após a fotografia fechada.",
+            "O quadro, a contagem e o acumulador correspondem aos mesmos votos aceitos até o encerramento.",
+            "Não admitir novos votos após o encerramento.",
             "Repetição recupera o mesmo encerramento."
           ]
         },
@@ -225,7 +227,7 @@
     {
       "name": "PublicElectionReader",
       "owner": "C/D",
-      "implementedBy": "Exportação pública do backend e leitor do auditor",
+      "implementedBy": "Exportação pública do backend e leitor das evidências para auditoria no CApp",
       "input": [
         "identificador da eleição ou arquivo exportado"
       ],

@@ -209,6 +209,6 @@
     "Cadastro e chave do eleitor durante a primeira votação.",
     "App Check/cliente assumidos para validade individual, com guardrail agregado.",
     "Chapa única permitida.",
-    "Cliente integrado ao CApp/Firebase em vez de CLI independente."
+    "Votação e auditoria no CApp. O eleitor usa Firebase Auth e App Check, e a verificação das evidências é executada no dispositivo."
   ]
 }

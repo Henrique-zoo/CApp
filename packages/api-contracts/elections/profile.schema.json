@@ -228,6 +228,7 @@
         "options",
         "authorities",
         "groupElements",
+        "manifestPublication",
         "calendar",
         "cancellation",
         "scheduleChain",
@@ -257,6 +258,10 @@
           "minLength": 1
         },
         "groupElements": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manifestPublication": {
           "type": "string",
           "minLength": 1
         },
