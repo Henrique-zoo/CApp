@@ -25,12 +25,13 @@ use crate::{
         events::{
             application::{
                 CancelEventRegistrationCommand, CancelEventRegistrationUseCase, CreateEventCommand,
-                EventApplicationError, EventRepository, EventService, GetEventByIdQuery,
-                GetPublishedEventDetailQuery, GetPublishedEventDetailUseCase, ListCaEventsQuery,
-                ListPublishedEventsByCaQuery, ListPublishedEventsByCaUseCase, PublishEventCommand,
-                RegisterInEventCommand, RegisterParticipantInEventUseCase, UpdateEventCommand,
+                EventApplicationError, EventAuthorizationPort, EventRepository, EventService,
+                GetEventByIdQuery, GetPublishedEventDetailQuery, GetPublishedEventDetailUseCase,
+                ListCaEventsQuery, ListPublishedEventsByCaQuery, ListPublishedEventsByCaUseCase,
+                PublishEventCommand, RegisterInEventCommand, RegisterParticipantInEventUseCase,
+                UpdateEventCommand,
             },
-            domain::{EventDomainError, EventRegistrationInfo},
+            domain::EventDomainError,
             infrastructure::{PostgresEventAuthorizationService, PostgresEventRepository},
         },
         identity::api::AuthenticatedUser,
@@ -64,6 +65,9 @@ fn map_application_error(error: EventApplicationError) -> Response {
             EventDomainError::EmptyLocation => (StatusCode::BAD_REQUEST, "missing:local"),
             EventDomainError::InvalidEventPeriod { .. } => {
                 (StatusCode::BAD_REQUEST, "invalid_period")
+            }
+            EventDomainError::InvalidMaxCapacity(_) => {
+                (StatusCode::BAD_REQUEST, "invalid_max_capacity")
             }
             EventDomainError::EventNotPublished => {
                 (StatusCode::UNPROCESSABLE_ENTITY, "event_not_available")
@@ -106,7 +110,24 @@ pub async fn create_event_handler(
         PostgresEventRepository::new(state.pool.clone()),
         PostgresEventAuthorizationService::new(state.pool),
     );
-    let registration = payload.into_registration_info();
+    execute_create_event(service, authenticated_user, payload).await
+}
+
+async fn execute_create_event<R, A>(
+    service: EventService<R, A>,
+    authenticated_user: Option<AuthenticatedUser>,
+    payload: CreateEventRequest,
+) -> Response
+where
+    R: EventRepository,
+    A: EventAuthorizationPort,
+{
+    let registration = match payload.try_into_registration_info() {
+        Ok(reg) => reg,
+        Err(domain_err) => {
+            return map_application_error(EventApplicationError::Domain(domain_err));
+        }
+    };
     let author_id = authenticated_user
         .map(|user| user.user_id)
         .unwrap_or(payload.author_id);
@@ -233,18 +254,24 @@ pub async fn update_event_handler(
         PostgresEventRepository::new(state.pool.clone()),
         PostgresEventAuthorizationService::new(state.pool),
     );
-    let registration = if payload.requires_registration.is_some()
-        || payload.max_capacity.is_some()
-        || payload.registration_deadline.is_some()
-    {
-        Some(EventRegistrationInfo {
-            requires_registration: payload.requires_registration.unwrap_or(true),
-            max_capacity: payload.max_capacity,
-            confirmed_registrations: 0,
-            registration_deadline: payload.registration_deadline,
-        })
-    } else {
-        None
+    execute_update_event(service, authenticated_user, id, payload).await
+}
+
+async fn execute_update_event<R, A>(
+    service: EventService<R, A>,
+    authenticated_user: Option<AuthenticatedUser>,
+    id: Uuid,
+    payload: UpdateEventRequest,
+) -> Response
+where
+    R: EventRepository,
+    A: EventAuthorizationPort,
+{
+    let registration = match payload.try_into_registration_info() {
+        Ok(reg) => Some(reg),
+        Err(domain_err) => {
+            return map_application_error(EventApplicationError::Domain(domain_err));
+        }
     };
 
     let actor_id = authenticated_user
@@ -473,7 +500,7 @@ mod tests {
     use super::*;
     use crate::modules::events::{
         application::InMemoryEventRepository,
-        domain::{Event, EventPublicationStatus, RegistrationStatus},
+        domain::{Event, EventPublicationStatus, EventRegistrationInfo, RegistrationStatus},
     };
 
     fn test_read_router(repo: Arc<InMemoryEventRepository>) -> Router {
@@ -486,6 +513,14 @@ mod tests {
                      Query(params): Query<ListEventsQueryParams>| async move {
                         execute_list_published_events(repo, &params, &headers).await
                     },
+                )
+                .post(
+                    |State(repo): State<Arc<InMemoryEventRepository>>,
+                     authenticated_user: Option<AuthenticatedUser>,
+                     Json(payload): Json<CreateEventRequest>| async move {
+                        let service = EventService::new(repo.as_ref().clone());
+                        execute_create_event(service, authenticated_user, payload).await
+                    },
                 ),
             )
             .route(
@@ -496,6 +531,15 @@ mod tests {
                      Path(id): Path<Uuid>,
                      Query(params): Query<ListEventsQueryParams>| async move {
                         execute_get_event_by_id(repo.as_ref().clone(), id, &params, &headers).await
+                    },
+                )
+                .put(
+                    |State(repo): State<Arc<InMemoryEventRepository>>,
+                     authenticated_user: Option<AuthenticatedUser>,
+                     Path(id): Path<Uuid>,
+                     Json(payload): Json<UpdateEventRequest>| async move {
+                        let service = EventService::new(repo.as_ref().clone());
+                        execute_update_event(service, authenticated_user, id, payload).await
                     },
                 ),
             )
@@ -1011,5 +1055,169 @@ mod tests {
         let body = to_bytes(cancel_res.into_body(), usize::MAX).await.unwrap();
         let err: EventErrorResponse = serde_json::from_slice(&body).unwrap();
         assert_eq!(err.code, "no_active_registration");
+    }
+
+    #[tokio::test]
+    async fn create_and_update_event_with_optional_and_invalid_max_capacity() {
+        let ca_cc = Uuid::new_v4();
+        let author = Uuid::new_v4();
+        let starts_at = Utc::now() + Duration::hours(24);
+        let ends_at = starts_at + Duration::hours(2);
+
+        let repo = Arc::new(InMemoryEventRepository::new());
+        let app = test_read_router(repo.clone());
+
+        // 1. Criar evento com limite válido (3 vagas) retorna 201 Created com max_capacity = Some(3)
+        let create_with_limit = serde_json::json!({
+            "academic_center_id": ca_cc,
+            "author_id": author,
+            "title": "Palestra de IA",
+            "description": "Introdução a agentes autônomos",
+            "location": "Auditório 1",
+            "starts_at": starts_at,
+            "ends_at": ends_at,
+            "publish_directly": true,
+            "max_capacity": 3
+        });
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/events")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(create_with_limit.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let created_with_limit: EventResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(created_with_limit.max_capacity, Some(3));
+        assert_eq!(created_with_limit.remaining_spots, Some(3));
+
+        // 2. Criar evento sem limite de vagas (max_capacity: null) retorna 201 Created com max_capacity = None
+        let create_unlimited = serde_json::json!({
+            "academic_center_id": ca_cc,
+            "author_id": author,
+            "title": "Semana Acadêmica",
+            "description": "Abertura geral da semana acadêmica",
+            "location": "Anfiteatro",
+            "starts_at": starts_at,
+            "ends_at": ends_at,
+            "publish_directly": true,
+            "max_capacity": null
+        });
+
+        let res_unlimited = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/events")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(create_unlimited.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res_unlimited.status(), StatusCode::CREATED);
+        let body = to_bytes(res_unlimited.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let created_unlimited: EventResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(created_unlimited.max_capacity, None);
+        assert_eq!(created_unlimited.remaining_spots, None);
+
+        // 3. Criar evento com limite inválido (0 ou negativo) retorna 400 Bad Request ("invalid_max_capacity")
+        for invalid_capacity in [0, -1, -25] {
+            let create_invalid = serde_json::json!({
+                "academic_center_id": ca_cc,
+                "author_id": author,
+                "title": "Evento Inválido",
+                "description": "Capacidade inválida",
+                "location": "Sala 1",
+                "starts_at": starts_at,
+                "ends_at": ends_at,
+                "max_capacity": invalid_capacity
+            });
+
+            let bad_res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/events")
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(create_invalid.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(bad_res.status(), StatusCode::BAD_REQUEST);
+            let body = to_bytes(bad_res.into_body(), usize::MAX).await.unwrap();
+            let err: EventErrorResponse = serde_json::from_slice(&body).unwrap();
+            assert_eq!(err.code, "invalid_max_capacity");
+        }
+
+        // 4. Editar evento existente para remover o limite (max_capacity: null) e depois definir novo limite (50)
+        let update_remove_limit = serde_json::json!({
+            "academic_center_id": ca_cc,
+            "actor_id": author,
+            "title": "Palestra de IA",
+            "description": "Introdução a agentes autônomos",
+            "location": "Auditório 1",
+            "starts_at": starts_at,
+            "ends_at": ends_at,
+            "max_capacity": null
+        });
+        let res_remove = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/api/v1/events/{}", created_with_limit.id))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(update_remove_limit.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res_remove.status(), StatusCode::OK);
+        let body = to_bytes(res_remove.into_body(), usize::MAX).await.unwrap();
+        let updated_unlimited: EventResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(updated_unlimited.max_capacity, None);
+
+        // 5. Editar evento com limite inválido (0 ou negativo) retorna 400 Bad Request ("invalid_max_capacity")
+        for invalid_capacity in [0, -10] {
+            let update_invalid = serde_json::json!({
+                "academic_center_id": ca_cc,
+                "actor_id": author,
+                "title": "Palestra de IA",
+                "description": "Introdução a agentes autônomos",
+                "location": "Auditório 1",
+                "starts_at": starts_at,
+                "ends_at": ends_at,
+                "max_capacity": invalid_capacity
+            });
+            let bad_update = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri(format!("/api/v1/events/{}", created_with_limit.id))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(update_invalid.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(bad_update.status(), StatusCode::BAD_REQUEST);
+            let body = to_bytes(bad_update.into_body(), usize::MAX).await.unwrap();
+            let err: EventErrorResponse = serde_json::from_slice(&body).unwrap();
+            assert_eq!(err.code, "invalid_max_capacity");
+        }
     }
 }
