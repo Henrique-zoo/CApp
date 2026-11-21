@@ -1111,4 +1111,101 @@ mod tests {
             })
         );
     }
+
+    #[tokio::test]
+    async fn configures_and_validates_optional_max_capacity_on_create_and_update() {
+        let ca_computacao = Uuid::new_v4();
+        let author = Uuid::new_v4();
+        let starts_at = Utc::now() + Duration::days(2);
+        let ends_at = starts_at + Duration::hours(3);
+
+        let repo = InMemoryEventRepository::new();
+        let service = EventService::new(repo.clone());
+
+        // 1. Criação com limite de 3 vagas persiste max_capacity = Some(3)
+        let event_with_limit = service
+            .create_event(CreateEventCommand {
+                academic_center_id: ca_computacao,
+                author_id: author,
+                title: "Palestra de IA".to_string(),
+                description: "Controle opcional de vagas".to_string(),
+                location: "Auditório 1".to_string(),
+                starts_at,
+                ends_at,
+                publish_directly: true,
+                registration: EventRegistrationInfo::with_signed_capacity(3).unwrap(),
+            })
+            .await
+            .expect("deve criar evento com limite de 3 vagas");
+        assert_eq!(event_with_limit.registration.max_capacity, Some(3));
+
+        // 2. Criação com limite inválido (0) no comando é rejeitada pelo domínio
+        let invalid_create = service
+            .create_event(CreateEventCommand {
+                academic_center_id: ca_computacao,
+                author_id: author,
+                title: "Evento Inválido".to_string(),
+                description: "Capacidade zero".to_string(),
+                location: "Sala 2".to_string(),
+                starts_at,
+                ends_at,
+                publish_directly: false,
+                registration: EventRegistrationInfo {
+                    requires_registration: true,
+                    max_capacity: Some(0),
+                    confirmed_registrations: 0,
+                    registration_deadline: None,
+                },
+            })
+            .await;
+        assert_eq!(
+            invalid_create,
+            Err(EventApplicationError::Domain(
+                EventDomainError::InvalidMaxCapacity(0)
+            ))
+        );
+
+        // 3. Edição para remover o limite (None) atualiza max_capacity para None
+        let unlimited = service
+            .update_event(UpdateEventCommand {
+                event_id: event_with_limit.id,
+                academic_center_id: Some(ca_computacao),
+                actor_id: Some(author),
+                title: "Palestra de IA".to_string(),
+                description: "Controle opcional de vagas".to_string(),
+                location: "Auditório 1".to_string(),
+                starts_at,
+                ends_at,
+                registration: Some(EventRegistrationInfo::unrestricted()),
+            })
+            .await
+            .expect("deve permitir remover o limite de vagas");
+        assert_eq!(unlimited.registration.max_capacity, None);
+
+        // 4. Edição com limite inválido (0) é rejeitada mantendo o evento intacto
+        let invalid_update = service
+            .update_event(UpdateEventCommand {
+                event_id: event_with_limit.id,
+                academic_center_id: Some(ca_computacao),
+                actor_id: Some(author),
+                title: "Palestra de IA".to_string(),
+                description: "Controle opcional de vagas".to_string(),
+                location: "Auditório 1".to_string(),
+                starts_at,
+                ends_at,
+                registration: Some(EventRegistrationInfo {
+                    requires_registration: true,
+                    max_capacity: Some(0),
+                    confirmed_registrations: 0,
+                    registration_deadline: None,
+                }),
+            })
+            .await;
+        assert_eq!(
+            invalid_update,
+            Err(EventApplicationError::Domain(
+                EventDomainError::InvalidMaxCapacity(0)
+            ))
+        );
+    }
 }

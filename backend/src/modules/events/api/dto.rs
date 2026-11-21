@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::modules::events::domain::{
-    Event, EventPublicationStatus, EventRegistration, EventRegistrationInfo, RegistrationStatus,
+    Event, EventDomainError, EventPublicationStatus, EventRegistration, EventRegistrationInfo,
+    RegistrationStatus,
 };
 
 /// Dados do formulário para criação de um novo evento (rascunho ou publicação direta).
@@ -30,21 +31,24 @@ pub struct CreateEventRequest {
     pub publish_directly: bool,
     /// Indica se o evento aceita inscrições (padrão `true`).
     pub requires_registration: Option<bool>,
-    /// Limite máximo opcional de participantes.
-    pub max_capacity: Option<u32>,
+    /// Limite máximo opcional de participantes (`None` / `null` significa sem limite de vagas).
+    pub max_capacity: Option<i64>,
     /// Prazo opcional limite para inscrição.
     pub registration_deadline: Option<DateTime<Utc>>,
 }
 
 impl CreateEventRequest {
-    /// Constrói a configuração de inscrição correspondente aos campos opcionais informados.
-    pub fn into_registration_info(&self) -> EventRegistrationInfo {
-        EventRegistrationInfo {
-            requires_registration: self.requires_registration.unwrap_or(true),
-            max_capacity: self.max_capacity,
-            confirmed_registrations: 0,
-            registration_deadline: self.registration_deadline,
-        }
+    /// Constrói e valida a configuração de inscrição correspondente aos campos opcionais informados.
+    ///
+    /// # Erros
+    ///
+    /// Retorna [`EventDomainError::InvalidMaxCapacity`] caso `max_capacity` seja `<= 0`.
+    pub fn try_into_registration_info(&self) -> Result<EventRegistrationInfo, EventDomainError> {
+        EventRegistrationInfo::from_optional_signed_capacity(
+            self.requires_registration.unwrap_or(true),
+            self.max_capacity,
+            self.registration_deadline,
+        )
     }
 }
 
@@ -67,10 +71,25 @@ pub struct UpdateEventRequest {
     pub ends_at: DateTime<Utc>,
     /// Atualização opcional da necessidade de inscrição.
     pub requires_registration: Option<bool>,
-    /// Atualização opcional do limite máximo de participantes.
-    pub max_capacity: Option<u32>,
+    /// Atualização opcional do limite máximo de participantes (`None` / `null` remove o limite).
+    pub max_capacity: Option<i64>,
     /// Atualização opcional do prazo de inscrição.
     pub registration_deadline: Option<DateTime<Utc>>,
+}
+
+impl UpdateEventRequest {
+    /// Constrói e valida a configuração de inscrição correspondente aos campos informados na edição.
+    ///
+    /// # Erros
+    ///
+    /// Retorna [`EventDomainError::InvalidMaxCapacity`] caso `max_capacity` seja `<= 0`.
+    pub fn try_into_registration_info(&self) -> Result<EventRegistrationInfo, EventDomainError> {
+        EventRegistrationInfo::from_optional_signed_capacity(
+            self.requires_registration.unwrap_or(true),
+            self.max_capacity,
+            self.registration_deadline,
+        )
+    }
 }
 
 /// Corpo opcional para a ação de publicação direta de um rascunho de evento.
@@ -120,6 +139,8 @@ pub struct EventSummaryResponse {
     pub ends_at: DateTime<Utc>,
     /// Situação de publicação do evento.
     pub status: EventPublicationStatus,
+    /// Limite máximo opcional de vagas configurado (`None` para eventos sem limite).
+    pub max_capacity: Option<u32>,
     /// Indica se o evento aceita novas inscrições diretas no momento.
     pub has_available_spots: bool,
     /// Número de vagas restantes quando há limite configurado (`None` para eventos sem limite).
@@ -128,6 +149,7 @@ pub struct EventSummaryResponse {
 
 impl From<Event> for EventSummaryResponse {
     fn from(event: Event) -> Self {
+        let max_capacity = event.registration.max_capacity;
         let remaining_spots = event.registration.remaining_spots();
         let has_available_spots = event.registration.has_available_spots();
         Self {
@@ -138,6 +160,7 @@ impl From<Event> for EventSummaryResponse {
             starts_at: event.starts_at,
             ends_at: event.ends_at,
             status: event.status,
+            max_capacity,
             has_available_spots,
             remaining_spots,
         }

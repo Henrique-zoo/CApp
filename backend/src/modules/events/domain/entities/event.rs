@@ -102,7 +102,7 @@ pub enum EventDomainError {
 
     /// O limite máximo de vagas configurado deve ser um inteiro estritamente positivo.
     #[error("o limite máximo de vagas deve ser maior que zero (informado: {0})")]
-    InvalidMaxCapacity(u32),
+    InvalidMaxCapacity(i64),
 
     /// O número de inscrições confirmadas ultrapassa a capacidade máxima configurada.
     #[error(
@@ -323,6 +323,52 @@ impl EventRegistrationInfo {
             max_capacity: Some(max_capacity),
             confirmed_registrations: 0,
             registration_deadline: None,
+        })
+    }
+
+    /// Cria uma configuração de inscrição validando um limite de vagas inteiro com sinal.
+    ///
+    /// # Erros
+    ///
+    /// Retorna [`EventDomainError::InvalidMaxCapacity`] se `max_capacity <= 0` ou exceder `u32::MAX`.
+    pub fn with_signed_capacity(max_capacity: i64) -> Result<Self, EventDomainError> {
+        let validated = Self::validate_max_capacity(Some(max_capacity))?;
+        Ok(Self {
+            requires_registration: true,
+            max_capacity: validated,
+            confirmed_registrations: 0,
+            registration_deadline: None,
+        })
+    }
+
+    /// Valida e converte um limite máximo opcional de vagas (`Option<i64>`) para `Option<u32>`.
+    ///
+    /// Permite `None` (evento sem limite de vagas) e recusa qualquer valor `<= 0` ou acima de `u32::MAX`
+    /// com [`EventDomainError::InvalidMaxCapacity`].
+    pub fn validate_max_capacity(
+        max_capacity: Option<i64>,
+    ) -> Result<Option<u32>, EventDomainError> {
+        match max_capacity {
+            None => Ok(None),
+            Some(limit) if limit <= 0 => Err(EventDomainError::InvalidMaxCapacity(limit)),
+            Some(limit) => u32::try_from(limit)
+                .map(Some)
+                .map_err(|_| EventDomainError::InvalidMaxCapacity(limit)),
+        }
+    }
+
+    /// Constrói uma configuração de inscrição validando opcionalmente um limite máximo de vagas com sinal.
+    pub fn from_optional_signed_capacity(
+        requires_registration: bool,
+        max_capacity: Option<i64>,
+        registration_deadline: Option<DateTime<Utc>>,
+    ) -> Result<Self, EventDomainError> {
+        let validated_capacity = Self::validate_max_capacity(max_capacity)?;
+        Ok(Self {
+            requires_registration,
+            max_capacity: validated_capacity,
+            confirmed_registrations: 0,
+            registration_deadline,
         })
     }
 
@@ -829,6 +875,33 @@ impl Event {
         Ok(())
     }
 
+    /// Configura ou remove o limite máximo opcional de participantes do evento (`None` remove o limite).
+    ///
+    /// # Erros
+    ///
+    /// Retorna [`EventDomainError::InvalidMaxCapacity`] se `max_capacity == Some(0)` ou
+    /// [`EventDomainError::CapacityExceeded`] se o novo limite for inferior ao número de inscritos já confirmados.
+    pub fn set_max_capacity(&mut self, max_capacity: Option<u32>) -> Result<(), EventDomainError> {
+        self.update_registration_settings(
+            self.registration.requires_registration,
+            max_capacity,
+            self.registration.registration_deadline,
+        )
+    }
+
+    /// Configura ou remove o limite máximo opcional de participantes a partir de um valor inteiro com sinal.
+    ///
+    /// # Erros
+    ///
+    /// Retorna [`EventDomainError::InvalidMaxCapacity`] se `max_capacity <= 0`.
+    pub fn set_signed_max_capacity(
+        &mut self,
+        max_capacity: Option<i64>,
+    ) -> Result<(), EventDomainError> {
+        let validated = EventRegistrationInfo::validate_max_capacity(max_capacity)?;
+        self.set_max_capacity(validated)
+    }
+
     /// Registra uma nova inscrição confirmada no evento, validando publicação e disponibilidade de vagas.
     pub fn register_participant(&mut self) -> Result<(), EventDomainError> {
         if !self.status.can_accept_registrations() {
@@ -1079,5 +1152,70 @@ mod tests {
 
         event.cancel_participant_registration();
         assert_eq!(event.registration.remaining_spots(), Some(1));
+    }
+
+    #[test]
+    fn should_configure_remove_and_validate_optional_max_capacity() {
+        let (starts_at, ends_at) = sample_dates();
+
+        // 1. Valores <= 0 (zero ou negativos) devem ser rejeitados na validação do limite de vagas
+        assert_eq!(
+            EventRegistrationInfo::with_capacity(0).unwrap_err(),
+            EventDomainError::InvalidMaxCapacity(0)
+        );
+        assert_eq!(
+            EventRegistrationInfo::with_signed_capacity(0).unwrap_err(),
+            EventDomainError::InvalidMaxCapacity(0)
+        );
+        assert_eq!(
+            EventRegistrationInfo::with_signed_capacity(-5).unwrap_err(),
+            EventDomainError::InvalidMaxCapacity(-5)
+        );
+        assert_eq!(
+            EventRegistrationInfo::validate_max_capacity(None).unwrap(),
+            None
+        );
+        assert_eq!(
+            EventRegistrationInfo::validate_max_capacity(Some(3)).unwrap(),
+            Some(3)
+        );
+
+        // 2. Criar evento sem limite (None), definir um limite válido (3) e depois remover o limite (None)
+        let mut event = Event::create_draft(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "Palestra de IA",
+            "Introdução a agentes autônomos",
+            "Auditório Principal",
+            starts_at,
+            ends_at,
+            EventRegistrationInfo::unrestricted(),
+        )
+        .expect("deve criar evento sem limite de vagas");
+        assert_eq!(event.registration.max_capacity, None);
+
+        event
+            .set_signed_max_capacity(Some(3))
+            .expect("deve configurar limite de 3 vagas");
+        assert_eq!(event.registration.max_capacity, Some(3));
+        assert_eq!(event.registration.remaining_spots(), Some(3));
+
+        // Tentativa de configurar valor 0 ou negativo mantém o limite anterior intacto
+        assert_eq!(
+            event.set_signed_max_capacity(Some(0)).unwrap_err(),
+            EventDomainError::InvalidMaxCapacity(0)
+        );
+        assert_eq!(
+            event.set_signed_max_capacity(Some(-10)).unwrap_err(),
+            EventDomainError::InvalidMaxCapacity(-10)
+        );
+        assert_eq!(event.registration.max_capacity, Some(3));
+
+        // Remover o limite de vagas (voltar para None)
+        event
+            .set_signed_max_capacity(None)
+            .expect("deve permitir remover o limite de vagas");
+        assert_eq!(event.registration.max_capacity, None);
+        assert_eq!(event.registration.remaining_spots(), None);
     }
 }
