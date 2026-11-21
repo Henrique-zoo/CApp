@@ -1,9 +1,12 @@
-//! Camada de domínio prevista para o módulo de eleições.
+//! Regras e primitivas do domínio de eleições.
 //!
-//! [`entities`], [`rules`] e [`events`] reservarão os modelos, suas invariantes
-//! e os fatos relevantes do negócio. Ainda não há regras implementadas;
-//! essa camada deve permanecer independente de HTTP e banco de dados.
+//! [`cryptography`] implementa as operações matemáticas do protocolo eleitoral
+//! e usa as falhas definidas em [`error`]. [`entities`], [`rules`] e [`events`]
+//! reservam espaço para os modelos, suas invariantes e os fatos relevantes
+//! do negócio.
 
+pub mod cryptography;
 pub mod entities;
+pub mod error;
 pub mod events;
 pub mod rules;
