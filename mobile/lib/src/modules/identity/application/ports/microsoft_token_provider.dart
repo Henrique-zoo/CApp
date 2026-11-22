@@ -24,7 +24,7 @@
 /// A ausência de conta é sucesso na limpeza e exige interação na obtenção.
 library;
 
-import '../errors/microsoft_interaction_required_exception.dart';
+import '../error/microsoft_interaction_required_exception.dart';
 
 /// Obtém tokens Microsoft e permite remover sua sessão local.
 abstract interface class MicrosoftTokenProvider {

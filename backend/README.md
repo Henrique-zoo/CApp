@@ -60,6 +60,8 @@ A direção das dependências é diferente do fluxo de chamadas durante a execu�
 
 A inicialização da aplicação atua como ponto de composição: instancia os adaptadores de infraestrutura e os fornece aos casos de uso. Assim, os casos de uso recebem suas dependências sem precisar construir um repositório PostgreSQL ou um cliente de serviço externo.
 
+Os módulos que agrupam erros usam o nome `error`, inclusive quando definem vários tipos de erro.
+
 ---
 
 # Princípios arquiteturais

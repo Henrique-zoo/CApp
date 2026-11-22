@@ -63,7 +63,7 @@ lib/
             ├── application/
             │   ├── models/           # Tipos próprios usados pelos casos de uso.
             │   ├── ports/            # Contratos requeridos pela aplicação.
-            │   ├── errors/           # Falhas expressas no vocabulário do módulo.
+            │   ├── error/            # Falhas expressas no vocabulário do módulo.
             │   └── ...               # Serviços, controladores, estados e resultados.
             ├── infrastructure/
             │   ├── backend/          # Implementação das portas sobre clientes HTTP.
@@ -76,6 +76,9 @@ lib/
 Cada novo domínio ocupa seu próprio diretório em modules/. Seus adaptadores
 variam conforme as integrações necessárias; firebase/ e preferences/ são escolhas
 do módulo atual, não diretórios obrigatórios para todos.
+
+Os diretórios que agrupam erros usam o nome `error`, inclusive quando contêm
+vários tipos de exceção.
 
 ## Papéis das camadas
 
@@ -271,7 +274,7 @@ modules/<modulo>/
 ├── application/
 │   ├── models/
 │   ├── ports/
-│   ├── errors/
+│   ├── error/
 │   └── ...                         # Casos de uso, estado e resultados.
 ├── infrastructure/
 │   └── <integracao>/              # Adaptadores e conversões da fronteira.

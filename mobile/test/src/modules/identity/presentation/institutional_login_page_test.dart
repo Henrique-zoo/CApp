@@ -10,7 +10,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:capp/src/modules/identity/application/errors/microsoft_interaction_required_exception.dart';
+import 'package:capp/src/modules/identity/application/error/microsoft_interaction_required_exception.dart';
 import 'package:capp/src/modules/identity/identity.dart';
 import 'package:capp/src/modules/identity/identity_widgets.dart';
 
