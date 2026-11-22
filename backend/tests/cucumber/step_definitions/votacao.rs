@@ -421,13 +421,10 @@ fn given_valor_esta_autenticada_pela_sua_conta_firebase(_world: &mut AppWorld, _
     pending_step("\"{string}\" está autenticada pela sua conta Firebase");
 }
 
-/// Pendente: "{string}" não possui inscrição ou chave prévia nessa eleição.
-#[given(regex = r#"^"([^"]*)" não possui inscrição ou chave prévia nessa eleição$"#)]
-fn given_valor_nao_possui_inscricao_ou_chave_previa_nessa_eleicao(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step("\"{string}\" não possui inscrição ou chave prévia nessa eleição");
+/// Pendente: "{string}" cadastrou sua chave pública antes da abertura.
+#[given(regex = r#"^"([^"]*)" cadastrou sua chave pública antes da abertura$"#)]
+fn given_valor_cadastrou_chave_antes_da_abertura(_world: &mut AppWorld, _value_1: String) {
+    pending_step("\"{string}\" cadastrou sua chave pública antes da abertura");
 }
 
 /// Pendente: registra seu primeiro voto na chapa "{string}".
@@ -436,17 +433,10 @@ fn when_registra_seu_primeiro_voto_na_chapa_valor(_world: &mut AppWorld, _value_
     pending_step("registra seu primeiro voto na chapa \"{string}\"");
 }
 
-/// Pendente: a chave pública enviada na cédula é vinculada à conta autenticada de "{string}".
-#[then(
-    regex = r#"^a chave pública enviada na cédula é vinculada à conta autenticada de "([^"]*)"$"#
-)]
-fn then_a_chave_publica_enviada_na_cedula_e_vinculada_a_conta_autenticada_de_valor(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step(
-        "a chave pública enviada na cédula é vinculada à conta autenticada de \"{string}\"",
-    );
+/// Pendente: a assinatura da cédula confere com a chave cadastrada por "{string}".
+#[then(regex = r#"^a assinatura da cédula confere com a chave cadastrada por "([^"]*)"$"#)]
+fn then_assinatura_confere_com_chave_cadastrada(_world: &mut AppWorld, _value_1: String) {
+    pending_step("a assinatura da cédula confere com a chave cadastrada por \"{string}\"");
 }
 
 /// Pendente: a chave privada permanece no dispositivo de "{string}".
@@ -509,19 +499,6 @@ fn when_submete_uma_cedula_assinada_com_sua_chave_local_indicando_a_chapa_valor(
     _value_1: String,
 ) {
     pending_step("submete uma cédula assinada com sua chave local, indicando a chapa \"{string}\"");
-}
-
-/// Pendente: a assinatura digital é validada com a chave pública enviada na cédula de "{string}".
-#[then(
-    regex = r#"^a assinatura digital é validada com a chave pública enviada na cédula de "([^"]*)"$"#
-)]
-fn then_a_assinatura_digital_e_validada_com_a_chave_publica_enviada_na_cedula_de_valor(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step(
-        "a assinatura digital é validada com a chave pública enviada na cédula de \"{string}\"",
-    );
 }
 
 /// Pendente: a publicação não expõe escolha em claro nem aleatoriedade da cifragem.
