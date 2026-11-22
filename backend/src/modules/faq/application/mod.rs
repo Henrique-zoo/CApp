@@ -1,8 +1,7 @@
-//! Camada de casos de uso prevista para o módulo de perguntas frequentes.
-//!
-//! [`commands`] agrupará alterações de estado, [`queries`] consultas e
-//! [`services`] a coordenação dessas operações. Ainda não há implementações.
+//! Camada de casos de uso e orquestração do módulo de FAQ.
 
 pub mod commands;
+pub mod error;
+pub mod ports;
 pub mod queries;
 pub mod services;

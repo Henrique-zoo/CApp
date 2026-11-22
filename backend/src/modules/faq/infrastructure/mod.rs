@@ -1,6 +1,3 @@
-//! Camada de persistência prevista para o módulo de perguntas frequentes.
-//!
-//! [`repository`] reserva os adaptadores de acesso aos dados desse domínio.
-//! Ainda não existem consultas ou implementações de repositório.
+//! Camada de persistência e repositórios do módulo de perguntas frequentes (FAQ).
 
 pub mod repository;
