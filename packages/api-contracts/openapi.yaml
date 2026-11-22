@@ -818,6 +818,9 @@ paths:
         Exige autenticação institucional com vínculo estudantil ativo. Demandas sobre o
         espaço físico são acessíveis a qualquer discente; demandas do fórum institucional
         são restritas aos estudantes dos cursos atendidos e à gestão do CA.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
       parameters:
         - name: academic_center_id
           in: path
@@ -968,6 +971,9 @@ paths:
         Exige obrigatoriamente parecer explicativo (`opinion`), valida a matriz de
         transições de ciclo de vida e proíbe encaminhamento à coordenação para o fórum
         de espaço físico. Registra nova entrada no histórico de status de forma atômica.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
       parameters:
         - name: academic_center_id
           in: path
