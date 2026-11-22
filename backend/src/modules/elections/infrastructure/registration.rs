@@ -15,6 +15,12 @@ use super::super::{
 /// Persistência do cadastro, sem precisar da chave privada de assinatura do servidor.
 pub struct PgVoterRegistry;
 
+impl From<sqlx::Error> for RegistrationError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Storage(Box::new(error))
+    }
+}
+
 impl PgVoterRegistry {
     /// Configura o curso no fluxo confiável de preparação. O CA vem exclusivamente
     /// do manifesto oficial. Uma configuração já publicada só admite repetição idêntica.
@@ -111,7 +117,13 @@ impl PgVoterRegistry {
         let voter_id = sqlx::query_scalar(
             "INSERT INTO election_voter_registration(election_id,account_id,public_key,registered_at)
              VALUES($1,$2,$3,$4) RETURNING voter_id",
-        ).bind(election_id).bind(account_id).bind(&key).bind(now).fetch_one(&mut *tx).await?;
+        )
+        .bind(election_id)
+        .bind(account_id)
+        .bind(&key)
+        .bind(now)
+        .fetch_one(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(RegistrationStatus {
             voter_id: Some(voter_id),
@@ -137,7 +149,7 @@ impl PgVoterRegistry {
     ) -> Result<RegistrationStatus, RegistrationError> {
         // Votos aceitos antes da migration preservam seu identificador e chave; não
         // simulamos um cadastro prévio retroativo e nunca autorizamos novos votos por isso.
-        sqlx::query_as(
+        let (voter_id, public_key, participated) = sqlx::query_as(
             "SELECT COALESCE(r.voter_id,p.voter_id) AS voter_id,
                     COALESCE(r.public_key,e.signed_ballot->'payload'->>'publicKey') AS public_key,
                     p.account_id IS NOT NULL AS participated
@@ -146,7 +158,17 @@ impl PgVoterRegistry {
              LEFT JOIN election_participation p ON p.election_id=b.election_id AND p.account_id=$2
              LEFT JOIN election_board_entry e ON e.election_id=p.election_id AND e.voter_id=p.voter_id
              WHERE b.election_id=$1",
-        ).bind(election_id).bind(account_id).fetch_optional(conn).await?.ok_or(RegistrationError::NotFound)
+        )
+        .bind(election_id)
+        .bind(account_id)
+        .fetch_optional(conn)
+        .await?
+        .ok_or(RegistrationError::NotFound)?;
+        Ok(RegistrationStatus {
+            voter_id,
+            public_key,
+            participated,
+        })
     }
 }
 
@@ -170,7 +192,12 @@ pub(super) async fn eligibility_deadline(
            AND v.microsoft_student_group_id=i.microsoft_student_group_id
            AND v.checked_at <= clock_timestamp()
          FOR SHARE OF ec,c,i,v,u",
-    ).bind(election_id).bind(identity.account_id).bind(identity.microsoft_object_id).fetch_optional(&mut **tx).await
+    )
+    .bind(election_id)
+    .bind(identity.account_id)
+    .bind(identity.microsoft_object_id)
+    .fetch_optional(&mut **tx)
+    .await
 }
 
 pub(super) async fn database_now(

@@ -13,7 +13,7 @@ pub struct VoterIdentity {
 }
 
 /// Situação da própria conta, recuperável após o fim da elegibilidade.
-#[derive(Debug, PartialEq, Eq, Serialize, sqlx::FromRow)]
+#[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistrationStatus {
     /// Identificador aleatório e estável apenas para esta eleição.
@@ -45,10 +45,4 @@ pub enum RegistrationError {
     /// Falha técnica sem confirmação da escrita.
     #[error("Falha no armazenamento do cadastro eleitoral")]
     Storage(#[source] Box<dyn std::error::Error + Send + Sync>),
-}
-
-impl From<sqlx::Error> for RegistrationError {
-    fn from(error: sqlx::Error) -> Self {
-        Self::Storage(Box::new(error))
-    }
 }

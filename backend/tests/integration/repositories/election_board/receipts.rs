@@ -7,6 +7,7 @@ use axum::{
 use backend::{
     api::{router::create_router, state::AppState},
     infrastructure::database::PgDatabase,
+    modules::elections::application::registration::RegistrationStatus,
     modules::elections::crypto_wire::{MAX_SIGNED_MESSAGE_BYTES, ServerSigner},
     modules::identity::infrastructure::firebase::AppCheckVerifier,
     test_support::local_identity_clients,
@@ -123,6 +124,40 @@ pub(super) async fn assert_own_receipts(pool: &PgPool, id: Uuid, expected: [(Uui
         assert_eq!(registration["participated"], true);
         assert!(registration["voterId"].is_string() && registration["publicKey"].is_string());
     }
+}
+
+pub(super) async fn assert_legacy_http(
+    pool: &PgPool,
+    id: Uuid,
+    owner: Uuid,
+    other: Uuid,
+    recovered: &RegistrationStatus,
+    receipt: &Value,
+) {
+    let api = SessionApi::new(pool).await;
+    let get = |path: &str| {
+        Request::get(format!("/elections/{id}/{path}/me"))
+            .body(Body::empty())
+            .unwrap()
+    };
+    assert_eq!(
+        api.send(owner, get("registration")).await,
+        (StatusCode::OK, json!(recovered))
+    );
+    assert_eq!(
+        api.send(owner, get("receipts")).await,
+        (StatusCode::OK, receipt.clone())
+    );
+    assert_eq!(
+        api.send(other, get("registration")).await,
+        (
+            StatusCode::OK,
+            json!({"voterId":null,"publicKey":null,"participated":false})
+        )
+    );
+    let (status, error) = api.send(other, get("receipts")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{error}");
+    assert_eq!(error["error"]["code"], "receipt_not_found");
 }
 
 pub(super) async fn assert_registration_http(

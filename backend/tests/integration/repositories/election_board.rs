@@ -1,6 +1,7 @@
 //! Aceite atravÃ©s da porta da aplicaÃ§Ã£o, com commits reais em PostgreSQL.
 
 mod fixtures;
+mod legacy;
 #[cfg(feature = "test-support")]
 mod receipts;
 mod registration;
