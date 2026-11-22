@@ -3,23 +3,9 @@
 //! Cancelamento e encerramento usam a mesma regra do perfil v1. Conferir o quadro
 //! completo, seus digests e a contagem transacional pertence aos adaptadores.
 
-use crate::modules::elections::domain::value_objects::{
-    fingerprint::Fingerprint, voter_count::VoterCount,
+use crate::modules::elections::domain::{
+    Fingerprint, counts::VoterCount, error::InvalidBoardSnapshot,
 };
-
-/// Referências incompatíveis com a existência do manifesto e a contagem.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum InvalidBoardSnapshot {
-    /// Sem manifesto, não pode existir cabeça de quadro nem participação.
-    #[error("Quadro ou participação sem manifesto")]
-    ManifestRequired,
-    /// Publicado o manifesto, a fotografia precisa identificar a cabeça do quadro.
-    #[error("A fotografia confidencial exige a cabeça do quadro")]
-    HeadRequired,
-    /// A origem do quadro representa exatamente zero participantes.
-    #[error("A cabeça do quadro é incompatível com a contagem de participantes")]
-    InvalidEmptyBoard,
-}
 
 /// Confere referências confidenciais sem calcular hashes ou percorrer o quadro.
 ///
@@ -44,5 +30,58 @@ pub fn validate_confidential_board_snapshot(
             Err(InvalidBoardSnapshot::InvalidEmptyBoard)
         }
         (Some(_), Some(_)) => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::modules::elections::test_support::fp;
+
+    #[test]
+    fn a_board_without_a_manifest_contains_no_head_or_participants() {
+        let head = fp('b');
+        let zero = VoterCount::try_new(0).unwrap();
+        let one = VoterCount::try_new(1).unwrap();
+
+        assert_eq!(
+            validate_confidential_board_snapshot(None, None, zero),
+            Ok(())
+        );
+        assert_eq!(
+            validate_confidential_board_snapshot(None, Some(&head), zero),
+            Err(InvalidBoardSnapshot::ManifestRequired)
+        );
+        assert_eq!(
+            validate_confidential_board_snapshot(None, None, one),
+            Err(InvalidBoardSnapshot::ManifestRequired)
+        );
+    }
+
+    #[test]
+    fn a_board_with_a_manifest_requires_a_head_consistent_with_the_count() {
+        let manifest = fp('b');
+        let other = fp('c');
+        let zero = VoterCount::try_new(0).unwrap();
+        let one = VoterCount::try_new(1).unwrap();
+
+        assert_eq!(
+            validate_confidential_board_snapshot(Some(&manifest), None, zero),
+            Err(InvalidBoardSnapshot::HeadRequired)
+        );
+        assert_eq!(
+            validate_confidential_board_snapshot(Some(&manifest), Some(&manifest), zero),
+            Ok(())
+        );
+        assert_eq!(
+            validate_confidential_board_snapshot(Some(&manifest), Some(&other), one),
+            Ok(())
+        );
+        for (head, count) in [(&other, zero), (&manifest, one)] {
+            assert_eq!(
+                validate_confidential_board_snapshot(Some(&manifest), Some(head), count),
+                Err(InvalidBoardSnapshot::InvalidEmptyBoard)
+            );
+        }
     }
 }

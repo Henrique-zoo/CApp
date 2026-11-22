@@ -4,8 +4,35 @@
 //! assinaturas/bytes/provas são conferidos pela suíte Python do contrato e pelas
 //! futuras implementações criptográficas; estes testes não implementam um codec.
 
-use super::*;
+use crate::modules::elections::{
+    domain::{
+        Fingerprint,
+        choices::ElectionOption,
+        counts::{OptionCount, VoterCount},
+        cryptography::elgamal::ElGamalCiphertext,
+        entities::{
+            authority::{Authority, AuthorityRole, KeyProof},
+            ballot::{BallotCiphertexts, BallotContent, Ciphertext, SignedBallot},
+            configuration::ElectionConfiguration,
+            election::{
+                Election, ElectionModality, ElectionPeriod, ElectionState, ElectionTransition,
+            },
+            manifest::{Manifest, VerifiedManifest},
+            result::{FinalTallyResult, TallyComputation},
+        },
+        error::ElectionTransitionError,
+        identifiers::{
+            AcademicCenterId, AccountId, AuthorityId, ElectionId, SlateId, SubmissionId,
+        },
+        rules::board_snapshot::validate_confidential_board_snapshot,
+    },
+    infrastructure::codec::{BASE64_URL_MAX_LENGTH, decode_fingerprint},
+    test_support::{aid, at, decoded},
+};
+use chrono::{DateTime, Utc};
+use crypto_bigint::U2048;
 use serde_json::Value;
+use uuid::Uuid;
 
 fn corpus() -> Value {
     serde_json::from_str(include_str!(concat!(
@@ -29,33 +56,36 @@ fn uuid(value: &Value, key: &str) -> Uuid {
     Uuid::parse_str(text(value, key)).unwrap()
 }
 fn hash(value: &Value, key: &str) -> Fingerprint {
-    Fingerprint::try_from_hex(text(value, key)).unwrap()
-}
-fn optional_hash(value: &Value, key: &str) -> Option<Fingerprint> {
-    value[key]
-        .as_str()
-        .map(|s| Fingerprint::try_from_hex(s).unwrap())
+    decode_fingerprint(text(value, key)).unwrap()
 }
 fn time(value: &Value, key: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(text(value, key))
         .unwrap()
         .with_timezone(&Utc)
 }
+fn period(value: &Value) -> ElectionPeriod {
+    ElectionPeriod::try_new(time(value, "startsAt"), time(value, "endsAt")).unwrap()
+}
 fn election_id(value: &Value) -> ElectionId {
     ElectionId::try_from_uuid(uuid(value, "electionId")).unwrap()
 }
-fn option_id(value: &Value, key: &str) -> OptionId {
-    OptionId::from_uuid(uuid(value, key))
-}
-fn big(value: &Value, key: &str) -> BigUInt {
-    BigUInt::try_from_decimal(text(value, key)).unwrap()
+fn uint2048(value: &Value, key: &str) -> U2048 {
+    U2048::from_str_radix_vartime(text(value, key), 10).unwrap()
 }
 fn ciphertexts(value: &Value) -> Vec<Ciphertext> {
     value["ciphertexts"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|c| Ciphertext::new(option_id(c, "optionId"), big(c, "a"), big(c, "b")))
+        .map(|c| {
+            Ciphertext::new(
+                uuid(c, "optionId"),
+                ElGamalCiphertext {
+                    a: uint2048(c, "a"),
+                    b: uint2048(c, "b"),
+                },
+            )
+        })
         .collect()
 }
 
@@ -66,17 +96,18 @@ fn read_manifest(value: &Value) -> Manifest {
         .as_array()
         .unwrap()
         .iter()
-        .map(|o| {
-            ElectionOption::try_new(
-                option_id(o, "id"),
-                match text(o, "kind") {
-                    "slate" => OptionKind::Slate,
-                    "null" => OptionKind::Null,
-                    _ => panic!("Opção desconhecida"),
-                },
-                text(o, "name"),
+        .map(|option| match text(option, "kind") {
+            "slate" => ElectionOption::try_slate(
+                SlateId::try_from_uuid(uuid(option, "id")).unwrap(),
+                text(option, "name"),
             )
-            .unwrap()
+            .unwrap(),
+            "null" => {
+                assert!(uuid(option, "id").is_nil());
+                assert_eq!(text(option, "name"), ElectionOption::NULL_OPTION_NAME);
+                ElectionOption::Null
+            }
+            kind => panic!("Opção desconhecida: {kind}"),
         })
         .collect();
     let authorities = value["authorities"]
@@ -89,17 +120,16 @@ fn read_manifest(value: &Value) -> Manifest {
                 match text(a, "role") {
                     "server" => AuthorityRole::Server,
                     "commission" => AuthorityRole::Commission,
-                    "slate" => AuthorityRole::Slate,
+                    "slate" => {
+                        AuthorityRole::Slate(SlateId::try_from_uuid(uuid(a, "slateId")).unwrap())
+                    }
                     _ => panic!("Autoridade desconhecida"),
                 },
-                a["slateId"]
-                    .as_str()
-                    .map(|id| SlateId::try_from_uuid(Uuid::parse_str(id).unwrap()).unwrap()),
-                encoded(text(a, "signingKey")),
-                big(a, "publicValue"),
+                decoded(text(a, "signingKey")),
+                uint2048(a, "publicValue"),
                 KeyProof::new(
-                    big(&a["keyProof"], "commitment"),
-                    big(&a["keyProof"], "response"),
+                    uint2048(&a["keyProof"], "commitment"),
+                    uint2048(&a["keyProof"], "response"),
                 ),
             )
             .unwrap()
@@ -110,115 +140,70 @@ fn read_manifest(value: &Value) -> Manifest {
         AcademicCenterId::try_from_uuid(uuid(value, "academicCenterId")).unwrap(),
         options,
         authorities,
-        big(value, "combinedPublicKey"),
-        encoded(text(value, "serverSigningKey")),
-        hash(value, "calendarOriginHash"),
+        uint2048(value, "combinedPublicKey"),
+        decoded(text(value, "serverSigningKey")),
     )
     .unwrap()
 }
-fn read_change(value: &Value) -> ScheduleChange {
-    ScheduleChange::try_new(
-        election_id(value),
-        optional_hash(value, "manifestHash"),
-        value["revision"].as_u64().unwrap().try_into().unwrap(),
-        hash(value, "previousScheduleHash"),
-        ElectionPeriod::try_new(time(value, "startsAt"), time(value, "endsAt")).unwrap(),
-        ActorId::try_from_uuid(uuid(value, "changedBy")).unwrap(),
-        time(value, "changedAt"),
-        text(value, "reason"),
-    )
-    .unwrap()
-}
-fn read_result(value: &Value) -> ElectionResult {
-    let status = match text(value, "status") {
-        "valid" => ResultStatus::Valid,
-        "annulled" => ResultStatus::Annulled,
-        "incomplete" => ResultStatus::Incomplete,
-        "cancelled" => ResultStatus::Cancelled,
-        _ => panic!("Resultado desconhecido"),
-    };
-    let reason = value["reason"].as_str().map(|reason| match reason {
-        "missing_authority" => ResultReason::MissingAuthority,
-        "invalid_authority_share" => ResultReason::InvalidAuthorityShare,
-        "aggregate_sum_mismatch" => ResultReason::AggregateSumMismatch,
-        "tally_out_of_range" => ResultReason::TallyOutOfRange,
-        "manual_cancellation" => ResultReason::ManualCancellation,
-        _ => panic!("Motivo desconhecido"),
-    });
-    let counts = value["counts"].as_array().map(|counts| {
+
+fn read_counts(value: &Value) -> Option<Vec<OptionCount>> {
+    value["counts"].as_array().map(|counts| {
         counts
             .iter()
             .map(|c| {
                 OptionCount::try_new(
-                    option_id(c, "optionId"),
+                    uuid(c, "optionId"),
                     c["count"].as_u64().unwrap().try_into().unwrap(),
                 )
                 .unwrap()
             })
             .collect()
-    });
-    let missing = value["missingAuthorities"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|id| {
-            AuthorityId::try_from_uuid(Uuid::parse_str(id.as_str().unwrap()).unwrap()).unwrap()
-        })
-        .collect();
-    ElectionResult::try_new(
-        election_id(value),
-        optional_hash(value, "manifestHash"),
-        optional_hash(value, "closureHash"),
-        optional_hash(value, "aggregateHash"),
-        optional_hash(value, "cancellationHash"),
-        VoterCount::try_new(value["voterCount"].as_u64().unwrap().try_into().unwrap()).unwrap(),
-        status,
-        reason,
-        counts,
-        missing,
-    )
-    .unwrap()
+    })
 }
 
 #[test]
-fn public_protocol_scenarios_preserve_domain_outcomes_and_reconstitution() {
+fn public_protocol_scenarios_preserve_domain_outcomes() {
     let corpus = corpus();
     for scenario in corpus["scenarios"].as_array().unwrap() {
         let name = text(scenario, "name");
-        let initial = &case(&corpus, &format!("{name}/calendar-origin"))["payload"];
+        let initial_case = case(&corpus, &format!("{name}/calendar-origin"));
+        let initial = &initial_case["payload"];
         let manifest_case = case(&corpus, &format!("{name}/manifest"));
         let manifest = read_manifest(&manifest_case["payload"]);
-        let mut election = Election::try_new(
+        assert_eq!(manifest.election_id(), election_id(initial));
+        assert_eq!(
+            hash(&manifest_case["payload"], "calendarOriginHash"),
+            hash(initial_case, "sha256")
+        );
+        let mut election = Election::new(
             manifest.election_id(),
             manifest.academic_center_id(),
+            period(initial),
             ElectionModality::Confidential,
-            CalendarOrigin::new(
-                election_id(initial),
-                ElectionPeriod::try_new(time(initial, "startsAt"), time(initial, "endsAt"))
-                    .unwrap(),
-            ),
-            hash(&manifest_case["payload"], "calendarOriginHash"),
-        )
-        .unwrap();
-        let delay = case(&corpus, &format!("{name}/delay"));
+            at(14, 10),
+        );
+        let delay = &case(&corpus, &format!("{name}/delay"))["payload"];
+        let delayed_period = period(delay);
+        let opened_at = *delayed_period.starts_at();
         election
-            .change_schedule(read_change(&delay["payload"]), hash(delay, "sha256"))
+            .change_schedule(delayed_period, time(delay, "changedAt"))
             .unwrap();
+
+        let configuration = ElectionConfiguration::Confidential(Box::new(
+            VerifiedManifest::from_verified_parts(manifest, hash(manifest_case, "sha256")),
+        ));
         election
-            .publish_manifest(VerifiedManifest::from_verified_parts(
-                manifest,
-                hash(manifest_case, "sha256"),
-            ))
+            .advance(ElectionTransition::CompletePreparation { configuration })
             .unwrap();
+
         election
-            .open(*election.current_period().starts_at())
+            .advance(ElectionTransition::Open { opened_at })
             .unwrap();
-        let extension = case(&corpus, &format!("{name}/extension"));
+        let extension_case = case(&corpus, &format!("{name}/extension"));
+        let extension = &extension_case["payload"];
+        let extended_period = period(extension);
         election
-            .change_schedule(
-                read_change(&extension["payload"]),
-                hash(extension, "sha256"),
-            )
+            .change_schedule(extended_period.clone(), time(extension, "changedAt"))
             .unwrap();
 
         // As mesmas cédulas do corpus preservam dimensão, ordem e contexto.
@@ -229,42 +214,62 @@ fn public_protocol_scenarios_preserve_domain_outcomes_and_reconstitution() {
             .filter(|c| text(c, "name").starts_with(&format!("{name}/ballot-")))
         {
             let payload = &ballot["payload"];
-            let signed = SignedBallot::try_new(
+            let signed = SignedBallot::new(
                 election_id(payload),
-                VoterId::try_from_uuid(uuid(payload, "voterId")).unwrap(),
+                AccountId::try_from_uuid(uuid(payload, "voterId")).unwrap(),
                 SubmissionId::try_from_uuid(uuid(payload, "submissionId")).unwrap(),
-                encoded(text(payload, "publicKey")),
-                encoded(text(ballot, "signature")),
+                decoded(text(payload, "publicKey")),
+                decoded(text(ballot, "signature")),
                 BallotContent::Confidential {
                     manifest_hash: hash(payload, "manifestHash"),
-                    ciphertexts: ciphertexts(payload),
+                    ciphertexts: BallotCiphertexts::try_new(ciphertexts(payload)).unwrap(),
                 },
-            )
-            .unwrap();
+            );
             signed.validate_for(&election).unwrap();
         }
         let closure_case = case(&corpus, &format!("{name}/closure"));
         let closure = &closure_case["payload"];
         let n = VoterCount::try_new(closure["voterCount"].as_u64().unwrap().try_into().unwrap())
             .unwrap();
+        let manifest_hash = hash(closure, "manifestHash");
+        let head_hash = hash(closure, "headHash");
+        validate_confidential_board_snapshot(Some(&manifest_hash), Some(&head_hash), n).unwrap();
+        assert_eq!(election_id(closure), election.id());
+        assert_eq!(
+            hash(closure, "scheduleHash"),
+            hash(extension_case, "sha256")
+        );
+        assert_eq!(manifest_hash, hash(manifest_case, "sha256"));
+        let closed_at = time(closure, "closedAt");
         election
-            .close(
-                time(closure, "closedAt"),
-                hash(closure, "headHash"),
-                n,
-                hash(closure_case, "sha256"),
-            )
+            .advance(ElectionTransition::Close {
+                closed_at,
+                voter_count: n,
+            })
             .unwrap();
         let aggregate_case = case(&corpus, &format!("{name}/aggregate"));
-        let payload = &aggregate_case["payload"];
-        let aggregate = Aggregate::try_new(
-            election_id(payload),
-            hash(payload, "manifestHash"),
-            hash(payload, "closureHash"),
-            ciphertexts(payload),
-        )
-        .unwrap();
-        let result = read_result(&case(&corpus, &format!("{name}/result"))["payload"]);
+        let aggregate = &aggregate_case["payload"];
+        let result = &case(&corpus, &format!("{name}/result"))["payload"];
+        let options = election.configuration().unwrap().options();
+        assert!(
+            ciphertexts(aggregate)
+                .iter()
+                .map(Ciphertext::option_id)
+                .eq(options.iter().map(ElectionOption::id))
+        );
+        assert_eq!(election_id(aggregate), election.id());
+        assert_eq!(hash(aggregate, "closureHash"), hash(closure_case, "sha256"));
+        assert_eq!(hash(result, "closureHash"), hash(aggregate, "closureHash"));
+        assert_eq!(
+            hash(result, "manifestHash"),
+            hash(aggregate, "manifestHash")
+        );
+        assert_eq!(
+            hash(result, "aggregateHash"),
+            hash(aggregate_case, "sha256")
+        );
+        assert_eq!(result["voterCount"], n.value());
+
         let shares: Vec<_> = corpus["cases"]
             .as_array()
             .unwrap()
@@ -273,37 +278,75 @@ fn public_protocol_scenarios_preserve_domain_outcomes_and_reconstitution() {
             .map(|c| AuthorityId::try_from_uuid(uuid(&c["payload"], "authorityId")).unwrap())
             .collect();
         if name == "valid" {
-            let pending = read_result(&case(&corpus, "valid/incomplete")["payload"]);
-            let contributions = shares
+            let pending = &case(&corpus, "valid/incomplete")["payload"];
+            let missing: Vec<_> = pending["missingAuthorities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| {
+                    AuthorityId::try_from_uuid(Uuid::parse_str(id.as_str().unwrap()).unwrap())
+                        .unwrap()
+                })
+                .collect();
+            let contributing_authorities = shares
                 .iter()
                 .copied()
-                .filter(|id| !pending.missing_authorities().contains(id))
+                .filter(|id| !missing.contains(id))
                 .collect();
-            election
-                .publish_tally(VerifiedTally::from_verified_parts(
-                    pending,
-                    aggregate.clone(),
-                    hash(aggregate_case, "sha256"),
-                    contributions,
-                ))
-                .unwrap();
-            assert_eq!(election.tally_status(), TallyStatus::Incomplete);
+            assert_eq!(pending["status"], "incomplete");
+            assert!(pending["counts"].is_null());
+            assert_eq!(
+                election.advance(ElectionTransition::StartCounting {
+                    contributing_authorities
+                }),
+                Err(ElectionTransitionError::ContributionsMismatch)
+            );
+            assert!(matches!(election.state(), ElectionState::Closed { .. }));
         }
         election
-            .publish_tally(VerifiedTally::from_verified_parts(
-                result.clone(),
-                aggregate,
-                hash(aggregate_case, "sha256"),
-                shares,
-            ))
+            .advance(ElectionTransition::StartCounting {
+                contributing_authorities: shares,
+            })
             .unwrap();
-        assert_eq!(election.result_status(), Some(result.status()), "{name}");
-        assert_eq!(
-            Election::try_reconstitute(election.to_snapshot()).unwrap(),
-            election,
-            "{name}"
-        );
-        if let Some(counts) = result.counts() {
+        let counts = read_counts(result);
+        let (computation, outcome) = match (
+            text(result, "status"),
+            result["reason"].as_str(),
+            counts.as_ref(),
+        ) {
+            ("valid", None, Some(counts)) => (
+                TallyComputation::Totals(counts.clone()),
+                FinalTallyResult::Valid(counts.clone()),
+            ),
+            ("annulled", Some("aggregate_sum_mismatch"), Some(counts)) => (
+                TallyComputation::Totals(counts.clone()),
+                FinalTallyResult::AnnulledBySumMismatch(counts.clone()),
+            ),
+            ("annulled", Some("tally_out_of_range"), None) => (
+                TallyComputation::TotalOutOfRange,
+                FinalTallyResult::AnnulledOutOfRange,
+            ),
+            _ => panic!("O cenário {name} deve ter uma apuração final válida ou anulada"),
+        };
+        election
+            .advance(ElectionTransition::Finalize { computation })
+            .unwrap();
+        let ElectionState::Finalized {
+            voting,
+            closed_at: actual_closed_at,
+            voter_count,
+            result: actual_result,
+        } = election.state()
+        else {
+            panic!("O cenário {name} deve terminar com a apuração finalizada");
+        };
+        assert_eq!(actual_result, &outcome, "{name}");
+        assert_eq!(voting.opened_at, opened_at, "{name}");
+        assert_eq!(*actual_closed_at, closed_at, "{name}");
+        assert_eq!(*voter_count, n, "{name}");
+        assert_eq!(election.current_period(), &extended_period, "{name}");
+
+        if let Some(counts) = counts {
             let totals: Vec<_> = counts.iter().map(|c| c.count().value()).collect();
             assert_eq!(
                 serde_json::json!(totals),
@@ -313,14 +356,13 @@ fn public_protocol_scenarios_preserve_domain_outcomes_and_reconstitution() {
         }
         if name == "compensated" {
             assert_eq!(scenario["assumptionViolation"], true);
-            assert_eq!(
-                result.status(),
-                ResultStatus::Valid,
+            assert!(
+                matches!(actual_result, FinalTallyResult::Valid(_)),
                 "Igualdade agregada não é prova de validade individual"
             );
         }
         if name == "out-of-range" {
-            assert_eq!(result.reason(), Some(ResultReason::TallyOutOfRange));
+            assert_eq!(actual_result, &FinalTallyResult::AnnulledOutOfRange);
         }
     }
 }
@@ -330,37 +372,41 @@ fn public_cancellation_before_manifest_has_no_tally() {
     let corpus = corpus();
     let initial = case(&corpus, "cancelled/calendar-origin");
     let payload = &initial["payload"];
-    let mut election = Election::try_new(
+    let mut election = Election::new(
         election_id(payload),
         aid(),
+        period(payload),
         ElectionModality::Confidential,
-        CalendarOrigin::new(
-            election_id(payload),
-            ElectionPeriod::try_new(time(payload, "startsAt"), time(payload, "endsAt")).unwrap(),
-        ),
-        hash(initial, "sha256"),
-    )
-    .unwrap();
+        at(14, 10),
+    );
+
     let cancellation = &case(&corpus, "cancelled/cancellation")["payload"];
+    let requested_by = uuid(cancellation, "requestedBy");
+    let cancelled_at = time(cancellation, "cancelledAt");
+    let reason = text(cancellation, "reason");
+
     election
-        .cancel(
-            ActorId::try_from_uuid(uuid(cancellation, "requestedBy")).unwrap(),
-            time(cancellation, "cancelledAt"),
-            None,
-            VoterCount::try_new(0).unwrap(),
-            text(cancellation, "reason"),
-        )
+        .advance(ElectionTransition::Cancel {
+            requested_by,
+            cancelled_at,
+            reason: reason.to_owned(),
+        })
         .unwrap();
-    assert_eq!(election.result_status(), Some(ResultStatus::Cancelled));
-    assert!(election.tally_result().is_none());
-    assert_eq!(
-        read_result(&case(&corpus, "cancelled/result")["payload"]).status(),
-        ResultStatus::Cancelled
-    );
-    assert_eq!(
-        Election::try_reconstitute(election.to_snapshot()).unwrap(),
-        election
-    );
+    let ElectionState::Cancelled {
+        requested_by: actual_requester,
+        cancelled_at: actual_cancelled_at,
+        reason: actual_reason,
+    } = election.state()
+    else {
+        panic!("A eleição deve estar cancelada");
+    };
+    assert_eq!(*actual_requester, requested_by);
+    assert_eq!(*actual_cancelled_at, cancelled_at);
+    assert_eq!(actual_reason, reason);
+    assert!(election.configuration().is_none());
+    let public_record = &case(&corpus, "cancelled/result")["payload"];
+    assert_eq!(public_record["status"], "cancelled");
+    assert!(public_record["counts"].is_null());
 }
 
 #[test]
@@ -370,11 +416,7 @@ fn domain_limits_match_the_versioned_profile() {
         "/../packages/api-contracts/elections/profile.json"
     )))
     .unwrap();
-    use super::super::entities::manifest::{MAX_AUTHORITIES, MAX_OPTIONS, MIN_OPTIONS};
-    use super::super::value_objects::{
-        base64_url::BASE64_URL_MAX_LENGTH, big_uint::BIG_UINT_MAX_LENGTH,
-        voter_count::MAX_VOTER_COUNT,
-    };
+    use super::super::profile::{MAX_AUTHORITIES, MAX_OPTIONS, MAX_VOTER_COUNT, MIN_OPTIONS};
     let schema: Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../packages/api-contracts/elections/schemas.json"
@@ -395,10 +437,6 @@ fn domain_limits_match_the_versioned_profile() {
     assert_eq!(
         serde_json::json!(MAX_VOTER_COUNT),
         profile["limits"]["maxVoters"]
-    );
-    assert_eq!(
-        serde_json::json!(BIG_UINT_MAX_LENGTH),
-        schema["$defs"]["BigUInt"]["maxLength"]
     );
     assert_eq!(
         serde_json::json!(BASE64_URL_MAX_LENGTH),

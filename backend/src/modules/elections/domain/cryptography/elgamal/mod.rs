@@ -20,7 +20,10 @@
 
 use std::collections::HashMap;
 
-use crate::modules::elections::domain::error::CryptographyError;
+use crate::modules::elections::domain::{
+    error::CryptographyError,
+    profile::{MAX_AUTHORITIES, MAX_OPTIONS, MAX_VOTER_COUNT, MIN_AUTHORITIES, MIN_OPTIONS},
+};
 use crypto_bigint::{
     Odd, U2048,
     modular::{FixedMontyForm, FixedMontyParams},
@@ -61,15 +64,6 @@ const G: GroupValue = GroupValue::new(&U2048::from_u8(2), &MOD_P);
 
 /// Identidade multiplicativa do subgrupo, em forma de Montgomery.
 const ONE: GroupValue = GroupValue::one(&MOD_P);
-
-/// Teto de cédulas aceitas por eleição no perfil v1.
-///
-/// O caso de uso de votação aplica este limite antes de aceitar outra cédula.
-/// [`recover_totals`] também o confere antes de calcular os totais.
-pub const MAX_VOTERS: u32 = 100_000;
-
-/// Teto de posições do perfil v1, contando até cinquenta chapas e Nulo.
-const MAX_CHOICES: usize = 51;
 
 /// Par ElGamal da autoridade do servidor para uma eleição.
 ///
@@ -158,7 +152,7 @@ fn sample_non_zero_scalar(
 /// Em uma cédula, `m` é o bit daquela escolha, `r` é o nonce da posição e
 /// `h` é a chave pública conjunta. No agregado, os campos contêm os produtos
 /// dos componentes da mesma escolha nas cédulas aceitas.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ElGamalCiphertext {
     /// Primeiro componente. Na cédula individual, vale `g^r mod P`.
     pub a: U2048,
@@ -171,6 +165,7 @@ pub struct ElGamalCiphertext {
 ///
 /// O caso de uso confere a ordem das escolhas e decide se aceita a cédula.
 /// Só as cédulas aceitas até o encerramento entram na agregação.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncryptedBallot {
     ciphertexts: Vec<ElGamalCiphertext>,
 }
@@ -282,7 +277,7 @@ fn validate_element(value: &U2048, allow_identity: bool) -> Result<GroupValue, C
 /// Retorna [`CryptographyError::InvalidCiphertexts`] se `choice_count` estiver
 /// fora de `2..=51`.
 pub fn empty_accumulator(choice_count: usize) -> Result<Vec<ElGamalCiphertext>, CryptographyError> {
-    if !(2..=MAX_CHOICES).contains(&choice_count) {
+    if !(MIN_OPTIONS..=MAX_OPTIONS).contains(&choice_count) {
         return Err(CryptographyError::InvalidCiphertexts);
     }
 
@@ -351,7 +346,9 @@ pub fn accumulate_ballot(
 ) -> Result<Vec<ElGamalCiphertext>, CryptographyError> {
     let choice_count = accumulator.len();
 
-    if !(2..=MAX_CHOICES).contains(&choice_count) || choice_count != ballot.ciphertexts.len() {
+    if !(MIN_OPTIONS..=MAX_OPTIONS).contains(&choice_count)
+        || choice_count != ballot.ciphertexts.len()
+    {
         return Err(CryptographyError::InvalidCiphertexts);
     }
 
@@ -396,23 +393,23 @@ pub fn accumulate_ballot(
 ///
 /// Um total por posição do manifesto, incluindo escolhas sem votos e Nulo.
 /// O chamador associa os totais aos IDs das escolhas pela ordem do manifesto.
-/// Em caso de sucesso, a soma dos totais é igual a `voter_count`. Essa igualdade
-/// confere a contagem agregada. Cédulas inválidas que se compensam ainda podem
-/// satisfazê-la.
+/// A apuração da eleição compara a soma com `voter_count` e preserva os totais
+/// para auditoria mesmo quando a soma diverge. Cédulas inválidas que se
+/// compensam ainda podem produzir uma soma igual ao número de votantes.
 ///
 /// # Erros
 ///
 /// - [`CryptographyError::InvalidCiphertexts`] se o agregado tiver menos de
 ///   duas ou mais de cinquenta e uma posições.
-/// - [`CryptographyError::TooManyVoters`] se a contagem exceder [`MAX_VOTERS`].
+/// - [`CryptographyError::TooManyVoters`] se a contagem exceder [`MAX_VOTER_COUNT`].
 /// - [`CryptographyError::InvalidShares`] se a quantidade de contribuições
-///   estiver fora de `3..=52`, se uma contribuição tiver quantidade de valores
-///   diferente do agregado ou se `D_i = 1` e `A != 1`, ou vice-versa.
+///   estiver fora de `MIN_AUTHORITIES..=MAX_AUTHORITIES`, se uma contribuição
+///   tiver quantidade de valores diferente do agregado ou se `D_i = 1` e
+///   `A != 1`, ou vice-versa.
 /// - [`CryptographyError::InvalidGroupElement`] se um valor estiver fora da
 ///   faixa ou do subgrupo, ou se um produto necessário não for invertível.
 /// - [`CryptographyError::TotalOutOfRange`] se algum elemento recuperado não
 ///   corresponder a um total em `[0, voter_count]`.
-/// - [`CryptographyError::TotalMismatch`] se a soma divergir de `voter_count`.
 ///
 /// # Como a tabela recupera a contagem
 ///
@@ -453,15 +450,15 @@ pub fn recover_totals(
     voter_count: u32,
     shares: &[&[U2048]],
 ) -> Result<Vec<u32>, CryptographyError> {
-    if voter_count > MAX_VOTERS {
+    if voter_count > MAX_VOTER_COUNT {
         return Err(CryptographyError::TooManyVoters);
     }
 
-    if !(2..=MAX_CHOICES).contains(&aggregate.len()) {
+    if !(MIN_OPTIONS..=MAX_OPTIONS).contains(&aggregate.len()) {
         return Err(CryptographyError::InvalidCiphertexts);
     }
 
-    if !(3..=52).contains(&shares.len()) {
+    if !(MIN_AUTHORITIES..=MAX_AUTHORITIES).contains(&shares.len()) {
         return Err(CryptographyError::InvalidShares);
     }
 
@@ -507,17 +504,10 @@ pub fn recover_totals(
     // Ao fim do laço, power = g^width. Seu inverso subtrai width do expoente
     // a cada passo da busca.
     let backward = invert_public(&power)?;
-    let totals = encoded_totals
+    encoded_totals
         .into_iter()
         .map(|message| bounded_log(message, voter_count, width, &baby_steps, &backward))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    // Esse caso deve cancelar a eleição.
-    if totals.iter().sum::<u32>() != voter_count {
-        return Err(CryptographyError::TotalMismatch);
-    }
-
-    Ok(totals)
+        .collect()
 }
 
 /// Retorna o inverso multiplicativo de `value` módulo `P`.

@@ -1,10 +1,10 @@
 //! Entidade que representa uma autoridade participante de uma eleição.
 
-use crate::modules::elections::domain::value_objects::{
-    base64_url::Base64Url,
-    big_uint::BigUInt,
+use crypto_bigint::U2048;
+
+use crate::modules::elections::domain::{
+    error::InvalidAuthority,
     identifiers::{AuthorityId, SlateId},
-    key_proof::KeyProof,
 };
 
 /// Papel desempenhado por uma autoridade no protocolo eleitoral.
@@ -17,7 +17,37 @@ pub enum AuthorityRole {
     Commission,
 
     /// Autoridade responsável pela chave de uma chapa.
-    Slate,
+    Slate(SlateId),
+}
+
+/// Prova de conhecimento do segredo associado ao valor público ElGamal.
+///
+/// A autoridade fornece o compromisso e a resposta para verificação
+/// criptográfica antes da publicação do manifesto.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyProof {
+    commitment: U2048,
+    response: U2048,
+}
+
+impl KeyProof {
+    /// Reúne o compromisso e a resposta numéricos para verificação.
+    pub fn new(commitment: U2048, response: U2048) -> Self {
+        Self {
+            commitment,
+            response,
+        }
+    }
+
+    /// Retorna o compromisso da prova.
+    pub const fn commitment(&self) -> &U2048 {
+        &self.commitment
+    }
+
+    /// Retorna a resposta da prova.
+    pub const fn response(&self) -> &U2048 {
+        &self.response
+    }
 }
 
 /// Autoridade registrada na configuração de uma eleição.
@@ -25,30 +55,9 @@ pub enum AuthorityRole {
 pub struct Authority {
     id: AuthorityId,
     role: AuthorityRole,
-    slate_id: Option<SlateId>,
-    signing_key: Base64Url,
-    public_value: BigUInt,
+    signing_key: Vec<u8>,
+    public_value: U2048,
     key_proof: KeyProof,
-}
-
-/// Erros encontrados ao construir uma autoridade.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum InvalidAuthority {
-    /// O papel Slate exige um identificador de chapa.
-    #[error("Uma autoridade de chapa exige um slate_id")]
-    MissingSlateId,
-
-    /// Autoridades Server e Commission não podem apontar para uma chapa.
-    #[error("Somente uma autoridade de chapa pode possuir slate_id")]
-    UnexpectedSlateId,
-
-    /// Os valores públicos zero e um são proibidos pelo perfil eleitoral.
-    #[error("O valor público da autoridade não pode ser zero ou um")]
-    InvalidPublicValue,
-
-    /// O compromisso da prova de conhecimento não pode ser zero ou um.
-    #[error("O compromisso da prova de conhecimento não pode ser zero ou um")]
-    InvalidKeyProofCommitment,
 }
 
 impl Authority {
@@ -56,33 +65,21 @@ impl Authority {
     pub fn try_new(
         id: AuthorityId,
         role: AuthorityRole,
-        slate_id: Option<SlateId>,
-        signing_key: Base64Url,
-        public_value: BigUInt,
+        signing_key: Vec<u8>,
+        public_value: U2048,
         key_proof: KeyProof,
     ) -> Result<Self, InvalidAuthority> {
-        match (role, slate_id) {
-            (AuthorityRole::Slate, None) => {
-                return Err(InvalidAuthority::MissingSlateId);
-            }
-            (AuthorityRole::Server | AuthorityRole::Commission, Some(_)) => {
-                return Err(InvalidAuthority::UnexpectedSlateId);
-            }
-            _ => {}
-        }
-
-        if matches!(public_value.as_str(), "0" | "1") {
+        if public_value <= U2048::ONE {
             return Err(InvalidAuthority::InvalidPublicValue);
         }
 
-        if matches!(key_proof.commitment().as_str(), "0" | "1") {
+        if key_proof.commitment() <= &U2048::ONE {
             return Err(InvalidAuthority::InvalidKeyProofCommitment);
         }
 
         Ok(Self {
             id,
             role,
-            slate_id,
             signing_key,
             public_value,
             key_proof,
@@ -101,16 +98,19 @@ impl Authority {
 
     /// Retorna o identificador da chapa, quando aplicável.
     pub const fn slate_id(&self) -> Option<SlateId> {
-        self.slate_id
+        match self.role {
+            AuthorityRole::Slate(id) => Some(id),
+            AuthorityRole::Server | AuthorityRole::Commission => None,
+        }
     }
 
-    /// Retorna a chave pública de assinatura codificada.
-    pub fn signing_key(&self) -> &Base64Url {
-        &self.signing_key
+    /// Retorna os bytes DER da chave pública de assinatura.
+    pub fn signing_key(&self) -> &[u8] {
+        self.signing_key.as_slice()
     }
 
-    /// Retorna o valor público do protocolo.
-    pub const fn public_value(&self) -> &BigUInt {
+    /// Retorna o valor público ElGamal usado para verificar a prova e combinar as chaves.
+    pub const fn public_value(&self) -> &U2048 {
         &self.public_value
     }
 
@@ -123,13 +123,8 @@ impl Authority {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::elections::domain::value_objects::identifiers::SlateId;
-    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-    use uuid::Uuid;
 
-    fn encoded_key(value: &str) -> String {
-        URL_SAFE_NO_PAD.encode(value.as_bytes())
-    }
+    use uuid::Uuid;
 
     fn authority_id() -> AuthorityId {
         AuthorityId::try_from_uuid(Uuid::new_v4()).unwrap()
@@ -139,19 +134,16 @@ mod tests {
         SlateId::try_from_uuid(Uuid::new_v4()).unwrap()
     }
 
-    fn signing_key() -> Base64Url {
-        Base64Url::try_new(encoded_key("public-signing-key")).unwrap()
+    fn signing_key() -> Vec<u8> {
+        "public-signing-key".as_bytes().to_vec()
     }
 
-    fn public_value() -> BigUInt {
-        BigUInt::try_from_decimal("123").unwrap()
+    fn public_value() -> U2048 {
+        U2048::from_u32(123)
     }
 
     fn key_proof() -> KeyProof {
-        KeyProof::new(
-            BigUInt::try_from_decimal("456").unwrap(),
-            BigUInt::try_from_decimal("789").unwrap(),
-        )
+        KeyProof::new(U2048::from_u32(456), U2048::from_u32(789))
     }
 
     #[test]
@@ -159,7 +151,6 @@ mod tests {
         let authority = Authority::try_new(
             authority_id(),
             AuthorityRole::Server,
-            None,
             signing_key(),
             public_value(),
             key_proof(),
@@ -175,7 +166,6 @@ mod tests {
         let authority = Authority::try_new(
             authority_id(),
             AuthorityRole::Commission,
-            None,
             signing_key(),
             public_value(),
             key_proof(),
@@ -192,75 +182,25 @@ mod tests {
 
         let authority = Authority::try_new(
             authority_id(),
-            AuthorityRole::Slate,
-            Some(slate_id),
+            AuthorityRole::Slate(slate_id),
             signing_key(),
             public_value(),
             key_proof(),
         )
         .unwrap();
 
-        assert_eq!(authority.role(), AuthorityRole::Slate);
+        assert_eq!(authority.role(), AuthorityRole::Slate(slate_id));
         assert_eq!(authority.slate_id(), Some(slate_id));
     }
 
     #[test]
-    fn rejects_slate_authority_without_slate_id() {
-        assert_eq!(
-            Authority::try_new(
-                authority_id(),
-                AuthorityRole::Slate,
-                None,
-                signing_key(),
-                public_value(),
-                key_proof(),
-            ),
-            Err(InvalidAuthority::MissingSlateId)
-        );
-    }
-
-    #[test]
-    fn rejects_server_authority_with_slate_id() {
-        assert_eq!(
-            Authority::try_new(
-                authority_id(),
-                AuthorityRole::Server,
-                Some(slate_id()),
-                signing_key(),
-                public_value(),
-                key_proof(),
-            ),
-            Err(InvalidAuthority::UnexpectedSlateId)
-        );
-    }
-
-    #[test]
-    fn rejects_commission_authority_with_slate_id() {
-        assert_eq!(
-            Authority::try_new(
-                authority_id(),
-                AuthorityRole::Commission,
-                Some(slate_id()),
-                signing_key(),
-                public_value(),
-                key_proof(),
-            ),
-            Err(InvalidAuthority::UnexpectedSlateId)
-        );
-    }
-
-    #[test]
     fn rejects_key_proof_commitment_equal_to_one() {
-        let invalid_proof = KeyProof::new(
-            BigUInt::try_from_decimal("1").unwrap(),
-            BigUInt::try_from_decimal("789").unwrap(),
-        );
+        let invalid_proof = KeyProof::new(U2048::from_u32(1), U2048::from_u32(789));
 
         assert_eq!(
             Authority::try_new(
                 authority_id(),
                 AuthorityRole::Server,
-                None,
                 signing_key(),
                 public_value(),
                 invalid_proof,
@@ -270,17 +210,40 @@ mod tests {
     }
 
     #[test]
-    fn rejects_public_value_equal_to_one() {
-        assert_eq!(
-            Authority::try_new(
-                authority_id(),
-                AuthorityRole::Server,
-                None,
-                signing_key(),
-                BigUInt::try_from_decimal("1").unwrap(),
-                key_proof(),
-            ),
-            Err(InvalidAuthority::InvalidPublicValue)
-        );
+    fn rejects_public_values_zero_and_one() {
+        for public_value in [U2048::ZERO, U2048::ONE] {
+            assert_eq!(
+                Authority::try_new(
+                    authority_id(),
+                    AuthorityRole::Server,
+                    signing_key(),
+                    public_value,
+                    key_proof(),
+                ),
+                Err(InvalidAuthority::InvalidPublicValue)
+            );
+        }
+    }
+
+    #[test]
+    fn stores_commitment_and_response() {
+        let commitment = U2048::from_u32(123);
+        let response = U2048::from_u32(456);
+
+        let proof = KeyProof::new(commitment, response);
+
+        assert_eq!(proof.commitment(), &commitment);
+        assert_eq!(proof.response(), &response);
+    }
+
+    #[test]
+    fn accepts_zero_values_structurally() {
+        // O grupo é considerado na verificação criptográfica da prova.
+        let zero = U2048::ZERO;
+
+        let proof = KeyProof::new(zero, zero);
+
+        assert_eq!(proof.commitment(), &zero);
+        assert_eq!(proof.response(), &zero);
     }
 }
