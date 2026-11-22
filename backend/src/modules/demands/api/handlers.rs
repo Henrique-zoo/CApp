@@ -21,12 +21,17 @@ use crate::{
     },
     modules::{
         demands::{
-            api::dto::{CreateDemandRequest, DemandResponse, ListDemandsQueryParams},
+            api::dto::{
+                CreateDemandCommentRequest, CreateDemandRequest, DemandCommentResponse,
+                DemandResponse, ListDemandsQueryParams,
+            },
             application::{
-                commands::CreateDemandCommand,
+                commands::{CreateDemandCommand, PostDemandCommentCommand},
                 error::DemandApplicationError,
-                queries::ListDemandsQuery,
-                services::{create_demand, list_demands},
+                queries::{ListDemandCommentsQuery, ListDemandsQuery},
+                services::{
+                    create_demand, list_demand_comments, list_demands, post_demand_comment,
+                },
             },
             domain::entities::{DemandForum, DemandStatus},
         },
@@ -227,6 +232,111 @@ pub async fn handle_list_demands(
     let demands = list_demands(&state.pg_database, &state.pg_database, query).await?;
 
     let response: Vec<DemandResponse> = demands.into_iter().map(DemandResponse::from).collect();
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+/// Publica um novo comentário ou interação em uma demanda.
+///
+/// # Rota
+///
+/// `POST /api/v1/academic-centers/{academic_center_id}/demands/{demand_id}/comments`
+///
+/// # Respostas
+///
+/// - `201 Created`: Comentário registrado com sucesso.
+/// - `400 Bad Request`: Payload JSON malformado ou demanda pertencente a outro CA.
+/// - `401 Unauthorized`: Credenciais ausentes ou inválidas.
+/// - `403 Forbidden`: Usuário sem permissão para interagir (terceiro não autorizado ou sem vínculo ativo).
+/// - `404 Not Found`: Centro Acadêmico ou demanda inexistente.
+/// - `422 Unprocessable Entity`: Conteúdo vazio, excedendo limite ou CA inativo.
+pub async fn handle_post_comment(
+    State(state): State<AppState>,
+    Path((academic_center_id, demand_id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+    body: Result<Json<CreateDemandCommentRequest>, JsonRejection>,
+) -> ApiResult<impl IntoResponse> {
+    let Json(payload) = body.map_err(|_| ApiError::bad_request())?;
+
+    let author_id = match authenticate_caller(&state, &headers).await {
+        Ok(authenticated_user_id) => {
+            if payload
+                .author_id
+                .is_some_and(|body_author| body_author != authenticated_user_id)
+            {
+                return Err(ApiError::forbidden());
+            }
+            authenticated_user_id
+        }
+        Err(err) => {
+            #[cfg(feature = "test-support")]
+            {
+                if let Some(body_author) = payload.author_id {
+                    body_author
+                } else {
+                    return Err(err);
+                }
+            }
+
+            #[cfg(not(feature = "test-support"))]
+            {
+                return Err(err);
+            }
+        }
+    };
+
+    let command =
+        PostDemandCommentCommand::new(academic_center_id, demand_id, author_id, payload.content);
+
+    let comment = post_demand_comment(
+        &state.pg_database,
+        &state.pg_database,
+        &state.pg_database,
+        command,
+    )
+    .await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(DemandCommentResponse::from(comment)),
+    ))
+}
+
+/// Lista os comentários e interações de uma demanda em ordem cronológica ascendente.
+///
+/// # Rota
+///
+/// `GET /api/v1/academic-centers/{academic_center_id}/demands/{demand_id}/comments`
+///
+/// # Respostas
+///
+/// - `200 OK`: Lista de comentários em ordem cronológica (`created_at ASC, id ASC`).
+/// - `400 Bad Request`: Demanda pertencente a outro Centro Acadêmico.
+/// - `401 Unauthorized`: Credenciais ausentes ou inválidas.
+/// - `403 Forbidden`: Usuário sem permissão para visualizar as interações (terceiro não autorizado ou sem vínculo ativo).
+/// - `404 Not Found`: Centro Acadêmico ou demanda inexistente.
+/// - `422 Unprocessable Entity`: Centro Acadêmico inativo.
+pub async fn handle_list_comments(
+    State(state): State<AppState>,
+    Path((academic_center_id, demand_id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+) -> ApiResult<impl IntoResponse> {
+    let user_id = authenticate_caller(&state, &headers).await?;
+
+    let query = ListDemandCommentsQuery::new(academic_center_id, demand_id, user_id);
+
+    let comments = list_demand_comments(
+        &state.pg_database,
+        &state.pg_database,
+        &state.pg_database,
+        query,
+    )
+    .await?;
+
+    let response: Vec<DemandCommentResponse> = comments
+        .into_iter()
+        .map(DemandCommentResponse::from)
+        .collect();
 
     Ok((StatusCode::OK, Json(response)))
 }

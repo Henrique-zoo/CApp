@@ -99,6 +99,18 @@ pub enum DemandError {
         /// Identificador encontrado na entrada do histórico.
         actual: Uuid,
     },
+
+    /// O conteúdo do comentário de demanda não pode ser vazio.
+    EmptyCommentContent,
+
+    /// O conteúdo do comentário de demanda ultrapassou o comprimento máximo permitido.
+    CommentContentTooLong {
+        /// Limite máximo permitido.
+        max: usize,
+    },
+
+    /// O papel do autor do comentário informado não é reconhecido pelo domínio.
+    InvalidCommentAuthorRole(String),
 }
 
 impl fmt::Display for DemandError {
@@ -180,6 +192,18 @@ impl fmt::Display for DemandError {
                 write!(
                     f,
                     "registro de histórico pertence à demanda '{actual}', divergindo da demanda '{expected}'"
+                )
+            }
+            Self::EmptyCommentContent => {
+                write!(f, "o conteúdo do comentário não pode ser vazio")
+            }
+            Self::CommentContentTooLong { max } => {
+                write!(f, "o comentário excede o limite de {max} caracteres")
+            }
+            Self::InvalidCommentAuthorRole(role) => {
+                write!(
+                    f,
+                    "papel de autor de comentário inválido ou desconhecido: '{role}'"
                 )
             }
         }

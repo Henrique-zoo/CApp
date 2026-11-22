@@ -52,6 +52,27 @@ impl From<DemandApplicationError> for ApiError {
                     "course_name": course_name,
                 })),
             ),
+            DemandApplicationError::DemandNotFound(demand_id) => Self::new(
+                StatusCode::NOT_FOUND,
+                "demand_not_found",
+                format!("Demanda '{demand_id}' não encontrada"),
+                Some(json!({ "demand_id": demand_id })),
+            ),
+            DemandApplicationError::DemandBelongsToAnotherCa { demand_id, ca_id } => Self::new(
+                StatusCode::BAD_REQUEST,
+                "demand_belongs_to_another_ca",
+                format!("A demanda '{demand_id}' pertence a outro Centro Acadêmico"),
+                Some(json!({
+                    "demand_id": demand_id,
+                    "academic_center_id": ca_id,
+                })),
+            ),
+            DemandApplicationError::UserNotPermittedToComment => Self::new(
+                StatusCode::FORBIDDEN,
+                "user_not_permitted_in_ca",
+                "Usuário sem permissão para interagir ou visualizar comentários desta demanda",
+                None,
+            ),
             DemandApplicationError::InvalidDemand(domain_err) => {
                 let (status, code) = match &domain_err {
                     DemandError::EmptyDescription => {
@@ -59,6 +80,15 @@ impl From<DemandApplicationError> for ApiError {
                     }
                     DemandError::DescriptionTooLong { .. } => {
                         (StatusCode::UNPROCESSABLE_ENTITY, "description_too_long")
+                    }
+                    DemandError::EmptyCommentContent => {
+                        (StatusCode::UNPROCESSABLE_ENTITY, "empty_comment")
+                    }
+                    DemandError::CommentContentTooLong { .. } => {
+                        (StatusCode::UNPROCESSABLE_ENTITY, "comment_too_long")
+                    }
+                    DemandError::InvalidCommentAuthorRole(_) => {
+                        (StatusCode::BAD_REQUEST, "invalid_comment_author_role")
                     }
                     DemandError::EmptyTitle => (StatusCode::UNPROCESSABLE_ENTITY, "empty_title"),
                     DemandError::TitleTooLong { .. } => {

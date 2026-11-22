@@ -73,6 +73,20 @@ pub enum DemandApplicationError {
         course_name: String,
     },
 
+    /// A demanda informada não foi encontrada.
+    DemandNotFound(Uuid),
+
+    /// A demanda informada pertence a outro Centro Acadêmico.
+    DemandBelongsToAnotherCa {
+        /// Identificador da demanda.
+        demand_id: Uuid,
+        /// Centro Acadêmico consultado.
+        ca_id: Uuid,
+    },
+
+    /// O usuário não tem permissão para comentar ou interagir na demanda informada.
+    UserNotPermittedToComment,
+
     /// Violação de regra de negócio ou invariante do domínio de demandas.
     InvalidDemand(DemandError),
 
@@ -114,6 +128,21 @@ impl fmt::Display for DemandApplicationError {
                 write!(
                     f,
                     "o curso '{course_name}' não é representado pelo Centro Acadêmico '{ca_id}'"
+                )
+            }
+            Self::DemandNotFound(id) => {
+                write!(f, "demanda '{id}' não encontrada")
+            }
+            Self::DemandBelongsToAnotherCa { demand_id, ca_id } => {
+                write!(
+                    f,
+                    "a demanda '{demand_id}' pertence a outro Centro Acadêmico (não pertence a '{ca_id}')"
+                )
+            }
+            Self::UserNotPermittedToComment => {
+                write!(
+                    f,
+                    "usuário sem permissão para interagir ou visualizar comentários desta demanda"
                 )
             }
             Self::InvalidDemand(err) => write!(f, "{err}"),
