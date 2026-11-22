@@ -13,6 +13,7 @@ use tokio::time::timeout;
 use crate::{
     api::{app_check::require_app_check, state::AppState},
     modules::{
+        ca::api as ca_api,
         elections::api as elections_api,
         identity::{api as identity_api, infrastructure::firebase::AppCheckVerifier},
     },
@@ -93,6 +94,7 @@ use crate::{
 pub fn create_router(state: AppState, app_check: AppCheckVerifier) -> Router {
     Router::new()
         .merge(identity_api::router())
+        .merge(ca_api::router())
         .merge(elections_api::protected_json_routes())
         .route("/health", get(|| async { "O servidor está saudável." }))
         .route(
