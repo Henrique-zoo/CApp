@@ -7,9 +7,9 @@ library;
 
 import 'dart:async';
 
-import 'package:capp/src/modules/identity/application/errors/account_password_required_exception.dart';
-import 'package:capp/src/modules/identity/application/errors/identity_exception.dart';
-import 'package:capp/src/modules/identity/application/errors/session_identity_changed_exception.dart';
+import 'package:capp/src/modules/identity/application/error/account_password_required_exception.dart';
+import 'package:capp/src/modules/identity/application/error/identity_exception.dart';
+import 'package:capp/src/modules/identity/application/error/session_identity_changed_exception.dart';
 import 'package:capp/src/modules/identity/application/models/saved_account.dart';
 import 'package:capp/src/modules/identity/application/ports/microsoft_token_provider.dart';
 import 'package:capp/src/modules/identity/infrastructure/firebase/firebase_account_auth.dart';

@@ -68,13 +68,13 @@ library;
 
 import 'dart:async';
 
-import 'errors/identity_exception.dart';
-import 'errors/microsoft_interaction_required_exception.dart';
-import 'errors/session_cache_removal_exception.dart';
-import 'errors/session_cache_write_exception.dart';
-import 'errors/session_identity_changed_exception.dart';
+import 'error/identity_exception.dart';
+import 'error/microsoft_interaction_required_exception.dart';
+import 'error/session_cache_removal_exception.dart';
+import 'error/session_cache_write_exception.dart';
+import 'error/session_identity_changed_exception.dart';
 import 'institutional_auth_service.dart';
-import 'errors/account_password_required_exception.dart';
+import 'error/account_password_required_exception.dart';
 import 'models/internal_user.dart';
 import 'models/saved_account.dart';
 import 'ports/account_authentication.dart';

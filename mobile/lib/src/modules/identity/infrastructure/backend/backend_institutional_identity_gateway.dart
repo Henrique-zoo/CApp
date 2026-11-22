@@ -47,7 +47,7 @@ import '../../application/ports/account_gateway.dart';
 import '../../application/models/internal_user.dart';
 import '../../../../infrastructure/backend/identity/dto/account_session_response.dart';
 
-import 'package:capp/src/modules/identity/application/errors/identity_exception.dart';
+import 'package:capp/src/modules/identity/application/error/identity_exception.dart';
 import 'package:capp/src/modules/identity/application/ports/institutional_identity_gateway.dart';
 
 /// Implementa verificação, restauração e conclusão de perfil sobre a API CApp.

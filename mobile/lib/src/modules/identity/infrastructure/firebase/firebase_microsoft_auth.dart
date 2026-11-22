@@ -75,11 +75,11 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
-import '../../application/errors/identity_exception.dart';
+import '../../application/error/identity_exception.dart';
 
 import 'firebase_auth_failure.dart';
-import '../../application/errors/microsoft_interaction_required_exception.dart';
-import '../../application/errors/session_identity_changed_exception.dart';
+import '../../application/error/microsoft_interaction_required_exception.dart';
+import '../../application/error/session_identity_changed_exception.dart';
 import '../../application/ports/auth_session.dart';
 import '../../application/ports/microsoft_sign_in.dart';
 import '../../application/ports/microsoft_token_provider.dart';

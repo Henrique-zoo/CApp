@@ -10,7 +10,7 @@ library;
 import 'dart:async';
 
 import 'package:capp/src/modules/identity/application/institutional_auth_service.dart';
-import 'package:capp/src/modules/identity/application/errors/microsoft_interaction_required_exception.dart';
+import 'package:capp/src/modules/identity/application/error/microsoft_interaction_required_exception.dart';
 import 'package:capp/src/modules/identity/application/ports/auth_session.dart';
 import 'package:capp/src/modules/identity/application/ports/institutional_identity_gateway.dart';
 import 'package:capp/src/modules/identity/application/ports/microsoft_sign_in.dart';

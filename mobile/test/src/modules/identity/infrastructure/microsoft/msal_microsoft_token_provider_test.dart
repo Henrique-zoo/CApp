@@ -6,8 +6,8 @@
 /// Não simula a renovação interna do SDK nem comprova OAuth ou configuração Android.
 library;
 
-import 'package:capp/src/modules/identity/application/errors/identity_exception.dart';
-import 'package:capp/src/modules/identity/application/errors/microsoft_interaction_required_exception.dart';
+import 'package:capp/src/modules/identity/application/error/identity_exception.dart';
+import 'package:capp/src/modules/identity/application/error/microsoft_interaction_required_exception.dart';
 import 'package:capp/src/modules/identity/infrastructure/microsoft/msal_microsoft_token_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:msal_auth/msal_auth.dart';

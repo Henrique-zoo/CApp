@@ -12,7 +12,7 @@ library;
 
 import 'package:firebase_auth/firebase_auth.dart';
 
-import '../../application/errors/identity_exception.dart';
+import '../../application/error/identity_exception.dart';
 
 /// Classifica uma falha sem alterar a sessão ou iniciar tentativas adicionais.
 IdentityException translateFirebaseAuthFailure(
