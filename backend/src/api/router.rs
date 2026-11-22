@@ -22,8 +22,6 @@ use crate::api::state::AppState;
 /// | `GET /health` | Retorna HTTP 200 e `O servidor está saudável.` sem consultar dependências. |
 /// | `GET /elections/{id}/board` | Exporta uma fotografia consistente do quadro público. |
 /// | `GET /elections/{id}/board/checkpoint` | Distribui a âncora assinada da posição atual do quadro. |
-/// | `GET /elections/{id}/registration/me` | Consulta chave e participação da conta autenticada. |
-/// | `PUT /elections/{id}/registration/me` | Cadastra a chave com uma prova assinada antes da votação. |
 /// | `GET /ready` | Executa `SELECT 1 AS ok` no pool; retorna HTTP 200 no sucesso e HTTP 503 em erro ou timeout. |
 ///
 /// A prontidão limita a espera pela aquisição da conexão e execução da consulta
@@ -82,7 +80,6 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         .merge(crate::modules::identity::api::router())
         .merge(crate::modules::elections::api::protected_receipt_routes())
-        .merge(crate::modules::elections::api::protected_registration_routes())
         .route("/health", get(|| async { "O servidor está saudável." }))
         .route(
             "/ready",

@@ -2,7 +2,7 @@
 # Os cenários descrevem regras de negócio e resultados observáveis.
 # Detalhes técnicos de persistência, concorrência e privacidade devem ser
 # verificados nos componentes correspondentes.
-# A chave é cadastrada antes da abertura e a elegibilidade é reavaliada em cada novo voto.
+# Contrato #377: chave no primeiro voto; elegibilidade no aceite; Nulo como opção.
 # App Check/cliente são premissas; a soma do agregado é um guardrail.
 # Os passos de produto continuam pendentes até existir implementação real.
 
@@ -20,24 +20,16 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
     E "Ana" está autenticada pela sua conta Firebase
     E as solicitações válidas de voto de "Ana" são assinadas com sua própria chave
 
-  Regra: A votação exige uma chave cadastrada antes da abertura
+  Regra: O primeiro voto não exige cadastro eleitoral prévio
 
     Cenário: Votar pela primeira vez após a abertura
       Dado que a eleição está no período de votação
       E o estudante "Ana" possui vínculo acadêmico válido com o Centro Acadêmico "CA Engenharia"
-      E "Ana" cadastrou sua chave pública antes da abertura
+      E "Ana" não possui inscrição ou chave prévia nessa eleição
       Quando registra seu primeiro voto na chapa "Aurora"
       Então o voto é confirmado
-      E a assinatura da cédula confere com a chave cadastrada por "Ana"
+      E a chave pública enviada na cédula é vinculada à conta autenticada de "Ana"
       E a chave privada permanece no dispositivo de "Ana"
-
-    Cenário: Recusar o primeiro voto de quem não cadastrou chave antes da abertura
-      Dado que a eleição está no período de votação
-      E o estudante "Ana" possui vínculo acadêmico válido com o Centro Acadêmico "CA Engenharia"
-      E "Ana" não possui chave cadastrada nessa eleição
-      Quando tenta registrar um voto na chapa "Aurora"
-      Então a tentativa de voto é recusada
-      E nenhum voto é registrado para o estudante "Ana"
 
   Regra: Somente estudantes com vínculo acadêmico válido podem votar
 
@@ -121,7 +113,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       E o estudante "Ana" ainda não votou nessa eleição
       Quando submete uma cédula assinada com sua chave local, indicando a chapa "Aurora"
       Então a cédula é aceita e o voto é confirmado
-      E a assinatura da cédula confere com a chave cadastrada por "Ana"
+      E a assinatura digital é validada com a chave pública enviada na cédula de "Ana"
       E o registro identifica "Ana" como eleitora e "Aurora" como sua escolha
       E a participação de "Ana" é marcada como realizada nessa eleição
 

@@ -205,15 +205,11 @@
     "signers": {
       "type": "object",
       "required": [
-        "voter-registration",
         "ballot",
         "decryption-share",
         "otherKinds"
       ],
       "properties": {
-        "voter-registration": {
-          "const": "payload.publicKey, proof of possession for the authenticated account and election"
-        },
         "ballot": {
           "const": "payload.publicKey, bound by backend to the authenticated voter"
         },

@@ -58,15 +58,6 @@ class ElectionContractTests(unittest.TestCase):
         """Todos os exemplos fixados conservam schema, bytes, hash e assinatura."""
         self.assertEqual(validate_contracts(), len(self.corpus["cases"]))
 
-    def test_private_registration_proof_binds_account_and_election(self):
-        proof = read_json(CONTRACTS.parent / "examples/election-voter-registration.json")
-        payload = proof["payload"]
-        verify_signature(payload, proof["signature"], payload["publicKey"], self.profile)
-        for field in ("accountId", "electionId"):
-            with self.subTest(field=field), self.assertRaises(ContractError):
-                changed = {**payload, field: "c9000000-0000-4000-8000-000000000002"}
-                verify_signature(changed, proof["signature"], payload["publicKey"], self.profile)
-
     def test_every_message_has_a_vector(self):
         """Uma nova variante não fica sem exemplo de intercâmbio compartilhado."""
         names = [

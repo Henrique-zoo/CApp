@@ -6,8 +6,6 @@
 
 use std::sync::Arc;
 
-use super::super::application::registration::VoterIdentity;
-use super::registration::{database_now, eligibility_deadline};
 use chrono::{DateTime, SecondsFormat, Utc};
 use crypto_bigint::U2048;
 use serde_json::{Value, json};
@@ -16,7 +14,9 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use super::super::{
-    application::board::{BoardError, BoardSnapshot, ElectionBoard, FrozenBoard, RecordedBallot},
+    application::board::{
+        BoardError, BoardSnapshot, ElectionBoard, EligibleVoter, FrozenBoard, RecordedBallot,
+    },
     crypto_wire::{
         BallotContext, CryptoWireError, ServerSigner, object_digest, parse_strict_json,
         verify_ballot, verify_calendar_origin, verify_manifest, verify_signed_object,
@@ -239,12 +239,11 @@ impl ElectionBoard for PgElectionBoard {
     async fn record(
         &self,
         election_id: Uuid,
-        identity: VoterIdentity,
+        voter: EligibleVoter,
         raw: &[u8],
     ) -> Result<RecordedBallot, BoardError> {
-        let account_id = identity.account_id;
         let envelope = parse_strict_json(raw)?;
-        if account_id.is_nil() {
+        if voter.account_id.is_nil() || voter.voter_id.is_nil() {
             return Err(BoardError::NotEligible);
         }
         // A verificação RSA e as exponenciações da cédula não dependem da
@@ -262,20 +261,12 @@ impl ElectionBoard for PgElectionBoard {
              WHERE p.election_id=$1 AND p.account_id=$2",
         )
         .bind(election_id)
-        .bind(account_id)
+        .bind(voter.account_id)
         .fetch_optional(&self.pool)
         .await?;
         let (verified_voter, verified_key) = match previous.as_ref() {
             Some((id, ballot)) => (*id, text(&ballot["payload"]["publicKey"])?.to_owned()),
-            None => sqlx::query_as::<_, (Uuid, String)>(
-                "SELECT voter_id,public_key FROM election_voter_registration
-                 WHERE election_id=$1 AND account_id=$2",
-            )
-            .bind(election_id)
-            .bind(account_id)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or(BoardError::NotEligible)?,
+            None => (voter.voter_id, voter.registered_public_key.clone()),
         };
         let verified = verify_ballot(
             raw,
@@ -310,7 +301,7 @@ impl ElectionBoard for PgElectionBoard {
              WHERE p.election_id = $1 AND p.account_id = $2",
         )
         .bind(election_id)
-        .bind(account_id)
+        .bind(voter.account_id)
         .fetch_optional(&mut *tx)
         .await?;
         if let Some(stored) = stored {
@@ -336,7 +327,6 @@ impl ElectionBoard for PgElectionBoard {
             ));
         }
 
-        let valid_until = eligibility_deadline(&mut tx, election_id, identity).await?;
         let now = database_now(&mut tx).await?;
         if board.status != "open" {
             return Err(BoardError::Closed);
@@ -347,7 +337,7 @@ impl ElectionBoard for PgElectionBoard {
         if now >= board.ends_at {
             return Err(BoardError::VotingEnded);
         }
-        if valid_until.is_none_or(|end| now >= end) {
+        if now >= voter.eligible_until {
             return Err(BoardError::NotEligible);
         }
         validate_signing_origin(&board, &self.signer)?;
@@ -359,7 +349,7 @@ impl ElectionBoard for PgElectionBoard {
                            WHERE election_id=$1 AND voter_id=$2)",
         )
         .bind(election_id)
-        .bind(verified_voter)
+        .bind(voter.voter_id)
         .fetch_one(&mut *tx)
         .await?;
         if used_voter {
@@ -379,8 +369,8 @@ impl ElectionBoard for PgElectionBoard {
              VALUES ($1,$2,$3,$4,$5,$6)",
         )
         .bind(election_id)
-        .bind(account_id)
-        .bind(verified_voter)
+        .bind(voter.account_id)
+        .bind(voter.voter_id)
         .bind(submission_id)
         .bind(&verified.ballot_hash)
         .bind(now)
@@ -394,7 +384,7 @@ impl ElectionBoard for PgElectionBoard {
         )
         .bind(election_id)
         .bind(next_index)
-        .bind(verified_voter)
+        .bind(voter.voter_id)
         .bind(&board.head_hash)
         .bind(&signed.entry_hash)
         .bind(&verified.envelope)
@@ -490,6 +480,13 @@ async fn load_board(
         .fetch_optional(&mut **tx)
         .await?
         .ok_or(BoardError::NotFound)
+}
+
+async fn database_now(tx: &mut Transaction<'_, Postgres>) -> Result<DateTime<Utc>, BoardError> {
+    // CURRENT_TIMESTAMP seria o instante anterior à espera pelo lock.
+    Ok(sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&mut **tx)
+        .await?)
 }
 
 async fn snapshot_in_transaction(

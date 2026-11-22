@@ -230,13 +230,6 @@ def validate_examples(spec: dict) -> int:
     )
 
     root = SPEC_PATH.parent.resolve()
-    # O OpenAPI compartilha tipos de chave e UUID com o protocolo eleitoral.
-    # Resolva esse arquivo conhecido localmente, inclusive no runner sem rede.
-    election_schema = root / "elections" / "schemas.json"
-    with election_schema.open(encoding="utf-8") as schema_file:
-        registry = registry.with_resource(
-            election_schema.as_uri(), Resource.from_contents(json.load(schema_file))
-        )
 
     validated = 0
     failures: list[str] = []

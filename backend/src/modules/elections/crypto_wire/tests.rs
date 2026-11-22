@@ -2,28 +2,6 @@
 
 use super::*;
 
-#[test]
-fn independent_registration_vector_binds_account_election_kind_and_key() {
-    let raw = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../packages/api-contracts/examples/election-voter-registration.json"
-    ));
-    let election = Uuid::parse_str("a7000000-0000-4000-8000-000000000137").unwrap();
-    let account = Uuid::parse_str("a7000000-0000-4000-8000-000000000001").unwrap();
-    let envelope = parse_strict_json(raw).unwrap();
-    assert_eq!(
-        verify_registration(raw, election, account).unwrap(),
-        envelope["payload"]["publicKey"]
-    );
-    assert!(verify_registration(raw, account, election).is_err());
-    let mut other = envelope.clone();
-    other["payload"]["kind"] = json!("ballot");
-    assert!(verify_registration(&serde_json::to_vec(&other).unwrap(), election, account).is_err());
-    let mut padded = envelope;
-    padded["signature"] = json!(format!("{}=", padded["signature"].as_str().unwrap()));
-    assert!(verify_registration(&serde_json::to_vec(&padded).unwrap(), election, account).is_err());
-}
-
 fn corpus() -> &'static Value {
     static CORPUS: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
     CORPUS.get_or_init(|| {

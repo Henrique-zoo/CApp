@@ -9,4 +9,3 @@ pub mod services;
 
 /// Porta do quadro público transacional.
 pub mod board;
-pub mod registration;

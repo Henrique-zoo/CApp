@@ -46,7 +46,7 @@
     {
       "name": "AuthenticatedElector",
       "owner": "B",
-      "implementedBy": "Firebase, identidade e cadastro eleitoral da #137",
+      "implementedBy": "Adaptador Firebase/identidade na integração #386",
       "input": [
         "principal autenticado",
         "electionId"
@@ -60,7 +60,6 @@
         "UID vem do token validado, nunca do corpo do voto.",
         "Comunicação app/backend usa HTTPS e valida o certificado do servidor; tokens não são enviados inicialmente por HTTP para depois seguir redirecionamento.",
         "Curso vem da evidência institucional vigente, sem declaração manual.",
-        "A prova de posse vincula a chave pública à conta e à eleição antes da abertura. O novo voto exige a mesma chave.",
         "A consulta de contexto não reserva voto; nova participação reavalia elegibilidade.",
         "Consulta de recibo aceito não exige nova chave ou permanência no curso."
       ]
