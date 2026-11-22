@@ -1,8 +1,9 @@
-//! Aceite através da porta da aplicação, com commits reais em PostgreSQL.
+//! Aceite atravÃ©s da porta da aplicaÃ§Ã£o, com commits reais em PostgreSQL.
 
 mod fixtures;
 #[cfg(feature = "test-support")]
 mod receipts;
+mod registration;
 
 use crate::support::TestDatabase;
 use axum::{
@@ -10,7 +11,7 @@ use axum::{
     http::{Request, StatusCode},
 };
 use backend::modules::elections::{
-    application::board::{BoardError, ElectionBoard, EligibleVoter},
+    application::board::{BoardError, ElectionBoard},
     crypto_wire::object_digest,
     infrastructure::PgElectionBoard,
 };
@@ -26,7 +27,7 @@ use backend::{
     infrastructure::database::PgDatabase,
 };
 use chrono::{Duration, Utc};
-use fixtures::{Origin, Voter, server, vector};
+use fixtures::{Origin, Voter, identity, server, vector};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -40,7 +41,7 @@ async fn paged_export_keeps_its_original_snapshot_while_another_vote_commits() {
     let origin = Origin::during(&signer, Utc::now() + Duration::hours(1));
     let id = origin.election;
     store.open(origin.frozen()).await.unwrap();
-    // Material sintético compartilhado para testar páginas e isolamento da leitura.
+    // Material sintÃ©tico compartilhado para testar pÃ¡ginas e isolamento da leitura.
     let public_key = signer.public_key_base64().unwrap();
     let manifest_hash = object_digest(&origin.manifest["payload"]).unwrap();
     let cast = async || {
@@ -57,14 +58,9 @@ async fn paged_export_keeps_its_original_snapshot_while_another_vote_commits() {
         ballot["voterId"] = json!(voter_id);
         ballot["submissionId"] = json!(Uuid::new_v4());
         ballot["publicKey"] = json!(&public_key);
-        let voter = EligibleVoter {
-            account_id,
-            voter_id,
-            registered_public_key: public_key.clone(),
-            eligible_until: Utc::now() + Duration::hours(1),
-        };
+        fixtures::seed_registration(&db.pool, id, account_id, voter_id, &public_key).await;
         let raw = serde_json::to_vec(&signer.sign_payload(&ballot).unwrap()).unwrap();
-        store.record(id, voter, &raw).await.unwrap();
+        store.record(id, identity(account_id), &raw).await.unwrap();
     };
     for _ in 0..33 {
         cast().await;
@@ -130,10 +126,12 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
 
     let a = Voter::new(&db.pool, "valid/ballot-0").await;
     let b = Voter::new(&db.pool, "valid/ballot-1").await;
+    a.seed_registration(&db.pool, id).await;
+    b.seed_registration(&db.pool, id).await;
     let first = a.sign(&origin, a.payload.clone());
     let second = b.sign(&origin, b.payload.clone());
 
-    // Falha diferida até COMMIT, depois de todas as escritas da transação.
+    // Falha diferida atÃ© COMMIT, depois de todas as escritas da transaÃ§Ã£o.
     sqlx::raw_sql(
         "CREATE FUNCTION fail_board_commit() RETURNS trigger LANGUAGE plpgsql AS
         $$ BEGIN RAISE EXCEPTION 'injected commit failure'; END $$;
@@ -144,7 +142,7 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
     .await
     .unwrap();
     assert!(matches!(
-        store.record(id, a.admitted(), &first).await,
+        store.record(id, identity(a.account), &first).await,
         Err(BoardError::Storage(_))
     ));
     assert!(store.recover(id, a.account).await.unwrap().is_none());
@@ -163,9 +161,9 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
         .unwrap();
 
     let (one, retry, other, observed) = tokio::join!(
-        store.record(id, a.admitted(), &first),
-        store.record(id, a.admitted(), &first),
-        store.record(id, b.admitted(), &second),
+        store.record(id, identity(a.account), &first),
+        store.record(id, identity(a.account), &first),
+        store.record(id, identity(b.account), &second),
         store.snapshot(id)
     );
     let (one, retry, other, observed) = (
@@ -221,7 +219,7 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
             object_digest(&previous["payload"]).unwrap()
         );
     }
-    // O corpus contém o produto esperado, calculado independentemente do store Rust.
+    // O corpus contÃ©m o produto esperado, calculado independentemente do store Rust.
     let accumulated: Value =
         sqlx::query_scalar("SELECT accumulator FROM election_board WHERE election_id=$1")
             .bind(id)
@@ -230,7 +228,7 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
             .unwrap();
     assert_eq!(accumulated, vector("valid/aggregate")["ciphertexts"]);
 
-    // Novo adaptador e novas conexões reconstroem a resposta perdida após o commit.
+    // Novo adaptador e novas conexÃµes reconstroem a resposta perdida apÃ³s o commit.
     let fresh_pool = sqlx::postgres::PgPoolOptions::new()
         .connect_with((*db.pool.connect_options()).clone())
         .await
@@ -256,7 +254,7 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
     assert_ne!(resigned, first);
     assert_eq!(
         restarted
-            .record(id, a.admitted(), &resigned)
+            .record(id, identity(a.account), &resigned)
             .await
             .unwrap()
             .receipt,
@@ -266,7 +264,7 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
     different["ciphertexts"] = b.payload["ciphertexts"].clone();
     assert!(matches!(
         restarted
-            .record(id, a.admitted(), &a.sign(&origin, different))
+            .record(id, identity(a.account), &a.sign(&origin, different))
             .await,
         Err(BoardError::SubmissionConflict)
     ));
@@ -274,7 +272,7 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
     another["submissionId"] = json!(Uuid::new_v4());
     assert!(matches!(
         restarted
-            .record(id, a.admitted(), &a.sign(&origin, another))
+            .record(id, identity(a.account), &a.sign(&origin, another))
             .await,
         Err(BoardError::AlreadyParticipated)
     ));
@@ -299,21 +297,26 @@ async fn close_freezes_the_accepted_vote_and_preserves_its_receipt() {
         Err(BoardError::NotYetEnded)
     ));
     let ballot = voter.sign(&origin, voter.payload.clone());
-    let mut wrong_key = voter.admitted();
-    wrong_key.registered_public_key = late_voter.admitted().registered_public_key;
-    assert!(store.record(id, wrong_key, &ballot).await.is_err());
+    voter.seed_registration(&db.pool, id).await;
+    late_voter.seed_registration(&db.pool, id).await;
+    assert!(
+        store
+            .record(id, identity(late_voter.account), &ballot)
+            .await
+            .is_err()
+    );
     let mut competing = voter.payload.clone();
     competing["submissionId"] = json!(Uuid::new_v4());
     let competing = voter.sign(&origin, competing);
     let (left, right) = tokio::join!(
-        store.record(id, voter.admitted(), &ballot),
-        store.record(id, voter.admitted(), &competing)
+        store.record(id, identity(voter.account), &ballot),
+        store.record(id, identity(voter.account), &competing)
     );
     let (accepted, committed_ballot) = match (left, right) {
         (Ok(record), Err(BoardError::AlreadyParticipated)) => (record, ballot),
         (Err(BoardError::AlreadyParticipated), Ok(record)) => (record, competing),
         result => {
-            panic!("Duas operações da mesma conta precisam disputar um único aceite: {result:?}")
+            panic!("Duas operaÃ§Ãµes da mesma conta precisam disputar um Ãºnico aceite: {result:?}")
         }
     };
     sqlx::query("SELECT pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM ($1::timestamptz - clock_timestamp())))::float8)")
@@ -329,11 +332,11 @@ async fn close_freezes_the_accepted_vote_and_preserves_its_receipt() {
     assert_eq!(aggregate["closureHash"], object_digest(closure).unwrap());
     assert_eq!(aggregate["ciphertexts"], voter.payload["ciphertexts"]);
     assert_eq!(store.close(id).await.unwrap().closure, closed.closure);
-    let mut expired = voter.admitted();
-    expired.eligible_until = Utc::now() - Duration::days(1);
+    sqlx::query("UPDATE institutional_verification SET expires_at=now()-interval '1 second' WHERE user_id=$1")
+        .bind(voter.account).execute(&db.pool).await.unwrap();
     assert_eq!(
         store
-            .record(id, expired, &committed_ballot)
+            .record(id, identity(voter.account), &committed_ballot)
             .await
             .unwrap()
             .receipt,
@@ -341,7 +344,7 @@ async fn close_freezes_the_accepted_vote_and_preserves_its_receipt() {
     );
     let late = late_voter.sign(&origin, late_voter.payload.clone());
     assert!(matches!(
-        store.record(id, late_voter.admitted(), &late).await,
+        store.record(id, identity(late_voter.account), &late).await,
         Err(BoardError::Closed)
     ));
     db.close().await;

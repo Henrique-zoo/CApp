@@ -103,6 +103,7 @@ final votingSteps = <StepDefinition>[
     r'^"([^"]*)" cadastrou sua chave pública antes da abertura$',
   ),
   pendingStep(r'^registra seu primeiro voto na chapa "([^"]*)"$'),
+  pendingStep(r'^"([^"]*)" não possui chave cadastrada nessa eleição$'),
   pendingStep(
     r'^a assinatura da cédula confere com a chave cadastrada por "([^"]*)"$',
   ),

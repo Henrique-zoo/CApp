@@ -1,7 +1,7 @@
 //! Calendário dinâmico e cifras dos vetores públicos, com chaves exclusivas dos testes.
 
 use backend::modules::elections::{
-    application::board::{EligibleVoter, FrozenBoard},
+    application::{board::FrozenBoard, registration::VoterIdentity},
     crypto_wire::{ServerSigner, object_digest},
 };
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
@@ -47,9 +47,16 @@ pub(super) struct Origin {
 
 impl Origin {
     pub(super) fn during(server: &ServerSigner, end: DateTime<Utc>) -> Self {
+        Self::scheduled(server, Utc::now() - Duration::hours(1), end)
+    }
+
+    pub(super) fn scheduled(
+        server: &ServerSigner,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Self {
         let mut calendar = vector("valid/calendar-origin").clone();
-        calendar["startsAt"] =
-            json!((Utc::now() - Duration::hours(1)).to_rfc3339_opts(SecondsFormat::Secs, true));
+        calendar["startsAt"] = json!(start.to_rfc3339_opts(SecondsFormat::Secs, true));
         calendar["endsAt"] = json!(end.to_rfc3339_opts(SecondsFormat::Secs, true));
         let mut manifest = vector("valid/manifest").clone();
         manifest["calendarOriginHash"] = json!(object_digest(&calendar).unwrap());
@@ -71,7 +78,6 @@ impl Origin {
 
 pub(super) struct Voter {
     pub(super) account: Uuid,
-    id: Uuid,
     key: ServerSigner,
     pub(super) payload: Value,
 }
@@ -91,27 +97,90 @@ impl Voter {
             .await
             .unwrap();
         let mut payload = vector(ballot_case).clone();
-        let id = serde_json::from_value(payload["voterId"].clone()).unwrap();
         payload["publicKey"] = json!(key.public_key_base64().unwrap());
         Self {
             account,
-            id,
             key,
             payload,
         }
     }
 
-    pub(super) fn admitted(&self) -> EligibleVoter {
-        EligibleVoter {
-            account_id: self.account,
-            voter_id: self.id,
-            registered_public_key: self.key.public_key_base64().unwrap(),
-            eligible_until: Utc::now() + Duration::hours(1),
-        }
+    pub(super) async fn seed_registration(&self, pool: &PgPool, election: Uuid) {
+        seed_registration(
+            pool,
+            election,
+            self.account,
+            serde_json::from_value(self.payload["voterId"].clone()).unwrap(),
+            &self.key.public_key_base64().unwrap(),
+        )
+        .await;
+    }
+
+    pub(super) fn proof(&self, election: Uuid) -> Vec<u8> {
+        registration_proof(&self.key, election, self.account)
     }
 
     pub(super) fn sign(&self, origin: &Origin, mut payload: Value) -> Vec<u8> {
         payload["manifestHash"] = json!(object_digest(&origin.manifest["payload"]).unwrap());
         serde_json::to_vec(&self.key.sign_payload(&payload).unwrap()).unwrap()
     }
+}
+
+pub(super) fn registration_proof(key: &ServerSigner, election: Uuid, account: Uuid) -> Vec<u8> {
+    serde_json::to_vec(
+        &key.sign_payload(&json!({
+            "version":1, "kind":"voter-registration","electionId":election,
+            "accountId":account, "publicKey":key.public_key_base64().unwrap()
+        }))
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+pub(super) fn identity(account: Uuid) -> VoterIdentity {
+    VoterIdentity {
+        account_id: account,
+        microsoft_object_id: Some(account),
+    }
+}
+
+pub(super) const COURSE: &str = "Ciência da Computação";
+
+pub(super) async fn institutional_evidence(pool: &PgPool, account: Uuid) {
+    let center: Uuid =
+        serde_json::from_value(vector("valid/manifest")["academicCenterId"].clone()).unwrap();
+    sqlx::query(
+        "INSERT INTO institution (id,name,microsoft_tenant_id,microsoft_student_group_id)
+                 VALUES ($1,'Instituição de teste',$1,$1) ON CONFLICT DO NOTHING",
+    )
+    .bind(center)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO academic_center (id,institution_id,name) VALUES ($1,$1,'CA de teste') ON CONFLICT DO NOTHING")
+        .bind(center).execute(pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO institutional_verification (user_id,microsoft_object_id,institution_id,microsoft_tenant_id,
+             microsoft_student_group_id,student_membership_confirmed,course_name,checked_at,expires_at)
+         VALUES ($1,$1,$2,$2,$2,true,$3,now()-interval '2 hours',now()+interval '1 hour')"
+    ).bind(account).bind(center).bind(COURSE).execute(pool).await.unwrap();
+}
+
+// Os testes de concorrência do quadro começam com a eleição em andamento e
+// eleitores previamente cadastrados. O fluxo real de inscrição é exercitado em registration.rs.
+pub(super) async fn seed_registration(
+    pool: &PgPool,
+    election: Uuid,
+    account: Uuid,
+    voter: Uuid,
+    key: &str,
+) {
+    institutional_evidence(pool, account).await;
+    sqlx::query("INSERT INTO election_eligibility_course(election_id,academic_center_id,course_name)
+                 SELECT election_id,(manifest->'payload'->>'academicCenterId')::uuid,$2 FROM election_board
+                 WHERE election_id=$1 ON CONFLICT DO NOTHING")
+        .bind(election).bind(COURSE).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO election_voter_registration(election_id,account_id,voter_id,public_key,registered_at)
+                 SELECT election_id,$2,$3,$4,starts_at-interval '1 minute' FROM election_board WHERE election_id=$1")
+        .bind(election).bind(account).bind(voter).bind(key).execute(pool).await.unwrap();
 }

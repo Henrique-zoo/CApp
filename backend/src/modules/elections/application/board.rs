@@ -5,7 +5,7 @@
 //! A implementação serializa aceite e encerramento e só devolve evidências de
 //! aceite depois do commit. Não implementa revisões de calendário da #132.
 
-use chrono::{DateTime, Utc};
+use super::registration::VoterIdentity;
 use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -19,23 +19,6 @@ pub struct FrozenBoard {
     pub manifest: Vec<u8>,
     /// Envelope assinado do calendário inicial referenciado pelo manifesto.
     pub calendar_origin: Vec<u8>,
-}
-
-/// Decisão confiável de identidade/elegibilidade, produzida pelo consumidor #137.
-///
-/// Nunca construir com campos de identidade ou chave extraídos apenas do corpo
-/// da requisição. No fluxo acadêmico, `registered_public_key` vem do cadastro
-/// anterior à abertura. O repositório compara a chave da cédula com essa chave.
-/// A validade é reavaliada pelo relógio do banco depois da aquisição do lock.
-pub struct EligibleVoter {
-    /// Conta interna autenticada; não integra a exportação pública.
-    pub account_id: Uuid,
-    /// Identificador público opaco, estável para a conta nesta eleição.
-    pub voter_id: Uuid,
-    /// Chave pública confiável do eleitor, em DER SPKI/base64url sem padding.
-    pub registered_public_key: String,
-    /// Limite exclusivo de validade da evidência institucional.
-    pub eligible_until: DateTime<Utc>,
 }
 
 /// Registro confirmado e recibo original, preservados na recuperação.
@@ -129,11 +112,12 @@ pub trait ElectionBoard: Send + Sync {
     /// Publica uma única origem congelada; repetição idêntica é idempotente.
     async fn open(&self, board: FrozenBoard) -> Result<BoardSnapshot, BoardError>;
 
-    /// Verifica, acumula e confirma um voto ou recupera o mesmo envelope aceito.
+    /// Verifica a chave previamente cadastrada e a elegibilidade da conta
+    /// autenticada. Um novo voto exige vínculo vigente no instante do aceite.
     async fn record(
         &self,
         election_id: Uuid,
-        voter: EligibleVoter,
+        identity: VoterIdentity,
         signed_ballot: &[u8],
     ) -> Result<RecordedBallot, BoardError>;
 

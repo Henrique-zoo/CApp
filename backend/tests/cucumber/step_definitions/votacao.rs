@@ -427,6 +427,12 @@ fn given_valor_cadastrou_chave_antes_da_abertura(_world: &mut AppWorld, _value_1
     pending_step("\"{string}\" cadastrou sua chave pública antes da abertura");
 }
 
+/// Pendente no fluxo de votação HTTP da #282.
+#[given(regex = r#"^"([^"]*)" não possui chave cadastrada nessa eleição$"#)]
+fn given_sem_chave_cadastrada(_world: &mut AppWorld, _student: String) {
+    pending_step("estudante sem chave cadastrada nessa eleição");
+}
+
 /// Pendente: registra seu primeiro voto na chapa "{string}".
 #[when(regex = r#"^registra seu primeiro voto na chapa "([^"]*)"$"#)]
 fn when_registra_seu_primeiro_voto_na_chapa_valor(_world: &mut AppWorld, _value_1: String) {

@@ -31,6 +31,14 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       E a assinatura da cédula confere com a chave cadastrada por "Ana"
       E a chave privada permanece no dispositivo de "Ana"
 
+    Cenário: Recusar o primeiro voto de quem não cadastrou chave antes da abertura
+      Dado que a eleição está no período de votação
+      E o estudante "Ana" possui vínculo acadêmico válido com o Centro Acadêmico "CA Engenharia"
+      E "Ana" não possui chave cadastrada nessa eleição
+      Quando tenta registrar um voto na chapa "Aurora"
+      Então a tentativa de voto é recusada
+      E nenhum voto é registrado para o estudante "Ana"
+
   Regra: Somente estudantes com vínculo acadêmico válido podem votar
 
     @backend @mobile

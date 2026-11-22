@@ -361,11 +361,30 @@ Inclui:
 Responsável pelo sistema eleitoral.
 
 O quadro público usa a porta `ElectionBoard` e o adaptador `PgElectionBoard`.
-A abertura recebe um manifesto e um calendário assinados. O aceite recebe a
-conta autenticada, o identificador eleitoral e a chave pública esperada do
-eleitor, além dos bytes da cédula assinada. O serviço chamador fornece esses
-dados a partir da identidade e do cadastro. A chave privada do eleitor fica
-no dispositivo. A chave de assinatura do servidor é injetada no adaptador.
+Na preparação, publique o manifesto e o calendário assinados com início futuro.
+O manifesto identifica o Centro Acadêmico. Antes da abertura, o operador
+configura o curso institucional aceito para essa eleição. Na pasta `backend`,
+com `DATABASE_URL` apontando ao PostgreSQL migrado e o CA e a instituição
+ativos, execute o comando abaixo com o UUID do manifesto e o nome do curso
+conforme a evidência institucional.
+
+```sh
+cargo run --locked --example configure_election_course -- "$ELECTION_ID" "Engenharia de Computação"
+```
+
+O app usa `GET /auth/session` para obter o identificador interno da conta.
+Em Android ou iOS, `AppDependencies.voterRegistration.register(electionId)`
+gera o par RSA no dispositivo e envia a chave pública e a prova de posse por
+`PUT /elections/{id}/registration/me`. Essa rota e o `GET` no mesmo endereço
+exigem Firebase Auth e App Check. Após a confirmação, o `GET` devolve o
+identificador eleitoral opaco, a chave pública e o indicador de participação.
+Cadastrar a chave deixa a participação disponível para a votação.
+
+O aceite recebe a conta autenticada e os bytes da cédula assinada. O banco
+fornece o identificador eleitoral e a chave cadastrada. O backend confere o
+vínculo institucional vigente antes de aceitar um novo voto. A chave privada
+do eleitor fica no dispositivo. A chave de assinatura do servidor é injetada
+no adaptador.
 
 O banco confirma participação, registro, recibo e produto das cifras numa
 transação. Nova tentativa da mesma operação recupera o recibo já emitido.
