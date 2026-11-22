@@ -1,6 +1,8 @@
-//! Camada de persistência prevista para o módulo de demandas.
+//! Camada de persistência do módulo de demandas.
 //!
-//! [`repository`] reserva os adaptadores de acesso aos dados desse domínio.
-//! Ainda não existem consultas ou implementações de repositório.
+//! Contém implementações PostgreSQL e adaptadores em memória para repositórios
+//! e portas de integração.
 
-pub mod repository;
+mod repository;
+
+pub use repository::*;
