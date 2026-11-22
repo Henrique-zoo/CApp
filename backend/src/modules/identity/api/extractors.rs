@@ -81,7 +81,7 @@ impl FromRequestParts<AppState> for AuthenticatedInstitutionalIdentity {
 /// esquema inválido ou token vazio ou contendo espaços em branco.
 /// O esquema é comparado sem diferenciar maiúsculas e minúsculas. Não decodifica
 /// o JWT, não o valida criptograficamente e devolve uma referência ao cabeçalho.
-pub(super) fn firebase_bearer_token(headers: &HeaderMap) -> ApiResult<&str> {
+pub(crate) fn firebase_bearer_token(headers: &HeaderMap) -> ApiResult<&str> {
     let mut values = headers.get_all(AUTHORIZATION).iter();
 
     let authorization = values

@@ -30,7 +30,8 @@ use crypto_bigint::{
 type GroupValue = FixedMontyForm<{ U2048::LIMBS }>;
 
 /// Identificador do grupo fixado no perfil eleitoral v1.
-const GROUP_ID: &str = "rfc3526-modp14";
+/// Identificador do grupo empregado nas cifras e no acumulador eleitoral.
+pub(crate) const GROUP_ID: &str = "rfc3526-modp14";
 
 /// Primo de 2048 bits do grupo MODP 14.
 const P: Odd<U2048> = Odd::<U2048>::from_be_hex(concat!(
@@ -43,6 +44,11 @@ const P: Odd<U2048> = Odd::<U2048>::from_be_hex(concat!(
     "e39e772c180e86039b2783a2ec07a28fb5c55df06f4c52c9de2bcbf695581718",
     "3995497cea956ae515d2261898fa051015728e5a8aacaa68ffffffffffffffff",
 ));
+
+/// Parâmetro público compartilhado com o verificador de provas do protocolo.
+pub(crate) fn group_modulus() -> U2048 {
+    *P.as_ref()
+}
 
 /// Parâmetros de Montgomery calculados na compilação para o primo público.
 const MOD_P: FixedMontyParams<{ U2048::LIMBS }> = FixedMontyParams::new_vartime(P);

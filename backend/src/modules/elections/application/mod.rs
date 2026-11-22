@@ -1,8 +1,11 @@
-//! Camada de casos de uso prevista para o módulo de eleições.
+//! Camada de aplicação do módulo eleitoral.
 //!
-//! [`commands`] agrupará alterações de estado, [`queries`] consultas e
-//! [`services`] a coordenação dessas operações. Ainda não há implementações.
+//! Coordena casos de uso por meio de portas, sem depender de HTTP,
+//! mecanismos de persistência ou implementações criptográficas.
 
 pub mod commands;
 pub mod queries;
 pub mod services;
+
+/// Porta do quadro público transacional.
+pub mod board;
