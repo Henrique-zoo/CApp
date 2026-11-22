@@ -1,46 +1,91 @@
 //! Cédulas assinadas e evidências públicas, sem segredos ou escolha secreta em claro.
 //!
-//! Estes valores representam dados necessários ao aceite, não DTOs HTTP. O codec
-//! verifica o envelope original antes do mapeamento; a criptografia verifica
-//! subgrupo e assinatura. Nenhum desses mecanismos comprova conteúdo binário.
+//! A cédula conserva os dados públicos usados no aceite e na auditoria. O codec
+//! lê o envelope original e converte os componentes decimais em inteiros. O
+//! ElGamal valida esses componentes uma vez, e a mesma cédula cifrada pode ser
+//! usada na agregação depois do aceite.
 
 use std::collections::HashSet;
 
-use super::election::Election;
-use crate::modules::elections::domain::value_objects::{
-    base64_url::Base64Url,
-    big_uint::BigUInt,
-    fingerprint::Fingerprint,
-    identifiers::{ElectionId, OptionId, SubmissionId, VoterId},
-    modality::ElectionModality,
-    options::{MAX_OPTIONS, MIN_OPTIONS},
+use uuid::Uuid;
+
+use super::{configuration::ElectionConfiguration, election::Election};
+use crate::modules::elections::domain::{
+    Fingerprint,
+    cryptography::elgamal::{ElGamalCiphertext, EncryptedBallot},
+    error::InvalidBallot,
+    identifiers::{AccountId, ElectionId, SubmissionId},
+    profile::{MAX_OPTIONS, MIN_OPTIONS},
 };
 
-/// Cifra pública de uma opção; a identidade é permitida em agregados.
+/// Associa os componentes públicos de uma cifra ElGamal à respectiva opção.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ciphertext {
-    option_id: OptionId,
-    a: BigUInt,
-    b: BigUInt,
+    option_id: Uuid,
+    components: ElGamalCiphertext,
 }
 
 impl Ciphertext {
-    /// Armazena componentes com representação decimal validada.
-    /// A pertinência ao grupo pertence à porta criptográfica.
-    pub fn new(option_id: OptionId, a: BigUInt, b: BigUInt) -> Self {
-        Self { option_id, a, b }
+    /// Associa os componentes à opção. A verificação do grupo depende de a
+    /// cifra representar uma cédula individual ou o agregado da votação.
+    pub const fn new(option_id: Uuid, components: ElGamalCiphertext) -> Self {
+        Self {
+            option_id,
+            components,
+        }
     }
+
     /// Opção correspondente à posição da cifra.
-    pub const fn option_id(&self) -> OptionId {
+    pub const fn option_id(&self) -> Uuid {
         self.option_id
     }
-    /// Primeiro componente público.
-    pub const fn a(&self) -> &BigUInt {
-        &self.a
+
+    /// Componentes numéricos da cifra usados na verificação e na apuração.
+    pub const fn components(&self) -> &ElGamalCiphertext {
+        &self.components
     }
-    /// Segundo componente público.
-    pub const fn b(&self) -> &BigUInt {
-        &self.b
+}
+
+/// Opções e cifras validadas de uma cédula confidencial, na ordem recebida.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BallotCiphertexts {
+    option_ids: Vec<Uuid>,
+    encrypted: EncryptedBallot,
+}
+
+impl BallotCiphertexts {
+    /// Confere a quantidade de opções e a unicidade dos IDs, e valida os
+    /// componentes ElGamal de uma cédula individual. Os IDs e as cifras
+    /// permanecem alinhados pela posição. A comparação com o manifesto ocorre
+    /// em [`SignedBallot::validate_for`].
+    ///
+    /// Retorna [`InvalidBallot::InvalidOptions`] se a dimensão ou os IDs forem
+    /// inválidos, ou [`InvalidBallot::InvalidCiphertext`] se algum componente
+    /// violar a faixa, a pertinência ao subgrupo ou a regra de identidade.
+    pub fn try_new(ciphertexts: Vec<Ciphertext>) -> Result<Self, InvalidBallot> {
+        validate_ciphertexts(&ciphertexts)?;
+
+        let (option_ids, components) = ciphertexts
+            .into_iter()
+            .map(|cipher| (cipher.option_id, cipher.components))
+            .unzip();
+        let encrypted =
+            EncryptedBallot::new(components).map_err(|_| InvalidBallot::InvalidCiphertext)?;
+
+        Ok(Self {
+            option_ids,
+            encrypted,
+        })
+    }
+
+    /// IDs das opções na mesma ordem das cifras.
+    pub fn option_ids(&self) -> &[Uuid] {
+        &self.option_ids
+    }
+
+    /// Cédula com componentes ElGamal prontos para agregação após o aceite.
+    pub const fn encrypted_ballot(&self) -> &EncryptedBallot {
+        &self.encrypted
     }
 }
 
@@ -48,94 +93,73 @@ impl Ciphertext {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BallotContent {
     /// Escolha associável ao eleitor; acesso é controlado pela aplicação.
-    Identified(OptionId),
+    Identified(Uuid),
     /// Vetor cifrado completo vinculado ao manifesto imutável.
     Confidential {
         /// Digest do manifesto conferido pelo codec.
         manifest_hash: Fingerprint,
         /// Uma cifra por opção, incluindo Nulo.
-        ciphertexts: Vec<Ciphertext>,
+        ciphertexts: BallotCiphertexts,
     },
 }
 
-/// Cédula com identidade eleitoral opaca, operação e chave pública de assinatura.
+/// Cédula com o UUID da conta CApp, a operação e a chave pública de assinatura.
 ///
-/// Não contém a conta interna. Na modalidade confidencial não há campo para
-/// escolha em claro, chave privada ou aleatoriedade de cifragem.
+/// Na modalidade confidencial, o quadro público identifica a participação
+/// pela conta e publica a escolha somente cifrada.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignedBallot {
     election_id: ElectionId,
-    voter_id: VoterId,
+    account_id: AccountId,
     submission_id: SubmissionId,
-    public_key: Base64Url,
-    signature: Base64Url,
+    public_key: Vec<u8>,
+    signature: Vec<u8>,
     content: BallotContent,
 }
 
-/// Falha estrutural ou contextual da cédula.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum InvalidBallot {
-    /// Configuração, eleição, modalidade ou manifesto divergente.
-    #[error("A cédula não corresponde à configuração eleitoral")]
-    ConfigurationMismatch,
-    /// Vetor incompleto, repetido ou fora da ordem configurada.
-    #[error("As opções da cédula divergem da configuração")]
-    InvalidOptions,
-    /// Componente zero ou primeiro componente individual igual a um.
-    #[error("A cédula contém uma cifra degenerada")]
-    DegenerateCiphertext,
-}
-
 impl SignedBallot {
-    /// Valida a estrutura, preservando os dados assinados sem normalizá-los.
+    /// Reúne a identificação, os bytes da chave pública e da assinatura e o
+    /// conteúdo da cédula. Na modalidade confidencial, recebe cifras já
+    /// validadas por [`BallotCiphertexts::try_new`].
     ///
     /// Não verifica a assinatura. Para o aceite é necessário obter também
     /// [`VerifiedBallot`] da porta criptográfica e conferir a conta autenticada.
-    pub fn try_new(
+    pub fn new(
         election_id: ElectionId,
-        voter_id: VoterId,
+        account_id: AccountId,
         submission_id: SubmissionId,
-        public_key: Base64Url,
-        signature: Base64Url,
+        public_key: Vec<u8>,
+        signature: Vec<u8>,
         content: BallotContent,
-    ) -> Result<Self, InvalidBallot> {
-        if let BallotContent::Confidential { ciphertexts, .. } = &content {
-            validate_ciphertexts(ciphertexts)?;
-            if ciphertexts
-                .iter()
-                .any(|c| matches!(c.a.as_str(), "0" | "1") || c.b.as_str() == "0")
-            {
-                return Err(InvalidBallot::DegenerateCiphertext);
-            }
-        }
-        Ok(Self {
+    ) -> Self {
+        Self {
             election_id,
-            voter_id,
+            account_id,
             submission_id,
             public_key,
             signature,
             content,
-        })
+        }
     }
     /// Identificador da eleição assinada.
     pub const fn election_id(&self) -> ElectionId {
         self.election_id
     }
-    /// Identidade pública opaca nesta eleição.
-    pub const fn voter_id(&self) -> VoterId {
-        self.voter_id
+    /// UUID da conta CApp gravado no campo `voterId` do contrato assinado.
+    pub const fn account_id(&self) -> AccountId {
+        self.account_id
     }
     /// Identificador idempotente do pacote preparado no dispositivo.
     pub const fn submission_id(&self) -> SubmissionId {
         self.submission_id
     }
-    /// Chave pública enviada na primeira cédula aceita.
-    pub const fn public_key(&self) -> &Base64Url {
-        &self.public_key
+    /// Chave pública do par de assinatura gerado para esta eleição.
+    pub const fn public_key(&self) -> &[u8] {
+        self.public_key.as_slice()
     }
     /// Assinatura do payload completo, a verificar pelo codec.
-    pub const fn signature(&self) -> &Base64Url {
-        &self.signature
+    pub const fn signature(&self) -> &[u8] {
+        self.signature.as_slice()
     }
     /// Conteúdo assinado, sem acesso mutável.
     pub const fn content(&self) -> &BallotContent {
@@ -147,12 +171,12 @@ impl SignedBallot {
         if self.election_id != election.id() {
             return Err(InvalidBallot::ConfigurationMismatch);
         }
-        let options = election
-            .options()
+        let configuration = election
+            .configuration()
             .ok_or(InvalidBallot::ConfigurationMismatch)?;
-        match (&self.content, election.modality()) {
-            (BallotContent::Identified(choice), ElectionModality::Identified) => {
-                if !options.iter().any(|o| o.id() == *choice) {
+        match (&self.content, configuration) {
+            (BallotContent::Identified(choice), ElectionConfiguration::Identified(options)) => {
+                if !options.as_slice().iter().any(|o| o.id() == *choice) {
                     return Err(InvalidBallot::InvalidOptions);
                 }
             }
@@ -161,15 +185,17 @@ impl SignedBallot {
                     manifest_hash,
                     ciphertexts,
                 },
-                ElectionModality::Confidential,
+                ElectionConfiguration::Confidential(verified),
             ) => {
-                if election.manifest_hash() != Some(manifest_hash) {
+                if verified.hash() != manifest_hash {
                     return Err(InvalidBallot::ConfigurationMismatch);
                 }
-                if !options
+                if !verified
+                    .manifest()
+                    .options()
                     .iter()
                     .map(|o| o.id())
-                    .eq(ciphertexts.iter().map(Ciphertext::option_id))
+                    .eq(ciphertexts.option_ids().iter().copied())
                 {
                     return Err(InvalidBallot::InvalidOptions);
                 }
@@ -181,7 +207,7 @@ impl SignedBallot {
 }
 
 /// Confere dimensão e IDs sem interpretar os inteiros como bits.
-pub(super) fn validate_ciphertexts(ciphertexts: &[Ciphertext]) -> Result<(), InvalidBallot> {
+fn validate_ciphertexts(ciphertexts: &[Ciphertext]) -> Result<(), InvalidBallot> {
     if !(MIN_OPTIONS..=MAX_OPTIONS).contains(&ciphertexts.len()) {
         return Err(InvalidBallot::InvalidOptions);
     }
@@ -194,13 +220,12 @@ pub(super) fn validate_ciphertexts(ciphertexts: &[Ciphertext]) -> Result<(), Inv
 
 /// Cédula cuja assinatura, codificação e cifras foram verificadas pelas portas.
 ///
-/// O digest cobre todo o payload, inclusive chave e operação. O fingerprint é o
-/// SHA-256 do DER público, calculado pelo codec. Não se afirma validade 0/1.
+/// O digest calculado pelo codec cobre o payload inteiro, inclusive a chave
+/// pública e o identificador de envio. A verificação autentica esse conteúdo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedBallot {
     ballot: SignedBallot,
     ballot_hash: Fingerprint,
-    key_fingerprint: Fingerprint,
 }
 
 impl VerifiedBallot {
@@ -209,15 +234,10 @@ impl VerifiedBallot {
         dead_code,
         reason = "Adaptadores criptográficos pertencem às issues #378/#380."
     )]
-    pub(crate) fn from_verified_parts(
-        ballot: SignedBallot,
-        ballot_hash: Fingerprint,
-        key_fingerprint: Fingerprint,
-    ) -> Self {
+    pub(crate) fn from_verified_parts(ballot: SignedBallot, ballot_hash: Fingerprint) -> Self {
         Self {
             ballot,
             ballot_hash,
-            key_fingerprint,
         }
     }
     /// Material público conferido.
@@ -228,8 +248,124 @@ impl VerifiedBallot {
     pub const fn ballot_hash(&self) -> &Fingerprint {
         &self.ballot_hash
     }
-    /// Referência à chave vinculada no primeiro aceite.
-    pub const fn key_fingerprint(&self) -> &Fingerprint {
-        &self.key_fingerprint
+}
+
+#[cfg(test)]
+mod tests {
+    //! Validação da cédula individual e sua compatibilidade com a configuração.
+
+    use super::*;
+    use crate::modules::elections::{
+        domain::entities::election::ElectionModality,
+        test_support::{account, ballot, ciphertext, decoded, eid, fp, opened, option},
+    };
+    use crypto_bigint::U2048;
+
+    #[test]
+    fn ballot_cannot_cross_modalities_or_choose_an_unknown_slate() {
+        let identified = opened(ElectionModality::Identified);
+        assert!(
+            ballot(ElectionModality::Confidential, 60, 'e')
+                .ballot()
+                .validate_for(&identified)
+                .is_err()
+        );
+        let confidential = opened(ElectionModality::Confidential);
+        assert!(
+            ballot(ElectionModality::Identified, 60, 'e')
+                .ballot()
+                .validate_for(&confidential)
+                .is_err()
+        );
+        let unknown = SignedBallot::new(
+            eid(),
+            account(50),
+            SubmissionId::try_from_uuid(Uuid::from_u128(60)).unwrap(),
+            decoded("YQ"),
+            decoded("Yg"),
+            BallotContent::Identified(option(999)),
+        );
+        assert!(unknown.validate_for(&identified).is_err());
+    }
+
+    #[test]
+    fn ciphertext_dimension_order_ids_manifest_and_degenerate_components_are_checked() {
+        let election = opened(ElectionModality::Confidential);
+        let make = |ciphertexts, manifest_hash| {
+            let ciphertexts = BallotCiphertexts::try_new(ciphertexts)?;
+            Ok(SignedBallot::new(
+                eid(),
+                account(50),
+                SubmissionId::try_from_uuid(Uuid::from_u128(60)).unwrap(),
+                decoded("YQ"),
+                decoded("Yg"),
+                BallotContent::Confidential {
+                    manifest_hash,
+                    ciphertexts,
+                },
+            ))
+        };
+        assert_eq!(
+            make(vec![ciphertext(option(30), 2, 4)], fp('b')),
+            Err(InvalidBallot::InvalidOptions)
+        );
+        assert_eq!(
+            make(vec![ciphertext(option(30), 2, 4); 2], fp('b')),
+            Err(InvalidBallot::InvalidOptions)
+        );
+        let two = U2048::from_u8(2);
+        let four = U2048::from_u8(4);
+        for (a, b) in [
+            (U2048::ZERO, four),
+            (U2048::ONE, four),
+            (two, U2048::ZERO),
+            (U2048::MAX, four),
+            (two, U2048::MAX),
+        ] {
+            assert_eq!(
+                make(
+                    vec![
+                        Ciphertext::new(option(30), ElGamalCiphertext { a, b }),
+                        ciphertext(option(0), 2, 4),
+                    ],
+                    fp('b')
+                ),
+                Err(InvalidBallot::InvalidCiphertext)
+            );
+        }
+        let reversed = vec![ciphertext(option(0), 2, 4), ciphertext(option(30), 2, 4)];
+        assert_eq!(
+            make(reversed, fp('b')).unwrap().validate_for(&election),
+            Err(InvalidBallot::InvalidOptions)
+        );
+        let correct = vec![ciphertext(option(30), 2, 4), ciphertext(option(0), 2, 4)];
+        assert_eq!(
+            make(correct, fp('f')).unwrap().validate_for(&election),
+            Err(InvalidBallot::ConfigurationMismatch)
+        );
+    }
+
+    #[test]
+    fn null_is_a_regular_valid_choice_in_both_modalities() {
+        let identified = opened(ElectionModality::Identified);
+        let ballot = SignedBallot::new(
+            eid(),
+            account(50),
+            SubmissionId::try_from_uuid(Uuid::from_u128(60)).unwrap(),
+            decoded("YQ"),
+            decoded("Yg"),
+            BallotContent::Identified(option(0)),
+        );
+        assert!(ballot.validate_for(&identified).is_ok());
+        assert_eq!(
+            opened(ElectionModality::Confidential)
+                .configuration()
+                .unwrap()
+                .options()
+                .last()
+                .unwrap()
+                .id(),
+            option(0)
+        );
     }
 }

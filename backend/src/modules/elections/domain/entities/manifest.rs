@@ -2,29 +2,23 @@
 
 use std::collections::HashSet;
 
+use crypto_bigint::U2048;
+
 use crate::modules::elections::domain::{
+    Fingerprint,
+    choices::{ElectionOption, ElectionOptions},
     entities::authority::{Authority, AuthorityRole},
-    value_objects::{
-        base64_url::Base64Url,
-        big_uint::BigUInt,
-        fingerprint::Fingerprint,
-        identifiers::{AcademicCenterId, ElectionId},
-        option::{ElectionOption, OptionKind},
-        options::{ElectionOptions, InvalidElectionOptions},
-    },
+    error::{InvalidElectionOptions, InvalidManifest},
+    identifiers::{AcademicCenterId, ElectionId},
 };
 
 /// Identificador do grupo criptográfico definido pelo protocolo v1.
 pub const ELECTION_GROUP_ID: &str = "rfc3526-modp14";
 
 // Preserva o caminho público usado pelos consumidores do manifesto.
-pub use crate::modules::elections::domain::value_objects::options::{MAX_OPTIONS, MIN_OPTIONS};
-
-/// Quantidade mínima de autoridades: servidor, comissão e uma chapa.
-pub const MIN_AUTHORITIES: usize = 3;
-
-/// Quantidade máxima de autoridades: servidor, comissão e 50 chapas.
-pub const MAX_AUTHORITIES: usize = 52;
+pub use crate::modules::elections::domain::profile::{
+    MAX_AUTHORITIES, MAX_OPTIONS, MIN_AUTHORITIES, MIN_OPTIONS,
+};
 
 /// Versão do protocolo eleitoral.
 pub const MANIFEST_VERSION: u8 = 1;
@@ -40,8 +34,10 @@ pub const MANIFEST_VERSION: u8 = 1;
 /// manifesto apenas estrutural como autorização para abrir uma eleição.
 ///
 /// ```compile_fail
-/// use backend::modules::elections::domain::{entities::manifest::{Manifest, VerifiedManifest},
-///     value_objects::fingerprint::Fingerprint};
+/// use backend::modules::elections::domain::{
+///     Fingerprint,
+///     entities::manifest::{Manifest, VerifiedManifest},
+/// };
 /// fn bypass(manifest: Manifest, hash: Fingerprint) -> VerifiedManifest {
 ///     VerifiedManifest::from_verified_parts(manifest, hash)
 /// }
@@ -76,88 +72,34 @@ impl VerifiedManifest {
 /// Manifesto imutável de uma eleição.
 ///
 /// A ordem das opções e das autoridades é preservada, pois faz parte
-/// da configuração publicada pelo protocolo.
+/// da configuração publicada pelo protocolo. A referência ao calendário inicial
+/// pertence ao envelope assinado que o adaptador publica junto da configuração.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Manifest {
     election_id: ElectionId,
     academic_center_id: AcademicCenterId,
     options: ElectionOptions,
     authorities: Vec<Authority>,
-    combined_public_key: BigUInt,
-    server_signing_key: Base64Url,
-    calendar_origin_hash: Fingerprint,
-}
-
-/// Erros encontrados ao construir um manifesto.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum InvalidManifest {
-    /// Quantidade de opções fora dos limites do protocolo.
-    #[error("O manifesto deve possuir entre 2 e 51 opções")]
-    InvalidOptionCount,
-
-    /// Quantidade de autoridades fora dos limites do protocolo.
-    #[error("O manifesto deve possuir entre 3 e 52 autoridades")]
-    InvalidAuthorityCount,
-
-    /// O manifesto precisa conter exatamente uma opção Nulo.
-    #[error("O manifesto deve possuir exatamente uma opção Nulo")]
-    InvalidNullOptionCount,
-
-    /// A opção Nulo deve ser a última opção.
-    #[error("A opção Nulo deve ocupar a última posição")]
-    NullOptionMustBeLast,
-
-    /// Duas opções não podem compartilhar o mesmo identificador.
-    #[error("Os identificadores das opções devem ser distintos")]
-    DuplicateOptionId,
-
-    /// Duas autoridades não podem compartilhar o mesmo identificador.
-    #[error("Os identificadores das autoridades devem ser distintos")]
-    DuplicateAuthorityId,
-
-    /// Duas autoridades não podem compartilhar a mesma chave de assinatura.
-    #[error("As chaves de assinatura das autoridades devem ser distintas")]
-    DuplicateAuthoritySigningKey,
-
-    /// As contribuições públicas das autoridades devem ser distintas.
-    #[error("Os valores públicos das autoridades devem ser distintos")]
-    DuplicateAuthorityPublicValue,
-
-    /// Deve existir exatamente uma autoridade do servidor.
-    #[error("O manifesto deve possuir exatamente uma autoridade Server")]
-    InvalidServerAuthorityCount,
-
-    /// Deve existir exatamente uma autoridade da comissão.
-    #[error("O manifesto deve possuir exatamente uma autoridade da comissão")]
-    InvalidCommissionAuthorityCount,
-
-    /// Deve existir uma autoridade para cada chapa.
-    #[error("Deve existir exatamente uma autoridade para cada chapa")]
-    SlateAuthorityMismatch,
-
-    /// A chave pública combinada não pode ser zero ou um.
-    #[error("A chave pública combinada não pode ser zero ou um")]
-    InvalidCombinedPublicKey,
+    combined_public_key: U2048,
+    server_signing_key: Vec<u8>,
 }
 
 impl Manifest {
     /// Constrói um manifesto validando suas invariantes estruturais.
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         election_id: ElectionId,
         academic_center_id: AcademicCenterId,
         options: Vec<ElectionOption>,
         authorities: Vec<Authority>,
-        combined_public_key: BigUInt,
-        server_signing_key: Base64Url,
-        calendar_origin_hash: Fingerprint,
+        combined_public_key: U2048,
+        server_signing_key: Vec<u8>,
     ) -> Result<Self, InvalidManifest> {
         let options = ElectionOptions::try_new(options).map_err(|error| match error {
             InvalidElectionOptions::InvalidCount => InvalidManifest::InvalidOptionCount,
             InvalidElectionOptions::DuplicateId => InvalidManifest::DuplicateOptionId,
             InvalidElectionOptions::InvalidNullCount => InvalidManifest::InvalidNullOptionCount,
         })?;
-        if options.as_slice().last().map(ElectionOption::kind) != Some(OptionKind::Null) {
+        if !matches!(options.as_slice().last(), Some(ElectionOption::Null)) {
             return Err(InvalidManifest::NullOptionMustBeLast);
         }
 
@@ -165,15 +107,14 @@ impl Manifest {
             return Err(InvalidManifest::InvalidAuthorityCount);
         }
 
-        if matches!(combined_public_key.as_str(), "0" | "1") {
+        if combined_public_key <= U2048::ONE {
             return Err(InvalidManifest::InvalidCombinedPublicKey);
         }
 
         let slate_ids: HashSet<_> = options
             .as_slice()
             .iter()
-            .filter(|option| option.kind() == OptionKind::Slate)
-            .map(|option| *option.id().as_uuid())
+            .filter_map(ElectionOption::slate_id)
             .collect();
 
         let mut authority_ids = HashSet::with_capacity(authorities.len());
@@ -188,10 +129,10 @@ impl Manifest {
                 return Err(InvalidManifest::DuplicateAuthorityId);
             }
 
-            if !signing_keys.insert(authority.signing_key().as_str()) {
+            if !signing_keys.insert(authority.signing_key()) {
                 return Err(InvalidManifest::DuplicateAuthoritySigningKey);
             }
-            if !public_values.insert(authority.public_value().as_str()) {
+            if !public_values.insert(authority.public_value()) {
                 return Err(InvalidManifest::DuplicateAuthorityPublicValue);
             }
 
@@ -202,12 +143,8 @@ impl Manifest {
                 AuthorityRole::Commission => {
                     commission_authority_count += 1;
                 }
-                AuthorityRole::Slate => {
-                    let slate_id = authority
-                        .slate_id()
-                        .expect("Authority::try_new garante slate_id para Slate");
-
-                    if !authority_slate_ids.insert(*slate_id.as_uuid()) {
+                AuthorityRole::Slate(slate_id) => {
+                    if !authority_slate_ids.insert(slate_id) {
                         return Err(InvalidManifest::SlateAuthorityMismatch);
                     }
                 }
@@ -235,7 +172,6 @@ impl Manifest {
             authorities,
             combined_public_key,
             server_signing_key,
-            calendar_origin_hash,
         })
     }
 
@@ -259,19 +195,14 @@ impl Manifest {
         &self.authorities
     }
 
-    /// Retorna a chave pública combinada.
-    pub const fn combined_public_key(&self) -> &BigUInt {
+    /// Retorna a chave pública que o app usa para cifrar os votos desta eleição.
+    pub const fn combined_public_key(&self) -> &U2048 {
         &self.combined_public_key
     }
 
-    /// Retorna a chave de assinatura do servidor.
-    pub fn server_signing_key(&self) -> &Base64Url {
-        &self.server_signing_key
-    }
-
-    /// Retorna o hash da origem do calendário.
-    pub const fn calendar_origin_hash(&self) -> &Fingerprint {
-        &self.calendar_origin_hash
+    /// Retorna os bytes DER da chave de assinatura do servidor.
+    pub fn server_signing_key(&self) -> &[u8] {
+        self.server_signing_key.as_slice()
     }
 
     /// Retorna a versão do protocolo do manifesto.
@@ -287,16 +218,11 @@ impl Manifest {
 
 #[cfg(test)]
 mod tests {
-    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-
-    fn encoded_key(value: &str) -> String {
-        URL_SAFE_NO_PAD.encode(value.as_bytes())
-    }
 
     use super::*;
-    use crate::modules::elections::domain::value_objects::{
-        identifiers::{AuthorityId, OptionId, SlateId},
-        key_proof::KeyProof,
+    use crate::modules::elections::domain::{
+        entities::authority::KeyProof,
+        identifiers::{AuthorityId, SlateId},
     };
     use uuid::Uuid;
 
@@ -317,54 +243,34 @@ mod tests {
     }
 
     fn slate_option(id: SlateId, name: &str) -> ElectionOption {
-        ElectionOption::try_new(OptionId::from_uuid(id.into_uuid()), OptionKind::Slate, name)
-            .unwrap()
+        ElectionOption::try_slate(id, name).unwrap()
     }
 
     fn null_option() -> ElectionOption {
-        ElectionOption::try_new(
-            OptionId::from_uuid(Uuid::nil()),
-            OptionKind::Null,
-            ElectionOption::NULL_OPTION_NAME,
-        )
-        .unwrap()
+        ElectionOption::Null
     }
 
-    fn authority(
-        role: AuthorityRole,
-        slate_id: Option<SlateId>,
-        id: AuthorityId,
-        signing_key: &str,
-    ) -> Authority {
+    fn authority(role: AuthorityRole, id: AuthorityId, signing_key: &str) -> Authority {
         Authority::try_new(
             id,
             role,
-            slate_id,
-            Base64Url::try_new(encoded_key(signing_key)).unwrap(),
-            BigUInt::try_from_decimal(id.as_uuid().as_u128().max(2).to_string()).unwrap(),
-            KeyProof::new(
-                BigUInt::try_from_decimal("456").unwrap(),
-                BigUInt::try_from_decimal("789").unwrap(),
-            ),
+            signing_key.as_bytes().to_vec(),
+            U2048::from_u128(id.as_uuid().as_u128().max(2)),
+            KeyProof::new(U2048::from_u32(456), U2048::from_u32(789)),
         )
         .unwrap()
     }
 
     fn server_authority(key: &str) -> Authority {
-        authority(AuthorityRole::Server, None, authority_id(), key)
+        authority(AuthorityRole::Server, authority_id(), key)
     }
 
     fn commission_authority() -> Authority {
-        authority(
-            AuthorityRole::Commission,
-            None,
-            authority_id(),
-            "commission-key",
-        )
+        authority(AuthorityRole::Commission, authority_id(), "commission-key")
     }
 
     fn slate_authority(id: SlateId) -> Authority {
-        authority(AuthorityRole::Slate, Some(id), authority_id(), "slate-key")
+        authority(AuthorityRole::Slate(id), authority_id(), "slate-key")
     }
 
     fn fixture_slate_id() -> SlateId {
@@ -393,7 +299,7 @@ mod tests {
     fn build_manifest(
         options: Vec<ElectionOption>,
         authorities: Vec<Authority>,
-        combined_public_key: &str,
+        combined_public_key: u32,
         server_key: &str,
     ) -> Result<Manifest, InvalidManifest> {
         Manifest::try_new(
@@ -401,16 +307,15 @@ mod tests {
             academic_center_id(),
             options,
             authorities,
-            BigUInt::try_from_decimal(combined_public_key).unwrap(),
-            Base64Url::try_new(encoded_key(server_key)).unwrap(),
-            Fingerprint::try_from_hex("a".repeat(64)).unwrap(),
+            U2048::from_u32(combined_public_key),
+            server_key.as_bytes().to_vec(),
         )
     }
 
     #[test]
     fn accepts_valid_manifest() {
         let manifest =
-            build_manifest(valid_options(), valid_authorities(), "987654", "server-key").unwrap();
+            build_manifest(valid_options(), valid_authorities(), 987_654, "server-key").unwrap();
 
         assert_eq!(manifest.version(), 1);
         assert_eq!(manifest.group_id(), "rfc3526-modp14");
@@ -428,8 +333,7 @@ mod tests {
 
             options.push(slate_option(id, &format!("Chapa {index}")));
             authorities.push(authority(
-                AuthorityRole::Slate,
-                Some(id),
+                AuthorityRole::Slate(id),
                 authority_id(),
                 &format!("slate-key-{index}"),
             ));
@@ -437,7 +341,7 @@ mod tests {
 
         options.push(null_option());
 
-        let manifest = build_manifest(options, authorities, "987654", "server-key").unwrap();
+        let manifest = build_manifest(options, authorities, 987_654, "server-key").unwrap();
 
         assert_eq!(manifest.options().len(), MAX_OPTIONS);
         assert_eq!(manifest.authorities().len(), MAX_AUTHORITIES);
@@ -446,7 +350,7 @@ mod tests {
             manifest
                 .options()
                 .iter()
-                .filter(|option| option.kind() == OptionKind::Slate)
+                .filter(|option| matches!(option, ElectionOption::Slate(_)))
                 .count(),
             50
         );
@@ -455,7 +359,7 @@ mod tests {
             manifest
                 .authorities()
                 .iter()
-                .filter(|authority| authority.role() == AuthorityRole::Slate)
+                .filter(|authority| matches!(authority.role(), AuthorityRole::Slate(_)))
                 .count(),
             50
         );
@@ -476,7 +380,7 @@ mod tests {
         options.push(null_option());
 
         assert_eq!(
-            build_manifest(options, authorities, "987654", "server-key"),
+            build_manifest(options, authorities, 987_654, "server-key"),
             Err(InvalidManifest::InvalidOptionCount)
         );
     }
@@ -492,7 +396,7 @@ mod tests {
         }
 
         assert_eq!(
-            build_manifest(valid_options(), authorities, "987654", "server-key",),
+            build_manifest(valid_options(), authorities, 987_654, "server-key",),
             Err(InvalidManifest::InvalidAuthorityCount)
         );
     }
@@ -502,7 +406,7 @@ mod tests {
         let (options, authorities) = valid_manifest_parts();
 
         let manifest =
-            build_manifest(options.clone(), authorities.clone(), "987654", "server-key").unwrap();
+            build_manifest(options.clone(), authorities.clone(), 987_654, "server-key").unwrap();
 
         assert_eq!(manifest.options(), options.as_slice());
         assert_eq!(manifest.authorities(), authorities.as_slice());
@@ -514,7 +418,7 @@ mod tests {
             build_manifest(
                 vec![null_option()],
                 valid_authorities(),
-                "987654",
+                987_654,
                 "server-key",
             ),
             Err(InvalidManifest::InvalidOptionCount)
@@ -527,7 +431,7 @@ mod tests {
             build_manifest(
                 valid_options(),
                 vec![server_authority("server-key"), commission_authority(),],
-                "987654",
+                987_654,
                 "server-key",
             ),
             Err(InvalidManifest::InvalidAuthorityCount)
@@ -551,7 +455,7 @@ mod tests {
                     slate_authority(first_slate),
                     slate_authority(second_slate),
                 ],
-                "987654",
+                987_654,
                 "server-key",
             ),
             Err(InvalidManifest::InvalidNullOptionCount)
@@ -566,7 +470,7 @@ mod tests {
             build_manifest(
                 vec![null_option(), slate_option(id, "Chapa Horizonte"),],
                 valid_authorities(),
-                "987654",
+                987_654,
                 "server-key",
             ),
             Err(InvalidManifest::NullOptionMustBeLast)
@@ -589,7 +493,7 @@ mod tests {
                     commission_authority(),
                     slate_authority(id),
                 ],
-                "987654",
+                987_654,
                 "server-key",
             ),
             Err(InvalidManifest::DuplicateOptionId)
@@ -601,13 +505,13 @@ mod tests {
         let shared_id = authority_id();
 
         let authorities = vec![
-            authority(AuthorityRole::Server, None, shared_id, "server-key"),
-            authority(AuthorityRole::Commission, None, shared_id, "commission-key"),
+            authority(AuthorityRole::Server, shared_id, "server-key"),
+            authority(AuthorityRole::Commission, shared_id, "commission-key"),
             slate_authority(slate_id()),
         ];
 
         assert_eq!(
-            build_manifest(valid_options(), authorities, "987654", "server-key",),
+            build_manifest(valid_options(), authorities, 987_654, "server-key",),
             Err(InvalidManifest::DuplicateAuthorityId)
         );
     }
@@ -616,17 +520,12 @@ mod tests {
     fn rejects_duplicate_authority_signing_keys() {
         let authorities = vec![
             server_authority("shared-key"),
-            authority(
-                AuthorityRole::Commission,
-                None,
-                authority_id(),
-                "shared-key",
-            ),
+            authority(AuthorityRole::Commission, authority_id(), "shared-key"),
             slate_authority(slate_id()),
         ];
 
         assert_eq!(
-            build_manifest(valid_options(), authorities, "987654", "shared-key",),
+            build_manifest(valid_options(), authorities, 987_654, "shared-key",),
             Err(InvalidManifest::DuplicateAuthoritySigningKey)
         );
     }
@@ -638,14 +537,13 @@ mod tests {
             slate_authority(slate_id()),
             authority(
                 AuthorityRole::Commission,
-                None,
                 authority_id(),
                 "another-commission-key",
             ),
         ];
 
         assert_eq!(
-            build_manifest(valid_options(), authorities, "987654", "server-key",),
+            build_manifest(valid_options(), authorities, 987_654, "server-key",),
             Err(InvalidManifest::InvalidServerAuthorityCount)
         );
     }
@@ -656,15 +554,14 @@ mod tests {
             server_authority("server-key"),
             slate_authority(slate_id()),
             authority(
-                AuthorityRole::Slate,
-                Some(slate_id()),
+                AuthorityRole::Slate(slate_id()),
                 authority_id(),
                 "another-slate-key",
             ),
         ];
 
         assert_eq!(
-            build_manifest(valid_options(), authorities, "987654", "server-key",),
+            build_manifest(valid_options(), authorities, 987_654, "server-key",),
             Err(InvalidManifest::InvalidCommissionAuthorityCount)
         );
     }
@@ -686,7 +583,7 @@ mod tests {
                     commission_authority(),
                     slate_authority(first_slate),
                 ],
-                "987654",
+                987_654,
                 "server-key",
             ),
             Err(InvalidManifest::SlateAuthorityMismatch)
@@ -706,7 +603,7 @@ mod tests {
                     commission_authority(),
                     slate_authority(unknown_slate),
                 ],
-                "987654",
+                987_654,
                 "server-key",
             ),
             Err(InvalidManifest::SlateAuthorityMismatch)
@@ -722,15 +619,14 @@ mod tests {
             commission_authority(),
             slate_authority(id),
             authority(
-                AuthorityRole::Slate,
-                Some(id),
+                AuthorityRole::Slate(id),
                 authority_id(),
                 "another-slate-key",
             ),
         ];
 
         assert_eq!(
-            build_manifest(valid_options(), authorities, "987654", "server-key",),
+            build_manifest(valid_options(), authorities, 987_654, "server-key",),
             Err(InvalidManifest::SlateAuthorityMismatch)
         );
     }
@@ -740,26 +636,47 @@ mod tests {
         let manifest = build_manifest(
             valid_options(),
             valid_authorities(),
-            "987654",
+            987_654,
             "different-server-key",
         )
         .unwrap();
 
+        assert_eq!(manifest.server_signing_key(), b"different-server-key");
+        assert_eq!(manifest.authorities()[0].signing_key(), b"server-key");
+    }
+
+    #[test]
+    fn rejects_duplicate_authority_public_values() {
+        let mut authorities = valid_authorities();
+        let commission = &authorities[1];
+
+        authorities[1] = Authority::try_new(
+            commission.id(),
+            commission.role(),
+            commission.signing_key().to_vec(),
+            *authorities[0].public_value(),
+            commission.key_proof().clone(),
+        )
+        .unwrap();
+
         assert_eq!(
-            manifest.server_signing_key().as_str(),
-            encoded_key("different-server-key")
-        );
-        assert_eq!(
-            manifest.authorities()[0].signing_key().as_str(),
-            encoded_key("server-key")
+            build_manifest(valid_options(), authorities, 987_654, "server-key"),
+            Err(InvalidManifest::DuplicateAuthorityPublicValue)
         );
     }
 
     #[test]
-    fn rejects_combined_public_key_equal_to_one() {
-        assert_eq!(
-            build_manifest(valid_options(), valid_authorities(), "1", "server-key",),
-            Err(InvalidManifest::InvalidCombinedPublicKey)
-        );
+    fn rejects_combined_public_keys_zero_and_one() {
+        for public_key in [0, 1] {
+            assert_eq!(
+                build_manifest(
+                    valid_options(),
+                    valid_authorities(),
+                    public_key,
+                    "server-key"
+                ),
+                Err(InvalidManifest::InvalidCombinedPublicKey)
+            );
+        }
     }
 }

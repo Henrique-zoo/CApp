@@ -21,9 +21,12 @@ use super::super::{
         BallotContext, CryptoWireError, ServerSigner, object_digest, parse_strict_json,
         verify_ballot, verify_calendar_origin, verify_manifest, verify_signed_object,
     },
-    domain::cryptography::elgamal::{
-        ElGamalCiphertext, EncryptedBallot, GROUP_ID, MAX_VOTERS, accumulate_ballot,
-        empty_accumulator, validate_public_key,
+    domain::{
+        cryptography::elgamal::{
+            ElGamalCiphertext, EncryptedBallot, GROUP_ID, accumulate_ballot, empty_accumulator,
+            validate_public_key,
+        },
+        profile::MAX_VOTER_COUNT,
     },
 };
 
@@ -341,7 +344,7 @@ impl ElectionBoard for PgElectionBoard {
             return Err(BoardError::NotEligible);
         }
         validate_signing_origin(&board, &self.signer)?;
-        if board.voter_count >= MAX_VOTERS as i32 {
+        if board.voter_count >= MAX_VOTER_COUNT as i32 {
             return Err(BoardError::LimitExceeded);
         }
         let used_voter: bool = sqlx::query_scalar(

@@ -1,7 +1,9 @@
 //! Regras de consistência das contagens de uma apuração eleitoral.
 
-use crate::modules::elections::domain::value_objects::{
-    option::ElectionOption, option_count::OptionCount, voter_count::VoterCount,
+use crate::modules::elections::domain::{
+    choices::ElectionOption,
+    counts::{OptionCount, VoterCount},
+    error::InvalidCountConsistency,
 };
 
 /// Resultado da verificação aritmética das contagens eleitorais.
@@ -18,21 +20,6 @@ pub enum CountConsistency {
         /// Soma efetiva das contagens por opção.
         actual: u64,
     },
-}
-
-/// Erros estruturais encontrados nas contagens eleitorais.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum InvalidCountConsistency {
-    /// Um total publicado está fora do intervalo da fotografia final.
-    #[error("Uma contagem excede o número de participantes")]
-    CountOutOfRange,
-    /// A quantidade de contagens difere da quantidade de opções do manifesto.
-    #[error("A quantidade de contagens difere da quantidade de opções do manifesto")]
-    OptionCountMismatch,
-
-    /// Os identificadores das opções não correspondem à ordem do manifesto.
-    #[error("As opções contabilizadas não correspondem à ordem do manifesto")]
-    OptionOrderMismatch,
 }
 
 /// Verifica a correspondência entre as opções do manifesto e suas contagens.
@@ -60,6 +47,11 @@ pub fn validate_result_counts(
         }
     }
 
+    Ok(compare_count_sum(counts, voter_count))
+}
+
+/// Compara a soma das contagens com o total de participantes.
+fn compare_count_sum(counts: &[OptionCount], voter_count: VoterCount) -> CountConsistency {
     let actual = counts
         .iter()
         .map(|count| u64::from(count.count().value()))
@@ -68,37 +60,25 @@ pub fn validate_result_counts(
     let expected = voter_count.value();
 
     if actual == u64::from(expected) {
-        Ok(CountConsistency::Consistent)
+        CountConsistency::Consistent
     } else {
-        Ok(CountConsistency::SumMismatch { expected, actual })
+        CountConsistency::SumMismatch { expected, actual }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::elections::domain::value_objects::{
-        identifiers::OptionId,
-        option::{ElectionOption, OptionKind},
-    };
+    use crate::modules::elections::domain::identifiers::SlateId;
     use uuid::Uuid;
 
     fn slate_option(id: u128, name: &str) -> ElectionOption {
-        ElectionOption::try_new(
-            OptionId::from_uuid(Uuid::from_u128(id)),
-            OptionKind::Slate,
-            name,
-        )
-        .unwrap()
+        ElectionOption::try_slate(SlateId::try_from_uuid(Uuid::from_u128(id)).unwrap(), name)
+            .unwrap()
     }
 
     fn null_option() -> ElectionOption {
-        ElectionOption::try_new(
-            OptionId::from_uuid(Uuid::nil()),
-            OptionKind::Null,
-            ElectionOption::NULL_OPTION_NAME,
-        )
-        .unwrap()
+        ElectionOption::Null
     }
 
     fn options() -> Vec<ElectionOption> {
@@ -112,9 +92,7 @@ mod tests {
     fn counts(values: [(u128, u32); 3]) -> Vec<OptionCount> {
         values
             .into_iter()
-            .map(|(id, count)| {
-                OptionCount::try_new(OptionId::from_uuid(Uuid::from_u128(id)), count).unwrap()
-            })
+            .map(|(id, count)| OptionCount::try_new(Uuid::from_u128(id), count).unwrap())
             .collect()
     }
 
@@ -173,8 +151,8 @@ mod tests {
         let result = validate_result_counts(&options, &counts, VoterCount::try_new(8).unwrap());
 
         assert_eq!(result, Ok(CountConsistency::Consistent));
-        assert!(options.last().unwrap().id().is_null_option());
-        assert!(counts.last().unwrap().option_id().is_null_option());
+        assert!(options.last().unwrap().id().is_nil());
+        assert!(counts.last().unwrap().option_id().is_nil());
     }
 
     #[test]
