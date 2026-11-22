@@ -2,10 +2,11 @@ openapi: 3.1.0
 
 info:
   title: CApp API
-  version: 4.0.0
+  version: 4.3.0
   description: |
     Contrato das rotas atualmente implementadas no backend CApp.
-    Os caminhos são servidos sem prefixo /v1.
+    Os caminhos legados de autenticação e perfil são servidos sem prefixo /v1;
+    rotas de recursos adotam o prefixo /api/v1.
     Desde 2.0.0, rotas de negócio exigem X-Firebase-AppCheck além do Firebase
     ID token. O servidor verifica assinatura, emissor, audiência, validade e
     App ID permitido. app_check_required e app_check_invalid retornam 403;
@@ -16,6 +17,12 @@ info:
     perfil interno não aceita courseName declarado pelo usuário. O e-mail do Graph
     é retornado apenas como suggestedEmail durante o cadastro, fora da evidência
     institucional, e não é persistido. Contas ativas preservam o e-mail escolhido.
+    Desde 4.1.0, adicionada rota para criação de demandas nos fóruns institucional
+    e de espaço físico em POST /api/v1/academic-centers/{academic_center_id}/demands.
+    Desde 4.2.0, adicionada rota para listagem e filtragem de demandas nos fóruns institucional
+    e de espaço físico em GET /api/v1/academic-centers/{academic_center_id}/demands.
+    Desde 4.3.0, adicionadas rotas para publicação e listagem de comentários e interações
+    em demandas em POST e GET /api/v1/academic-centers/{academic_center_id}/demands/{demand_id}/comments.
 
     A verificação institucional valida um Firebase ID token e um Microsoft access
     token da mesma pessoa, consulta a instituição pelo tenant Microsoft, verifica
@@ -30,6 +37,8 @@ tags:
     description: Saúde do processo e comunicação com PostgreSQL.
   - name: Identidade
     description: Verificação das credenciais e do vínculo institucional.
+  - name: Demandas
+    description: Criação e acompanhamento de demandas nos fóruns institucional e de espaço físico.
 
 paths:
   /health:
@@ -372,6 +381,793 @@ paths:
         "503":
           $ref: "#/components/responses/AccountServiceUnavailable"
 
+  /api/v1/academic-centers/{academic_center_id}/demands:
+    get:
+      operationId: listDemands
+      tags: [Demandas]
+      summary: Listar e filtrar demandas do Centro Acadêmico
+      description: |
+        Consulta a listagem de demandas vinculadas a um Centro Acadêmico,
+        suportando filtragem por fórum (`institutional` ou `physical_space`),
+        status do ciclo de vida, demandas próprias (`mine=true`) e paginação determinística.
+
+        Demandas de espaço físico (`physical_space`) são visíveis para qualquer
+        estudante da instituição com vínculo ativo.
+
+        Demandas do fórum institucional (`institutional`) são restritas aos estudantes
+        matriculados nos cursos representados pelo Centro Acadêmico e aos membros da gestão.
+        Tentativas de consulta explícita ao fórum institucional por estudantes não autorizados
+        são recusadas com HTTP 403 (`user_not_permitted_in_ca`). Caso o fórum não seja informado,
+        o backend retorna exclusivamente as demandas do espaço físico para usuários sem acesso institucional.
+
+        A ordenação dos registros é determinística e decrescente pela data de criação (`createdAt DESC, id DESC`).
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: academic_center_id
+          in: path
+          required: true
+          description: Identificador único (UUID) do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000001"
+        - name: forum
+          in: query
+          required: false
+          description: Filtro opcional pelo fórum da demanda (`institutional` ou `physical_space`).
+          schema:
+            type: string
+            enum: [institutional, physical_space]
+          example: physical_space
+        - name: status
+          in: query
+          required: false
+          description: Filtro opcional pelo status da demanda no ciclo de vida.
+          schema:
+            type: string
+            enum:
+              - open
+              - in_analysis
+              - rejected
+              - forwarded_to_coordination
+              - in_execution
+              - resolved
+              - cancelled
+              - completed
+          example: open
+        - name: mine
+          in: query
+          required: false
+          description: Quando verdadeiro (`true`), filtra apenas as demandas registradas pelo usuário autenticado.
+          schema:
+            type: boolean
+          example: false
+        - name: limit
+          in: query
+          required: false
+          description: Quantidade máxima de registros a retornar na página.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          example: 20
+        - name: offset
+          in: query
+          required: false
+          description: Deslocamento inicial de registros para paginação.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          example: 0
+      responses:
+        "200":
+          description: Lista de demandas recuperada com sucesso conforme os filtros aplicados.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DemandResponse"
+              examples:
+                demandsList:
+                  summary: Demandas do Centro Acadêmico
+                  value:
+                    - id: "00000000-0000-0000-0000-000000000020"
+                      academicCenterId: "00000000-0000-0000-0000-000000000001"
+                      authorId: "00000000-0000-0000-0000-000000000010"
+                      forum: physical_space
+                      title: Reparo do ar-condicionado
+                      description: O ar-condicionado da sala de estudos não está refrigerando adequadamente.
+                      category: Infraestrutura
+                      courseName: null
+                      status: open
+                      createdAt: "2026-11-20T12:00:00Z"
+                      updatedAt: "2026-11-20T12:00:00Z"
+                emptyList:
+                  summary: Lista vazia quando não existem demandas para o filtro
+                  value: []
+        "400":
+          description: |
+            bad_request — query params malformados ou inválidos.
+            invalid_forum — fórum desconhecido (deve ser 'institutional' ou 'physical_space').
+            invalid_status — status de demanda desconhecido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                invalidForum:
+                  value:
+                    error:
+                      code: invalid_forum
+                      message: Fórum de demanda inválido
+                      details: null
+                invalidStatus:
+                  value:
+                    error:
+                      code: invalid_status
+                      message: Status de demanda inválido
+                      details: null
+        "401":
+          description: |
+            Credenciais ausentes ou inválidas. Códigos possíveis:
+            - unauthorized: cabeçalho Authorization ausente, repetido ou formato Bearer malformado;
+            - invalid_token: credencial rejeitada pelo verificador de identidade;
+            - expired_token: token de autenticação expirado.
+          headers:
+            WWW-Authenticate:
+              description: Desafio Bearer incluído em todas as respostas 401.
+              schema:
+                type: string
+                const: Bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                missingCredentials:
+                  value:
+                    error:
+                      code: unauthorized
+                      message: Autenticação necessária
+                      details: null
+        "403":
+          description: |
+            Acesso negado. Possíveis códigos:
+            - student_membership_required: solicitante não possui vínculo estudantil ativo na instituição do CA;
+            - user_not_permitted_in_ca: usuário sem permissão para consultar o fórum institucional deste CA;
+            - app_check_required / app_check_invalid: comprovação do aplicativo ausente ou recusada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                studentMembershipRequired:
+                  value:
+                    error:
+                      code: student_membership_required
+                      message: Vínculo estudantil ativo é obrigatório para registrar demandas
+                      details: null
+                userNotPermittedInCa:
+                  value:
+                    error:
+                      code: user_not_permitted_in_ca
+                      message: Usuário sem permissão para criar demandas neste Centro Acadêmico
+                      details: null
+        "404":
+          description: |
+            academic_center_not_found — Centro Acadêmico informado não foi encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: academic_center_not_found
+                  message: Centro Acadêmico não encontrado
+                  details:
+                    academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "422":
+          description: |
+            academic_center_inactive — Centro Acadêmico encontra-se desativado/arquivado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: academic_center_inactive
+                  message: Centro Acadêmico '00000000-0000-0000-0000-000000000001' não está ativo
+                  details:
+                    academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+    post:
+      operationId: createDemand
+      tags: [Demandas]
+      summary: Criar nova demanda no fórum institucional ou de espaço físico
+      description: |
+        Registra uma nova demanda estudantil vinculada a um Centro Acadêmico.
+
+        Demandas de espaço físico (`physical_space`) pertencem diretamente ao Centro
+        Acadêmico, são abertas a qualquer estudante com vínculo ativo e não aceitam
+        curso associado (`courseName`).
+
+        Demandas do fórum institucional (`institutional`) exigem indicação obrigatória
+        de um curso válido (`courseName`) representado pelo Centro Acadêmico, e o autor
+        deve estar matriculado no curso ou ser membro da gestão do CA.
+
+        O status inicial é sempre `open`, gerando o registro inicial no histórico
+        de status da demanda de forma atômica.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: academic_center_id
+          in: path
+          required: true
+          description: Identificador único (UUID) do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000001"
+      requestBody:
+        required: true
+        description: Dados da demanda a ser registrada nos fóruns institucional ou de espaço físico.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDemandRequest"
+            examples:
+              physicalSpaceDemand:
+                summary: Demanda de espaço físico
+                value:
+                  forum: physical_space
+                  title: Reparo do ar-condicionado
+                  description: O ar-condicionado da sala de estudos não está refrigerando adequadamente.
+                  category: Infraestrutura
+              institutionalDemand:
+                summary: Demanda institucional
+                value:
+                  forum: institutional
+                  title: Revisão de pré-requisitos de disciplina
+                  description: Solicitação de ajuste nos pré-requisitos para viabilizar matrículas no fluxo padrão.
+                  category: Pedagógico
+                  courseName: Ciência da Computação
+      responses:
+        "201":
+          description: Demanda criada com sucesso e status inicial 'open' registrado no histórico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DemandResponse"
+              examples:
+                createdPhysicalSpaceDemand:
+                  summary: Demanda de espaço físico criada
+                  value:
+                    id: "00000000-0000-0000-0000-000000000020"
+                    academicCenterId: "00000000-0000-0000-0000-000000000001"
+                    authorId: "00000000-0000-0000-0000-000000000010"
+                    forum: physical_space
+                    title: Reparo do ar-condicionado
+                    description: O ar-condicionado da sala de estudos não está refrigerando adequadamente.
+                    category: Infraestrutura
+                    courseName: null
+                    status: open
+                    createdAt: "2026-11-20T12:00:00Z"
+                    updatedAt: "2026-11-20T12:00:00Z"
+                createdInstitutionalDemand:
+                  summary: Demanda institucional criada
+                  value:
+                    id: "00000000-0000-0000-0000-000000000021"
+                    academicCenterId: "00000000-0000-0000-0000-000000000001"
+                    authorId: "00000000-0000-0000-0000-000000000010"
+                    forum: institutional
+                    title: Revisão de pré-requisitos de disciplina
+                    description: Solicitação de ajuste nos pré-requisitos para viabilizar matrículas no fluxo padrão.
+                    category: Pedagógico
+                    courseName: Ciência da Computação
+                    status: open
+                    createdAt: "2026-11-20T12:00:00Z"
+                    updatedAt: "2026-11-20T12:00:00Z"
+        "400":
+          description: |
+            bad_request — JSON ausente, malformado, de tipo incompatível ou excedendo o limite de tamanho do corpo.
+            invalid_forum — fórum desconhecido (deve ser 'institutional' ou 'physical_space').
+            invalid_demand — dados gerais da demanda rejeitados pelo domínio.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                badRequest:
+                  value:
+                    error:
+                      code: bad_request
+                      message: Requisição inválida
+                      details: null
+                invalidForum:
+                  value:
+                    error:
+                      code: invalid_forum
+                      message: Fórum de demanda inválido
+                      details: null
+        "401":
+          description: |
+            Credenciais ausentes ou inválidas. Códigos possíveis:
+            - unauthorized: cabeçalho Authorization ausente, repetido ou formato Bearer malformado;
+            - invalid_token: credencial rejeitada pelo verificador de identidade;
+            - expired_token: token de autenticação expirado.
+          headers:
+            WWW-Authenticate:
+              description: Desafio Bearer incluído em todas as respostas 401.
+              schema:
+                type: string
+                const: Bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                missingCredentials:
+                  value:
+                    error:
+                      code: unauthorized
+                      message: Autenticação necessária
+                      details: null
+        "403":
+          description: |
+            Acesso negado. Possíveis códigos:
+            - student_membership_required: autor não possui vínculo estudantil ativo na instituição do CA;
+            - user_not_permitted_in_ca: estudante pertence a curso não atendido pelo CA e não integra a gestão;
+            - user_not_found: usuário não encontrado na base de dados interna;
+            - forbidden: authorId informado no corpo diverge da credencial autenticada;
+            - app_check_required / app_check_invalid: comprovação do aplicativo ausente ou recusada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                studentMembershipRequired:
+                  value:
+                    error:
+                      code: student_membership_required
+                      message: Vínculo estudantil ativo é obrigatório para registrar demandas
+                      details: null
+                userNotPermittedInCa:
+                  value:
+                    error:
+                      code: user_not_permitted_in_ca
+                      message: Usuário sem permissão para criar demandas neste Centro Acadêmico
+                      details: null
+        "404":
+          description: |
+            academic_center_not_found — Centro Acadêmico informado não foi encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: academic_center_not_found
+                  message: Centro Acadêmico não encontrado
+                  details:
+                    academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "422":
+          description: |
+            Violação de regras de validação e restrições de negócio da demanda. Possíveis códigos:
+            - academic_center_inactive: Centro Acadêmico encontra-se desativado/arquivado;
+            - course_name_required: demandas do fórum institucional exigem curso associado;
+            - course_not_represented_by_ca: curso informado não é representado pelo Centro Acadêmico;
+            - course_not_allowed_for_physical_space: demandas de espaço físico não permitem curso;
+            - empty_description / description_too_long: descrição vazia ou superior a 2000 caracteres;
+            - empty_title / title_too_long: título vazio ou superior a 200 caracteres;
+            - empty_category / category_too_long: categoria vazia ou superior a 100 caracteres;
+            - empty_course_name / course_name_too_long: curso vazio ou superior a 200 caracteres.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                courseNameRequired:
+                  value:
+                    error:
+                      code: course_name_required
+                      message: Demandas do fórum institucional exigem associação válida a um curso
+                      details: null
+                courseNotAllowedForPhysicalSpace:
+                  value:
+                    error:
+                      code: course_not_allowed_for_physical_space
+                      message: Demandas de espaço físico não permitem associação a curso
+                      details: null
+                courseNotRepresented:
+                  value:
+                    error:
+                      code: course_not_represented_by_ca
+                      message: O curso informado não é representado pelo Centro Acadêmico
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+                        course_name: "Engenharia Mecânica"
+                emptyDescription:
+                  value:
+                    error:
+                      code: empty_description
+                      message: A descrição da demanda não pode ser vazia
+                      details: null
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
+  /api/v1/academic-centers/{academic_center_id}/demands/{demand_id}/comments:
+    get:
+      operationId: listDemandComments
+      tags: [Demandas]
+      summary: Listar comentários e interações de uma demanda
+      description: |
+        Consulta a linha do tempo cronológica de comentários e interações de uma demanda.
+
+        Apenas o estudante autor da solicitação ou integrantes da gestão do Centro
+        Acadêmico possuem permissão para visualizar as interações. Usuários sem
+        permissão têm a solicitação rejeitada com HTTP 403 (`user_not_permitted_in_ca`).
+
+        Os comentários são retornados em ordem cronológica ascendente (`createdAt ASC, id ASC`).
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: academic_center_id
+          in: path
+          required: true
+          description: Identificador único (UUID) do Centro Acadêmico responsável pela demanda.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000001"
+        - name: demand_id
+          in: path
+          required: true
+          description: Identificador único (UUID) da demanda consultada.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000020"
+      responses:
+        "200":
+          description: Linha do tempo de comentários recuperada com sucesso em ordem cronológica.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DemandCommentResponse"
+              examples:
+                commentsTimeline:
+                  summary: Histórico cronológico de interações da demanda
+                  value:
+                    - id: "00000000-0000-0000-0000-000000000030"
+                      demandId: "00000000-0000-0000-0000-000000000020"
+                      authorId: "00000000-0000-0000-0000-000000000010"
+                      authorRole: student
+                      content: Anexei também a comparação com o currículo de referência.
+                      createdAt: "2026-11-20T12:05:00Z"
+                    - id: "00000000-0000-0000-0000-000000000031"
+                      demandId: "00000000-0000-0000-0000-000000000020"
+                      authorId: "00000000-0000-0000-0000-000000000011"
+                      authorRole: ca_management
+                      content: Entramos em contato com a coordenação para agendar reunião sobre a ementa.
+                      createdAt: "2026-11-20T14:30:00Z"
+                emptyTimeline:
+                  summary: Linha do tempo sem comentários
+                  value: []
+        "400":
+          description: |
+            bad_request — parâmetros de rota inválidos.
+            demand_belongs_to_another_ca — a demanda informada pertence a outro Centro Acadêmico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                demandBelongsToAnotherCa:
+                  value:
+                    error:
+                      code: demand_belongs_to_another_ca
+                      message: A demanda pertence a outro Centro Acadêmico
+                      details:
+                        demand_id: "00000000-0000-0000-0000-000000000020"
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "401":
+          description: |
+            Credenciais ausentes ou inválidas. Códigos possíveis:
+            - unauthorized: cabeçalho Authorization ausente ou malformado;
+            - invalid_token: credencial rejeitada pelo verificador de identidade;
+            - expired_token: token expirado.
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+                const: Bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: unauthorized
+                  message: Autenticação necessária
+                  details: null
+        "403":
+          description: |
+            Acesso negado. Possíveis códigos:
+            - student_membership_required: solicitante não possui vínculo estudantil ativo na instituição;
+            - user_not_permitted_in_ca: usuário não é o autor da demanda nem integra a gestão do CA.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                studentMembershipRequired:
+                  value:
+                    error:
+                      code: student_membership_required
+                      message: Vínculo estudantil ativo é obrigatório para registrar demandas
+                      details: null
+                userNotPermittedInCa:
+                  value:
+                    error:
+                      code: user_not_permitted_in_ca
+                      message: Usuário sem permissão para interagir ou visualizar comentários desta demanda
+                      details: null
+        "404":
+          description: |
+            academic_center_not_found — Centro Acadêmico não encontrado.
+            demand_not_found — Demanda informada não encontrada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                academicCenterNotFound:
+                  value:
+                    error:
+                      code: academic_center_not_found
+                      message: Centro Acadêmico não encontrado
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+                demandNotFound:
+                  value:
+                    error:
+                      code: demand_not_found
+                      message: Demanda não encontrada
+                      details:
+                        demand_id: "00000000-0000-0000-0000-000000000020"
+        "422":
+          description: |
+            academic_center_inactive — Centro Acadêmico encontra-se desativado/arquivado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: academic_center_inactive
+                  message: Centro Acadêmico '00000000-0000-0000-0000-000000000001' não está ativo
+                  details:
+                    academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
+    post:
+      operationId: createDemandComment
+      tags: [Demandas]
+      summary: Publicar comentário ou resposta em uma demanda
+      description: |
+        Registra um novo comentário ou resposta textual na linha do tempo de uma demanda.
+
+        Se o autor for o estudante solicitante da demanda, a interação é identificada
+        com o papel `student`. Se for um representante da gestão do Centro Acadêmico,
+        a resposta é identificada oficialmente com o papel `ca_management`.
+
+        Usuários que não sejam o autor nem membros da gestão do CA têm o envio
+        recusado com HTTP 403 (`user_not_permitted_in_ca`).
+
+        O conteúdo do comentário é obrigatório, não pode ser vazio e tem limite
+        máximo de 2000 caracteres.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: academic_center_id
+          in: path
+          required: true
+          description: Identificador único (UUID) do Centro Acadêmico responsável pela demanda.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000001"
+        - name: demand_id
+          in: path
+          required: true
+          description: Identificador único (UUID) da demanda alvo.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000020"
+      requestBody:
+        required: true
+        description: Conteúdo textual do comentário a ser registrado.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDemandCommentRequest"
+            examples:
+              studentComment:
+                summary: Comentário publicado pelo estudante autor
+                value:
+                  content: Anexei também a comparação com o currículo de referência.
+              managementResponse:
+                summary: Resposta oficial da gestão do Centro Acadêmico
+                value:
+                  content: Entramos em contato com a coordenação para agendar reunião sobre a ementa.
+      responses:
+        "201":
+          description: Comentário registrado com sucesso na demanda.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DemandCommentResponse"
+              examples:
+                createdStudentComment:
+                  summary: Comentário do estudante registrado
+                  value:
+                    id: "00000000-0000-0000-0000-000000000030"
+                    demandId: "00000000-0000-0000-0000-000000000020"
+                    authorId: "00000000-0000-0000-0000-000000000010"
+                    authorRole: student
+                    content: Anexei também a comparação com o currículo de referência.
+                    createdAt: "2026-11-20T12:05:00Z"
+                createdManagementResponse:
+                  summary: Resposta oficial da gestão registrada
+                  value:
+                    id: "00000000-0000-0000-0000-000000000031"
+                    demandId: "00000000-0000-0000-0000-000000000020"
+                    authorId: "00000000-0000-0000-0000-000000000011"
+                    authorRole: ca_management
+                    content: Entramos em contato com a coordenação para agendar reunião sobre a ementa.
+                    createdAt: "2026-11-20T14:30:00Z"
+        "400":
+          description: |
+            bad_request — JSON malformado ou parâmetros inválidos.
+            demand_belongs_to_another_ca — a demanda informada pertence a outro Centro Acadêmico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                badRequest:
+                  value:
+                    error:
+                      code: bad_request
+                      message: Requisição inválida
+                      details: null
+                demandBelongsToAnotherCa:
+                  value:
+                    error:
+                      code: demand_belongs_to_another_ca
+                      message: A demanda pertence a outro Centro Acadêmico
+                      details:
+                        demand_id: "00000000-0000-0000-0000-000000000020"
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "401":
+          description: |
+            Credenciais ausentes ou inválidas. Códigos possíveis:
+            - unauthorized: cabeçalho Authorization ausente ou malformado;
+            - invalid_token: credencial rejeitada pelo verificador de identidade;
+            - expired_token: token expirado.
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+                const: Bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: unauthorized
+                  message: Autenticação necessária
+                  details: null
+        "403":
+          description: |
+            Acesso negado. Possíveis códigos:
+            - student_membership_required: autor não possui vínculo estudantil ativo na instituição;
+            - user_not_permitted_in_ca: usuário não é o autor da demanda nem membro da gestão do CA;
+            - forbidden: authorId informado no corpo diverge da credencial autenticada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                studentMembershipRequired:
+                  value:
+                    error:
+                      code: student_membership_required
+                      message: Vínculo estudantil ativo é obrigatório para registrar demandas
+                      details: null
+                userNotPermittedInCa:
+                  value:
+                    error:
+                      code: user_not_permitted_in_ca
+                      message: Usuário sem permissão para interagir ou visualizar comentários desta demanda
+                      details: null
+        "404":
+          description: |
+            academic_center_not_found — Centro Acadêmico não encontrado.
+            demand_not_found — Demanda informada não encontrada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                academicCenterNotFound:
+                  value:
+                    error:
+                      code: academic_center_not_found
+                      message: Centro Acadêmico não encontrado
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+                demandNotFound:
+                  value:
+                    error:
+                      code: demand_not_found
+                      message: Demanda não encontrada
+                      details:
+                        demand_id: "00000000-0000-0000-0000-000000000020"
+        "422":
+          description: |
+            empty_comment — conteúdo do comentário em branco ou apenas espaços.
+            comment_too_long — comentário ultrapassou o limite máximo de 2000 caracteres.
+            academic_center_inactive — Centro Acadêmico desativado/arquivado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                emptyComment:
+                  value:
+                    error:
+                      code: empty_comment
+                      message: O conteúdo do comentário não pode ser vazio
+                      details: null
+                commentTooLong:
+                  value:
+                    error:
+                      code: comment_too_long
+                      message: O comentário excede o limite de 2000 caracteres
+                      details: null
+                academicCenterInactive:
+                  value:
+                    error:
+                      code: academic_center_inactive
+                      message: Centro Acadêmico '00000000-0000-0000-0000-000000000001' não está ativo
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
 components:
   responses:
     InvalidAccountCredential:
@@ -631,3 +1427,149 @@ components:
           description: Mensagem pública legível, sem diagnósticos internos ou credenciais.
         details:
           description: Contexto público adicional ou null. Os erros atuais da rota de verificação retornam null.
+    CreateDemandRequest:
+      type: object
+      additionalProperties: false
+      required: [forum, description]
+      properties:
+        forum:
+          type: string
+          enum: [institutional, physical_space]
+          description: Fórum alvo da demanda (`institutional` ou `physical_space`).
+        title:
+          type: [string, "null"]
+          maxLength: 200
+          description: Título ou resumo identificador opcional da demanda.
+        description:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: '\S'
+          description: Conteúdo ou descrição detalhada da demanda.
+        category:
+          type: [string, "null"]
+          maxLength: 100
+          description: Categoria temática opcional.
+        courseName:
+          type: [string, "null"]
+          maxLength: 200
+          description: Nome do curso associado (obrigatório em fórum institucional, proibido em espaço físico).
+        authorId:
+          type: [string, "null"]
+          format: uuid
+          description: Identificador opcional do autor; se informado, deve coincidir com o usuário autenticado.
+    DemandResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - academicCenterId
+        - authorId
+        - forum
+        - description
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único estável da demanda.
+        academicCenterId:
+          type: string
+          format: uuid
+          description: Identificador do Centro Acadêmico responsável.
+        authorId:
+          type: string
+          format: uuid
+          description: Identificador do usuário autor da demanda.
+        forum:
+          type: string
+          enum: [institutional, physical_space]
+          description: Fórum ao qual a demanda pertence.
+        title:
+          type: [string, "null"]
+          maxLength: 200
+          description: Título ou resumo identificador da demanda, se houver.
+        description:
+          type: string
+          maxLength: 2000
+          description: Descrição detalhada do problema ou necessidade comunicada.
+        category:
+          type: [string, "null"]
+          maxLength: 100
+          description: Categoria temática, se informada.
+        courseName:
+          type: [string, "null"]
+          maxLength: 200
+          description: Curso associado à demanda (presente somente em demandas institucionais).
+        status:
+          type: string
+          enum:
+            - open
+            - in_analysis
+            - rejected
+            - forwarded_to_coordination
+            - in_execution
+            - resolved
+            - cancelled
+            - completed
+          description: Status atual da demanda no ciclo de vida.
+        createdAt:
+          type: string
+          format: date-time
+          description: Instante UTC de registro da demanda.
+        updatedAt:
+          type: string
+          format: date-time
+          description: Instante UTC da última modificação da demanda.
+    CreateDemandCommentRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: '\S'
+          description: Conteúdo textual do comentário ou resposta.
+        authorId:
+          type: [string, "null"]
+          format: uuid
+          description: Identificador opcional do autor; se informado, deve coincidir com o usuário autenticado.
+    DemandCommentResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - demandId
+        - authorId
+        - authorRole
+        - content
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único estável do comentário.
+        demandId:
+          type: string
+          format: uuid
+          description: Identificador da demanda a que pertence.
+        authorId:
+          type: string
+          format: uuid
+          description: Identificador do usuário autor do comentário.
+        authorRole:
+          type: string
+          enum: [student, ca_management]
+          description: Papel explícito do autor no momento da interação.
+        content:
+          type: string
+          maxLength: 2000
+          description: Conteúdo textual do comentário.
+        createdAt:
+          type: string
+          format: date-time
+          description: Instante UTC de publicação do comentário.
