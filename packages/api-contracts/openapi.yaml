@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: CApp API
-  version: 4.1.0
+  version: 4.2.0
   description: |
     Contrato das rotas atualmente implementadas no backend CApp.
     Os caminhos são servidos sem prefixo /v1.
@@ -17,6 +17,7 @@ info:
     é retornado apenas como suggestedEmail durante o cadastro, fora da evidência
     institucional, e não é persistido. Contas ativas preservam o e-mail escolhido.
     A partir de 4.1.0, as leituras do quadro eleitoral e de seu checkpoint são públicas.
+    A versão 4.2.0 acrescenta o cadastro privado da chave do eleitor antes da abertura.
 
     A verificação institucional valida um Firebase ID token e um Microsoft access
     token da mesma pessoa, consulta a instituição pelo tenant Microsoft, verifica
@@ -84,6 +85,75 @@ paths:
           description: Falha de consistência nas evidências armazenadas.
         "503":
           description: Falha ao ler o armazenamento eleitoral.
+
+  /elections/{id}/registration/me:
+    parameters:
+      - $ref: "#/components/parameters/ElectionId"
+    get:
+      operationId: getOwnElectionRegistration
+      tags: [Eleições]
+      summary: Consultar o cadastro e a participação da própria conta
+      description: O eleitor pode consultar a situação em outro dispositivo e após o encerramento.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      responses:
+        "200":
+          $ref: "#/components/responses/ElectionRegistration"
+        "400":
+          description: Identificador da eleição inválido.
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          $ref: "#/components/responses/AccountAccessDenied"
+        "404":
+          $ref: "#/components/responses/RegistrationNotFound"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          description: Autenticação ou armazenamento indisponível.
+    put:
+      operationId: registerOwnElectionKey
+      tags: [Eleições]
+      summary: Cadastrar a chave pública do eleitor antes da abertura
+      description: |
+        Assinar o payload com RSA-PSS/SHA-256 (MGF1-SHA-256, salt de 32 bytes)
+        sobre o prefixo CAPP-ELECTIONS/1 seguido de LF e do JSON canônico RFC 8785.
+        accountId é o UUID interno de GET /auth/session. Repetir o cadastro confirmado
+        com a mesma chave recupera a inscrição. O servidor mantém o vínculo original.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ElectionRegistrationProof"
+            examples:
+              signedRegistration:
+                externalValue: ./examples/election-voter-registration.json
+      responses:
+        "200":
+          $ref: "#/components/responses/ElectionRegistration"
+        "400":
+          description: Identificador inválido ou prova de posse inválida (invalid_registration_proof).
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: App Check, conta ou elegibilidade institucional recusados.
+        "404":
+          $ref: "#/components/responses/RegistrationNotFound"
+        "409":
+          description: Cadastro encerrado (registration_closed) ou chave diferente da original (registration_key_conflict).
+        "413":
+          description: O corpo excede 262144 bytes.
+        "415":
+          description: O servidor exige application/json.
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          description: Autenticação ou armazenamento indisponível.
 
   /elections/{id}/receipts/me:
     parameters:
@@ -471,6 +541,18 @@ components:
         type: string
         format: uuid
   responses:
+    ElectionRegistration:
+      description: Cadastro e participação da conta autenticada nesta eleição.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ElectionRegistrationStatus"
+    RegistrationNotFound:
+      description: Eleição desconhecida ou conta interna ainda não provisionada.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
     BoardNotFound:
       description: A eleição ainda não possui quadro publicado.
       content:
@@ -520,6 +602,44 @@ components:
         microsoft.com vinculada. Enviar um único Authorization: Bearer <ID_TOKEN>.
         O access token Microsoft é enviado separadamente no corpo da verificação.
   schemas:
+    ElectionRegistrationProof:
+      type: object
+      additionalProperties: false
+      required: [payload, signature]
+      properties:
+        payload:
+          type: object
+          additionalProperties: false
+          required: [version, kind, electionId, accountId, publicKey]
+          properties:
+            version: { type: integer, const: 1 }
+            kind: { type: string, const: voter-registration }
+            electionId:
+              $ref: "./elections/schemas.json#/$defs/Uuid"
+            accountId:
+              $ref: "./elections/schemas.json#/$defs/Uuid"
+            publicKey:
+              description: DER SubjectPublicKeyInfo RSA em Base64url sem padding.
+              $ref: "./elections/schemas.json#/$defs/Base64Url"
+        signature:
+          $ref: "./elections/schemas.json#/$defs/Base64Url"
+    ElectionRegistrationStatus:
+      type: object
+      additionalProperties: false
+      required: [voterId, publicKey, participated]
+      properties:
+        voterId:
+          description: Identificador eleitoral opaco, nulo antes do cadastro.
+          type: [string, "null"]
+          format: uuid
+        publicKey:
+          description: Chave pública cadastrada, nula antes do cadastro.
+          oneOf:
+            - $ref: "./elections/schemas.json#/$defs/Base64Url"
+            - type: "null"
+        participated:
+          description: A conta já possui voto confirmado nesta eleição.
+          type: boolean
     ElectionEvidence:
       type: object
       description: Envelope assinado do quadro eleitoral, com payload do protocolo v1.

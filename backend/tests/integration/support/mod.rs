@@ -25,6 +25,13 @@ impl TestDatabase {
     /// Falha o teste se Docker, a imagem, a conexão ou as migrations não estiverem
     /// disponíveis. Nenhum banco externo ao container é acessado.
     pub(super) async fn new() -> Self {
+        let db = Self::unmigrated().await;
+        MIGRATOR.run(&db.pool).await.unwrap();
+        db
+    }
+
+    /// Banco vazio para os cenários que exercitam uma atualização entre versões reais.
+    pub(super) async fn unmigrated() -> Self {
         let container = GenericImage::new("postgres", "17-alpine")
             .with_wait_for(WaitFor::message_on_stderr(
                 "database system is ready to accept connections",
@@ -44,7 +51,6 @@ impl TestDatabase {
             ))
             .await
             .unwrap();
-        MIGRATOR.run(&pool).await.unwrap();
         Self { pool, container }
     }
 

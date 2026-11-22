@@ -49,6 +49,7 @@ import '../infrastructure/firebase/firebase_app_check_setup.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../infrastructure/backend/backend_api.dart';
+import '../modules/elections/infrastructure/voter_registration_client.dart';
 import '../modules/identity/application/institutional_auth_service.dart';
 import '../modules/identity/identity.dart';
 import '../modules/identity/infrastructure/backend/backend_institutional_identity_gateway.dart';
@@ -78,6 +79,16 @@ final class AppDependencies {
 
   final BackendApi _backendApi;
   final FirebaseAccountAuth _accountAuth;
+
+  late final VoterRegistrationClient voterRegistration =
+      VoterRegistrationClient(_backendApi.voterRegistration, () {
+        final state = sessionController.state;
+        if (state is! SessionSignedIn ||
+            state.firebaseUid != _accountAuth.currentUserId) {
+          return null;
+        }
+        return state.user?.id;
+      });
 
   /// Coordenação exposta à interface pela API pública do módulo.
   ///

@@ -100,11 +100,12 @@ final votingSteps = <StepDefinition>[
   ),
   pendingStep(r'^"([^"]*)" está autenticada pela sua conta Firebase$'),
   pendingStep(
-    r'^"([^"]*)" não possui inscrição ou chave prévia nessa eleição$',
+    r'^"([^"]*)" cadastrou sua chave pública antes da abertura$',
   ),
   pendingStep(r'^registra seu primeiro voto na chapa "([^"]*)"$'),
+  pendingStep(r'^"([^"]*)" não possui chave cadastrada nessa eleição$'),
   pendingStep(
-    r'^a chave pública enviada na cédula é vinculada à conta autenticada de "([^"]*)"$',
+    r'^a assinatura da cédula confere com a chave cadastrada por "([^"]*)"$',
   ),
   pendingStep(r'^a chave privada permanece no dispositivo de "([^"]*)"$'),
   pendingStep(
@@ -124,9 +125,6 @@ final votingSteps = <StepDefinition>[
   ),
   pendingStep(
     r'^submete uma cédula assinada com sua chave local, indicando a chapa "([^"]*)"$',
-  ),
-  pendingStep(
-    r'^a assinatura digital é validada com a chave pública enviada na cédula de "([^"]*)"$',
   ),
   pendingStep(
     r'^a publicação não expõe escolha em claro nem aleatoriedade da cifragem$',

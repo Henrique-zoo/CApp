@@ -24,6 +24,7 @@
       "name": "Elegibilidade",
       "mechanisms": [
         "Firebase Auth",
+        "chave pública cadastrada com prova de posse antes da abertura",
         "vínculo institucional vigente no momento do novo voto",
         "voterId opaco vinculado à conta pelo backend"
       ],
@@ -201,12 +202,11 @@
     }
   ],
   "bddChanges": {
-    "features/eleicoes/votacao.feature": "Remover inscrição/chave anteriores à abertura; cobrir primeiro voto, Nulo, soma, dispositivo e vínculos. Automação funcional permanece pendente.",
+    "features/eleicoes/votacao.feature": "Exigir cadastro anterior à abertura e cobrir primeiro voto, Nulo, soma, dispositivo e vínculos. A integração do fluxo completo depende da #282.",
     "features/eleicoes/configuracao.feature": "Cobrir escolha entre votação secreta e identificada; chapa única e autoridades na modalidade secreta; adiamento, prorrogação e cancelamento sem apuração antecipada."
   },
   "academicDeviations": [
     "Confiança no backend.",
-    "Cadastro e chave do eleitor durante a primeira votação.",
     "App Check/cliente assumidos para validade individual, com guardrail agregado.",
     "Chapa única permitida.",
     "Votação e auditoria no CApp. O eleitor usa Firebase Auth e App Check, e a verificação das evidências é executada no dispositivo."

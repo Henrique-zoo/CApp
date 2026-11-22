@@ -25,10 +25,10 @@
 //! Um contexto de tela pode antecipar a decisão, mas o aceite precisa reavaliá-la.
 //!
 //! O dispositivo cifra cada opção com aleatoriedade nova e assina toda a cédula.
-//! A porta de aceite exige a chave pública esperada para a identidade autenticada.
-//! No fluxo acadêmico, o serviço de elegibilidade deve fornecê-la a partir do
-//! cadastro anterior à abertura. A primeira cédula aceita conserva o vínculo,
-//! e a conta pode recuperar o recibo em outro dispositivo depois de uma falha.
+//! Antes da abertura, a conta autenticada cadastra sua chave pública e prova a
+//! posse da chave privada. No aceite, o servidor obtém a chave cadastrada e
+//! revalida a evidência institucional na transação. A conta pode recuperar o
+//! recibo em outro dispositivo mesmo que o vínculo acadêmico tenha expirado.
 //!
 //! O armazenamento deve confirmar voto, participação, índice, cadeia, recibo e
 //! atualização do acumulador de cifras na mesma transação, com unicidade por

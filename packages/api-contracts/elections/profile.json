@@ -51,6 +51,7 @@
   "objectDigest": "SHA256(signatureInput), excluding the outer signature",
   "keyFingerprint": "SHA256(public key DER), lowercase hex",
   "signers": {
+    "voter-registration": "payload.publicKey, proof of possession for the authenticated account and election",
     "ballot": "payload.publicKey, bound by backend to the authenticated voter",
     "decryption-share": "signingKey of authorityId in the manifest",
     "otherKinds": "server signing key; manifest contains its public copy"
@@ -71,7 +72,7 @@
     "transport": "HTTPS obrigatório entre app e backend, com validação de confiança, validade e nome do servidor no cliente. Terminação TLS no Caddy; HTTP somente na rede privada do Compose, no mesmo host, sem exposição externa da porta do backend. Iniciar chamadas com credenciais diretamente em HTTPS. Um envelope assinado por mensagem JSON; exportação pública pode usar JSON Lines. Rejeitar chaves duplicadas, campos desconhecidos e strings escalares não canônicas.",
     "binary": "Decodificar Base64url e exigir que a recodificação sem padding seja igual à entrada. Chaves RSA usam DER SPKI canônico com OID rsaEncryption.",
     "serverKey": "A configuração confiável do backend fornece a chave do servidor. A autoassinatura do manifesto, isoladamente, não comprova sua origem.",
-    "eligibility": "Firebase identifica a conta; backend confere vínculo institucional vigente no instante do novo voto. Identificador eleitoral é opaco por conta/eleição; curso nunca é declaração do cliente.",
+    "eligibility": "A conta autenticada cadastra a chave pública com prova de posse antes da abertura. O backend confere a instituição e o curso da evidência vigente no cadastro e em cada novo voto. A cédula deve usar a chave cadastrada. Somente o identificador opaco por conta e eleição aparece no quadro.",
     "retries": "Autenticar primeiro. Mesma eleição, eleitor e submissionId com o mesmo ballotHash recuperam registro/recibo, inclusive após o encerramento. Outra cédula ou outra operação depois do aceite não cria voto novo.",
     "ordering": "A ordem de options e authorities publicada no manifesto é a referência imutável. IDs devem ser distintos; Nulo ocupa a última posição. Canonicalização não reordena arrays. Cifras, totais e contribuições seguem options.",
     "terminalStates": "Cancelamento manual somente antes de resultado final. Repetir o mesmo cancelamento é idempotente. Tallied, cancelled e annulled não reabrem. Incomplete ainda permite receber contribuições válidas.",

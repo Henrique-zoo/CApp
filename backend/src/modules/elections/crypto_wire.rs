@@ -332,6 +332,29 @@ pub fn verify_signed_object(
         .map_err(|_| CryptoWireError::Signature)
 }
 
+/// Prova privada de posse destinada à conta autenticada e à eleição da rota.
+pub fn verify_registration(
+    raw: &[u8],
+    election_id: Uuid,
+    account_id: Uuid,
+) -> Result<String, CryptoWireError> {
+    let envelope = parse_strict_json(raw)?;
+    let payload = &envelope["payload"];
+    exact_fields(
+        payload,
+        &["version", "kind", "electionId", "accountId", "publicKey"],
+    )?;
+    version_kind(payload, "voter-registration")?;
+    if uuid_value(string(payload, "electionId")?, false)? != election_id
+        || uuid_value(string(payload, "accountId")?, false)? != account_id
+    {
+        return Err(CryptoWireError::Context);
+    }
+    let public_key = string(payload, "publicKey")?;
+    verify_signed_object(&envelope, public_key)?;
+    Ok(public_key.to_owned())
+}
+
 fn group_parameters() -> &'static (BigUint, BigUint) {
     static PARAMETERS: std::sync::OnceLock<(BigUint, BigUint)> = std::sync::OnceLock::new();
     PARAMETERS.get_or_init(|| {
