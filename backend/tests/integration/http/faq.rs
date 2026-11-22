@@ -149,30 +149,36 @@ async fn provision_user_officially(
     email: &str,
     course_name: &str,
 ) -> Uuid {
+    let graph_token = format!("graph-token-{uid}");
+
     Mock::given(method("GET"))
         .and(path("/v1.0/organization"))
-        .and(header("authorization", "Bearer graph-token"))
+        .and(header("authorization", format!("Bearer {graph_token}")))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"value":[{"id":tenant}]})))
+        .expect(1)
         .mount(graph)
         .await;
 
     Mock::given(method("POST"))
         .and(path("/v1.0/me/checkMemberGroups"))
-        .and(header("authorization", "Bearer graph-token"))
+        .and(header("authorization", format!("Bearer {graph_token}")))
         .and(body_json(json!({"groupIds":[group]})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"value":[group]})))
+        .expect(1)
         .mount(graph)
         .await;
 
     Mock::given(method("GET"))
         .and(path("/v1.0/me"))
-        .and(header("authorization", "Bearer graph-token"))
+        .and(header("authorization", format!("Bearer {graph_token}")))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "id": object,
             "displayName": "Estudante Teste",
             "mail": email,
+            "userPrincipalName": email,
             "jobTitle": course_name
         })))
+        .expect(1)
         .mount(graph)
         .await;
 
@@ -182,7 +188,7 @@ async fn provision_user_officially(
         "POST",
         "/auth/institutional/verify",
         Some(&jwt),
-        Some(json!({"microsoftAccessToken": "graph-token"})),
+        Some(json!({"microsoftAccessToken": graph_token})),
     )
     .await;
 
@@ -191,6 +197,9 @@ async fn provision_user_officially(
         StatusCode::OK,
         "verificação institucional oficial falhou: {body}"
     );
+
+    graph.verify().await;
+    graph.reset().await;
 
     Uuid::parse_str(body["user"]["id"].as_str().expect("id do usuario")).expect("uuid valido")
 }
