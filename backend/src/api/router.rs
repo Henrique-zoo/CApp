@@ -77,6 +77,7 @@ use crate::api::state::AppState;
 pub fn create_router(state: AppState) -> Router {
     Router::new()
         .merge(crate::modules::identity::api::router())
+        .merge(crate::modules::faq::api::router())
         .route("/health", get(|| async { "O servidor está saudável." }))
         .route(
             "/ready",

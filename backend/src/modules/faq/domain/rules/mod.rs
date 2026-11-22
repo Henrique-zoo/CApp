@@ -1,4 +1,3 @@
-//! Espaço reservado para regras do módulo de perguntas frequentes.
-//!
-//! Ainda não define validações. As invariantes de negócio implementadas aqui
-//! deverão ser independentes dos mecanismos de transporte e persistência.
+//! Regras e validações de negócio do módulo de FAQ.
+
+pub mod faq_entry;
