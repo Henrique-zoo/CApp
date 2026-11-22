@@ -20,6 +20,8 @@ use crate::api::state::AppState;
 /// | --- | --- |
 /// | `POST /auth/institutional/verify` | Valida as credenciais, persiste a confirmação e retorna perfil e validade. |
 /// | `GET /health` | Retorna HTTP 200 e `O servidor está saudável.` sem consultar dependências. |
+/// | `GET /elections/{id}/board` | Exporta uma fotografia consistente do quadro público. |
+/// | `GET /elections/{id}/board/checkpoint` | Distribui a âncora assinada da posição atual do quadro. |
 /// | `GET /ready` | Executa `SELECT 1 AS ok` no pool; retorna HTTP 200 no sucesso e HTTP 503 em erro ou timeout. |
 ///
 /// A prontidão limita a espera pela aquisição da conexão e execução da consulta
@@ -31,7 +33,7 @@ use crate::api::state::AppState;
 /// # Retorno
 ///
 /// Router já associado a [AppState], com fiscalização App Check nas rotas de
-/// negócio. GET/HEAD /health e /ready são públicos. Construir não inicia servidor,
+/// negócio. Saúde, prontidão e evidências do quadro são públicas. Construir não inicia servidor,
 /// aplica migrations ou consulta chaves remotas. Após a comprovação do aplicativo,
 /// cada rota continua verificando a identidade Firebase e suas regras de acesso.
 ///
@@ -77,6 +79,7 @@ use crate::api::state::AppState;
 pub fn create_router(state: AppState) -> Router {
     Router::new()
         .merge(crate::modules::identity::api::router())
+        .merge(crate::modules::elections::api::protected_receipt_routes())
         .route("/health", get(|| async { "O servidor está saudável." }))
         .route(
             "/ready",
@@ -104,5 +107,6 @@ pub fn create_router(state: AppState) -> Router {
             state.clone(),
             super::app_check::require_app_check,
         ))
+        .merge(crate::modules::elections::api::public_board_routes())
         .with_state(state)
 }

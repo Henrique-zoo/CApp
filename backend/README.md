@@ -187,8 +187,8 @@ clones do mesmo adaptador compartilham somente essa instância. O adaptador
 Firebase Auth só reutiliza chaves com prazo HTTP explícito; App Check usa fallback
 e teto de seis horas. Ambos rejeitam `kid` duplicado e adotam o menor max-age
 quando há diretivas repetidas. Claims e erros específicos continuam separados.
-O middleware que exige App Check pertence à API global, pois protege as rotas
-de todos os módulos. A comprovação do aplicativo não concede permissões de
+O middleware que exige App Check pertence à API global e protege as rotas
+autenticadas. A comprovação do aplicativo não concede permissões de
 usuário nem cria uma entidade institucional adicional.
 
 A implementação cobre verificação institucional com validade de 120 dias,
@@ -360,6 +360,44 @@ Inclui:
 
 Responsável pelo sistema eleitoral.
 
+O quadro público usa a porta `ElectionBoard` e o adaptador `PgElectionBoard`.
+A abertura recebe um manifesto e um calendário assinados. O aceite recebe a
+conta autenticada, o identificador eleitoral e a chave pública esperada do
+eleitor, além dos bytes da cédula assinada. O serviço chamador fornece esses
+dados a partir da identidade e do cadastro. A chave privada do eleitor fica
+no dispositivo. A chave de assinatura do servidor é injetada no adaptador.
+
+O banco confirma participação, registro, recibo e produto das cifras numa
+transação. Nova tentativa da mesma operação recupera o recibo já emitido.
+O índice começa em 1 e o primeiro registro aponta para o hash do manifesto.
+O aplicativo pode recuperar o recibo em `GET /elections/{id}/receipts/me`
+com os tokens Firebase e App Check da sessão, inclusive após o encerramento.
+Ao encerrar, o backend assina o termo com a contagem e a cabeça finais, além
+do agregado que as autoridades usarão na apuração.
+
+Cada eleitor ou autoridade pode guardar uma evidência em seu próprio dispositivo.
+Use a URL HTTPS da instalação e o UUID do manifesto na variável `BOARD`.
+No exemplo, `servidor.spki` contém a chave pública de confiança em DER/SPKI
+codificada em base64url, obtida da comissão por um canal independente.
+Na raiz do repositório, com OpenSSL e as dependências de
+`packages/api-contracts/requirements-ci.txt`, execute:
+
+```sh
+curl --fail "$BOARD/checkpoint" --output recibo-anterior.json
+# Em uma consulta posterior, baixe o quadro da mesma eleição.
+curl --fail "$BOARD" --output quadro.json
+python packages/api-contracts/scripts/audit_election_board.py \
+  --snapshot quadro.json --trusted-key servidor.spki \
+  --checkpoint observacao-local.json --receipt recibo-anterior.json
+```
+
+`BOARD` termina em `/elections/{id}/board`. O checkpoint público é o último
+recibo assinado, ou o manifesto antes do primeiro voto. Para comparar a inclusão
+de um voto, conserve seu recibo original. Um recibo no índice 5 permite conferir
+o histórico até 5. Comparar esse recibo com um quadro de oito entradas deixa as
+três últimas sem confirmação externa. A primeira execução do auditor sem
+observação anterior guarda uma referência local para as próximas comparações.
+
 Inclui:
 
 - comissão eleitoral;
@@ -497,10 +535,11 @@ Exemplos:
 
 # Firebase App Check
 
-As rotas de negócio exigem `X-Firebase-AppCheck`, além de `Authorization: Bearer`.
+As rotas autenticadas exigem `X-Firebase-AppCheck`, além de `Authorization: Bearer`.
 O adaptador está em `src/modules/identity/infrastructure/firebase/app_check.rs`,
 consumido pelo middleware global de `src/api/app_check.rs`.
-GET/HEAD `/health` e `/ready` são públicos. O middleware valida assinatura RS256,
+GET/HEAD `/health`, `/ready` e as duas leituras do quadro eleitoral são públicos.
+O middleware valida assinatura RS256,
 `typ=JWT`, emissor e audiência do número do projeto, expiração, emissão e App ID
 permitido. A lista de apps é obrigatória; não há modo de aceitação sem atestado.
 Tokens ausentes/recusados retornam 403 (`app_check_required`/`app_check_invalid`);

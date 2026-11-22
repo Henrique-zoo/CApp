@@ -6,10 +6,9 @@
 //! em `packages/api-contracts/elections/` fixa formatos, bytes, parâmetros e vetores
 //! antes de as quatro frentes implementarem seus próprios adaptadores.
 //!
-//! Este módulo conserva os espaços de [`api`], [`application`], [`domain`] e
-//! [`infrastructure`]. Os contratos da issue #377 não implementam endpoints,
-//! entidades, persistência ou telas: essas entregas pertencem às issues consumidoras.
-//! O validador das fixtures é uma ferramenta de teste do contrato.
+//! [`application::board`] define a porta transacional da #381. [`infrastructure`]
+//! persiste as evidências em PostgreSQL e [`api`] publica o quadro e os recibos.
+//! [`crypto_wire`] verifica os envelopes do contrato da #377.
 //!
 //! # Participação no fluxo
 //!
@@ -25,11 +24,11 @@
 //! O identificador eleitoral público é opaco por conta/eleição; não é o UID Firebase.
 //! Um contexto de tela pode antecipar a decisão, mas o aceite precisa reavaliá-la.
 //!
-//! Não há inscrição ou chave do eleitor obrigatória antes da abertura. Ao preparar
-//! a cédula, o dispositivo gera uma chave RSA, cifra cada opção com aleatoriedade
-//! nova e assina o payload completo. A primeira cédula aceita associa a chave à
-//! conta autenticada. O pacote assinado permite repetição após falha de transporte;
-//! consulta de participação/recibo em outro dispositivo dispensa a chave privada.
+//! O dispositivo cifra cada opção com aleatoriedade nova e assina toda a cédula.
+//! A porta de aceite exige a chave pública esperada para a identidade autenticada.
+//! No fluxo acadêmico, o serviço de elegibilidade deve fornecê-la a partir do
+//! cadastro anterior à abertura. A primeira cédula aceita conserva o vínculo,
+//! e a conta pode recuperar o recibo em outro dispositivo depois de uma falha.
 //!
 //! O armazenamento deve confirmar voto, participação, índice, cadeia, recibo e
 //! atualização do acumulador de cifras na mesma transação, com unicidade por
@@ -194,5 +193,6 @@
 
 pub mod api;
 pub mod application;
+pub mod crypto_wire;
 pub mod domain;
 pub mod infrastructure;

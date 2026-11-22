@@ -1,6 +1,5 @@
-//! Camada de persistência prevista para o módulo de eleições.
-//!
-//! [`repository`] reserva os adaptadores de acesso aos dados desse domínio.
-//! Ainda não existem consultas ou implementações de repositório.
+//! Persistência transacional e exportação pública do quadro eleitoral.
 
 pub mod repository;
+
+pub use repository::PgElectionBoard;
