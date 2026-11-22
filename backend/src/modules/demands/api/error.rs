@@ -23,6 +23,12 @@ impl From<DemandApplicationError> for ApiError {
                 format!("Centro Acadêmico '{ca_id}' não está ativo"),
                 Some(json!({ "academic_center_id": ca_id })),
             ),
+            DemandApplicationError::DemandNotFound(demand_id) => Self::new(
+                StatusCode::NOT_FOUND,
+                "demand_not_found",
+                format!("Demanda '{demand_id}' não encontrada"),
+                Some(json!({ "demand_id": demand_id })),
+            ),
             DemandApplicationError::StudentMembershipRequired => Self::new(
                 StatusCode::FORBIDDEN,
                 "student_membership_required",
@@ -32,7 +38,7 @@ impl From<DemandApplicationError> for ApiError {
             DemandApplicationError::UserNotPermittedInCa => Self::new(
                 StatusCode::FORBIDDEN,
                 "user_not_permitted_in_ca",
-                "Usuário sem permissão para criar demandas neste Centro Acadêmico",
+                "Usuário sem permissão para atuar no Centro Acadêmico informado",
                 None,
             ),
             DemandApplicationError::CourseNameRequired => Self::new(
@@ -51,6 +57,12 @@ impl From<DemandApplicationError> for ApiError {
                     "academic_center_id": ca_id,
                     "course_name": course_name,
                 })),
+            ),
+            DemandApplicationError::OpinionRequired => Self::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "opinion_required",
+                "Parecer ou justificativa é obrigatório para alterar o status da demanda",
+                None,
             ),
             DemandApplicationError::InvalidDemand(domain_err) => {
                 let (status, code) = match &domain_err {
@@ -75,6 +87,12 @@ impl From<DemandApplicationError> for ApiError {
                     }
                     DemandError::CourseNameTooLong { .. } => {
                         (StatusCode::UNPROCESSABLE_ENTITY, "course_name_too_long")
+                    }
+                    DemandError::EmptyComment => {
+                        (StatusCode::UNPROCESSABLE_ENTITY, "opinion_required")
+                    }
+                    DemandError::CommentTooLong { .. } => {
+                        (StatusCode::UNPROCESSABLE_ENTITY, "comment_too_long")
                     }
                     DemandError::CourseNotAllowedForPhysicalSpace => (
                         StatusCode::UNPROCESSABLE_ENTITY,

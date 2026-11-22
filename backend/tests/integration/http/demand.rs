@@ -120,6 +120,40 @@ async fn get_request(app: &Router, path: &str, token: Option<&str>) -> (StatusCo
     )
 }
 
+/// Envia uma requisição PATCH em memória e interpreta seu corpo e status code.
+async fn patch_request(
+    app: &Router,
+    path: &str,
+    token: Option<&str>,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let builder = Request::builder().uri(path).method("PATCH");
+
+    let builder = if let Some(tok) = token {
+        builder.header("authorization", format!("Bearer {tok}"))
+    } else {
+        builder
+    };
+
+    let req = if let Some(body) = body {
+        builder
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    } else {
+        builder.body(Body::empty()).unwrap()
+    };
+
+    let response = app.clone().oneshot(req).await.unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
 /// Helper para configurar o ambiente de banco e mock JWKS.
 async fn setup_app(db: &TestDatabase) -> (Router, MockServer) {
     let jwks = MockServer::start().await;
@@ -1199,6 +1233,701 @@ async fn should_reject_listing_with_invalid_status_query_param_with_400() {
 
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error"]["code"], "invalid_status");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_allow_ca_manager_to_update_physical_space_demand_status_with_opinion() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let manager_uid = "manager-user-caer";
+    let manager_obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _manager_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Engenharia de Redes",
+        "CAER",
+        manager_uid,
+        manager_obj,
+        true,
+        Some("Engenharia de Redes"),
+        true, // is_ca_manager = true
+        "active",
+    )
+    .await;
+
+    let manager_jwt = token_with_email(manager_uid, manager_obj, "241098765@aluno.unb.br");
+
+    // Cria demanda de espaço físico
+    let create_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (c_status, c_body) = request(
+        &app,
+        &create_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "title": "Reparo no ar-condicionado",
+            "description": "Ar-condicionado da sala do CA parou de refrigerar"
+        })),
+    )
+    .await;
+    assert_eq!(c_status, StatusCode::CREATED, "{c_body}");
+    let demand_id = c_body["id"].as_str().unwrap();
+
+    // 1. Gestor altera status para em análise com parecer
+    let patch_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/status");
+    let (p1_status, p1_body) = patch_request(
+        &app,
+        &patch_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "status": "in_analysis",
+            "opinion": "Demanda recebida pela diretoria de patrimônio para triagem"
+        })),
+    )
+    .await;
+
+    assert_eq!(p1_status, StatusCode::OK, "{p1_body}");
+    assert_eq!(p1_body["status"], "in_analysis");
+    assert_eq!(p1_body["id"], demand_id);
+    let history_1 = p1_body["statusHistory"].as_array().expect("statusHistory");
+    assert_eq!(history_1.len(), 2);
+    assert_eq!(history_1[1]["toStatus"], "in_analysis");
+    assert_eq!(
+        history_1[1]["opinion"],
+        "Demanda recebida pela diretoria de patrimônio para triagem"
+    );
+
+    // 2. Gestor conclui demanda via rota de conveniência sem prefixo /api/v1
+    let alias_patch_path = format!("/academic-centers/{ca_id}/demands/{demand_id}/status");
+    let (p2_status, p2_body) = patch_request(
+        &app,
+        &alias_patch_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "status": "completed",
+            "opinion": "Manutenção realizada e equipamento em pleno funcionamento"
+        })),
+    )
+    .await;
+
+    assert_eq!(p2_status, StatusCode::OK, "{p2_body}");
+    assert_eq!(p2_body["status"], "completed");
+    let history_2 = p2_body["statusHistory"].as_array().expect("statusHistory");
+    assert_eq!(history_2.len(), 3);
+    assert_eq!(history_2[2]["toStatus"], "completed");
+    assert_eq!(
+        history_2[2]["opinion"],
+        "Manutenção realizada e equipamento em pleno funcionamento"
+    );
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_allow_ca_manager_to_forward_institutional_demand_to_coordination() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let manager_uid = "manager-inst-caer";
+    let manager_obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _manager_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Engenharia de Redes",
+        "CAER",
+        manager_uid,
+        manager_obj,
+        true,
+        Some("Engenharia de Redes"),
+        true, // is_ca_manager = true
+        "active",
+    )
+    .await;
+
+    let manager_jwt = token_with_email(manager_uid, manager_obj, "241098765@aluno.unb.br");
+
+    // Cria demanda institucional
+    let create_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (c_status, c_body) = request(
+        &app,
+        &create_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "forum": "institutional",
+            "courseName": "Engenharia de Redes",
+            "title": "Revisão da ementa de Redes 1",
+            "description": "Necessidade de atualização bibliográfica e de laboratório"
+        })),
+    )
+    .await;
+    assert_eq!(c_status, StatusCode::CREATED, "{c_body}");
+    let demand_id = c_body["id"].as_str().unwrap();
+
+    // 1. Move para in_analysis
+    let patch_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/status");
+    let (p1_status, p1_body) = patch_request(
+        &app,
+        &patch_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "status": "in_analysis",
+            "opinion": "Triagem acadêmica inicial concluída"
+        })),
+    )
+    .await;
+    assert_eq!(p1_status, StatusCode::OK, "{p1_body}");
+
+    // 2. Encaminha à coordenação
+    let (p2_status, p2_body) = patch_request(
+        &app,
+        &patch_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "status": "forwarded_to_coordination",
+            "opinion": "Pauta formalizada no processo SEI e remetida à coordenação do curso"
+        })),
+    )
+    .await;
+
+    assert_eq!(p2_status, StatusCode::OK, "{p2_body}");
+    assert_eq!(p2_body["status"], "forwarded_to_coordination");
+
+    // 3. Conclui com parecer de resolução
+    let (p3_status, p3_body) = patch_request(
+        &app,
+        &patch_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "status": "completed",
+            "opinion": "Coordenação aprovou a atualização da ementa para o próximo semestre"
+        })),
+    )
+    .await;
+
+    assert_eq!(p3_status, StatusCode::OK, "{p3_body}");
+    assert_eq!(p3_body["status"], "completed");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_forwarding_physical_space_demand_to_coordination_with_422() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let manager_uid = "manager-ps-reject";
+    let manager_obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _manager_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        manager_uid,
+        manager_obj,
+        true,
+        Some("Ciência da Computação"),
+        true, // is_ca_manager = true
+        "active",
+    )
+    .await;
+
+    let manager_jwt = token_with_email(manager_uid, manager_obj, "241098765@aluno.unb.br");
+
+    let create_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (c_status, c_body) = request(
+        &app,
+        &create_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "description": "Porta danificada"
+        })),
+    )
+    .await;
+    assert_eq!(c_status, StatusCode::CREATED, "{c_body}");
+    let demand_id = c_body["id"].as_str().unwrap();
+
+    let patch_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/status");
+    let (p_status, p_body) = patch_request(
+        &app,
+        &patch_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "status": "forwarded_to_coordination",
+            "opinion": "Solicitando auxílio da coordenação para manutenção"
+        })),
+    )
+    .await;
+
+    assert_eq!(p_status, StatusCode::UNPROCESSABLE_ENTITY, "{p_body}");
+    assert_eq!(
+        p_body["error"]["code"],
+        "coordination_forwarding_not_allowed"
+    );
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_status_update_without_opinion_with_422() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let manager_uid = "manager-no-opinion";
+    let manager_obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _manager_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        manager_uid,
+        manager_obj,
+        true,
+        Some("Ciência da Computação"),
+        true,
+        "active",
+    )
+    .await;
+
+    let manager_jwt = token_with_email(manager_uid, manager_obj, "241098765@aluno.unb.br");
+
+    let create_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (c_status, c_body) = request(
+        &app,
+        &create_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "description": "Lâmpada queimada"
+        })),
+    )
+    .await;
+    assert_eq!(c_status, StatusCode::CREATED, "{c_body}");
+    let demand_id = c_body["id"].as_str().unwrap();
+
+    let patch_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/status");
+    let (p_status, p_body) = patch_request(
+        &app,
+        &patch_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "status": "in_analysis",
+            "opinion": "   "
+        })),
+    )
+    .await;
+
+    assert_eq!(p_status, StatusCode::UNPROCESSABLE_ENTITY, "{p_body}");
+    assert_eq!(p_body["error"]["code"], "opinion_required");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_status_update_by_regular_student_without_management_role_with_403() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let inst_id = Uuid::new_v4();
+    let tenant_id = Uuid::new_v4();
+    let group_id = Uuid::new_v4();
+
+    sqlx::query(
+        "INSERT INTO institution (id, name, acronym, microsoft_tenant_id, microsoft_student_group_id, status)
+         VALUES ($1, 'Universidade de Brasília', 'UnB', $2, $3, 'active')",
+    )
+    .bind(inst_id)
+    .bind(tenant_id)
+    .bind(group_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let manager_uid = "ca-creator-user";
+    let manager_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO app_user (id, firebase_uid, status) VALUES ($1, $2, 'incomplete')")
+        .bind(manager_id)
+        .bind(manager_uid)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+    let ca_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, created_by_id, name, acronym, description, status)
+         VALUES ($1, $2, $3, 'Centro Acadêmico de Engenharia de Redes', 'CAER', 'CA', 'active')",
+    )
+    .bind(ca_id)
+    .bind(inst_id)
+    .bind(manager_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    // Cria estudante regular sem cargo de gestão
+    let student_uid = "student-regular-no-manager";
+    let student_obj = Uuid::new_v4();
+    let student_id = create_test_student(
+        &db.pool,
+        inst_id,
+        student_uid,
+        student_obj,
+        true,
+        Some("Engenharia de Redes"),
+    )
+    .await;
+
+    let student_jwt = token_with_email(student_uid, student_obj, "241098766@aluno.unb.br");
+
+    // Estudante cria demanda
+    let create_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (c_status, c_body) = request(
+        &app,
+        &create_path,
+        Some(&student_jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "description": "Reparo na fechadura"
+        })),
+    )
+    .await;
+    assert_eq!(c_status, StatusCode::CREATED, "{c_body}");
+    let demand_id = c_body["id"].as_str().unwrap();
+
+    // Estudante tenta atualizar status da demanda -> recusado com 403
+    let patch_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/status");
+    let (p_status, p_body) = patch_request(
+        &app,
+        &patch_path,
+        Some(&student_jwt),
+        Some(json!({
+            "status": "in_analysis",
+            "opinion": "Tentativa não autorizada por discente regular"
+        })),
+    )
+    .await;
+
+    assert_eq!(p_status, StatusCode::FORBIDDEN, "{p_body}");
+    assert_eq!(p_body["error"]["code"], "user_not_permitted_in_ca");
+
+    let _ = student_id;
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_status_update_by_manager_of_another_ca_with_403() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    // CA 1: CAER
+    let manager_1_uid = "manager-caer";
+    let manager_1_obj = Uuid::new_v4();
+    let (inst_id, ca_1_id, _manager_1_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Engenharia de Redes",
+        "CAER",
+        manager_1_uid,
+        manager_1_obj,
+        true,
+        Some("Engenharia de Redes"),
+        true,
+        "active",
+    )
+    .await;
+
+    let manager_1_jwt = token_with_email(manager_1_uid, manager_1_obj, "241098765@aluno.unb.br");
+
+    // Cria demanda no CA 1
+    let create_path = format!("/api/v1/academic-centers/{ca_1_id}/demands");
+    let (c_status, c_body) = request(
+        &app,
+        &create_path,
+        Some(&manager_1_jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "description": "Limpeza necessária na sala de reuniões"
+        })),
+    )
+    .await;
+    assert_eq!(c_status, StatusCode::CREATED, "{c_body}");
+    let demand_id = c_body["id"].as_str().unwrap();
+
+    // CA 2: CACC, com gestor 2
+    let manager_2_uid = "manager-cacc";
+    let manager_2_obj = Uuid::new_v4();
+    let manager_2_id = create_test_student(
+        &db.pool,
+        inst_id,
+        manager_2_uid,
+        manager_2_obj,
+        true,
+        Some("Ciência da Computação"),
+    )
+    .await;
+
+    let ca_2_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, created_by_id, name, acronym, description, status)
+         VALUES ($1, $2, $3, 'Centro Acadêmico de Ciência da Computação', 'CACC', 'CA 2', 'active')",
+    )
+    .bind(ca_2_id)
+    .bind(inst_id)
+    .bind(manager_2_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let manager_2_jwt = token_with_email(manager_2_uid, manager_2_obj, "241098766@aluno.unb.br");
+
+    // Gestor 2 tenta atualizar a demanda do CA 1 -> 403
+    let patch_path = format!("/api/v1/academic-centers/{ca_1_id}/demands/{demand_id}/status");
+    let (p_status, p_body) = patch_request(
+        &app,
+        &patch_path,
+        Some(&manager_2_jwt),
+        Some(json!({
+            "status": "in_analysis",
+            "opinion": "Intervenção cruzada indevida entre CAs"
+        })),
+    )
+    .await;
+
+    assert_eq!(p_status, StatusCode::FORBIDDEN, "{p_body}");
+    assert_eq!(p_body["error"]["code"], "user_not_permitted_in_ca");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_status_update_for_demand_belonging_to_another_ca_with_404() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    // CA 1: CAER com gestor 1
+    let manager_1_uid = "manager-caer-iso";
+    let manager_1_obj = Uuid::new_v4();
+    let (inst_id, ca_1_id, _manager_1_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Engenharia de Redes",
+        "CAER",
+        manager_1_uid,
+        manager_1_obj,
+        true,
+        Some("Engenharia de Redes"),
+        true,
+        "active",
+    )
+    .await;
+
+    let manager_1_jwt = token_with_email(manager_1_uid, manager_1_obj, "241098765@aluno.unb.br");
+
+    // CA 2: CACC com gestor 2
+    let manager_2_uid = "manager-cacc-iso";
+    let manager_2_obj = Uuid::new_v4();
+    let manager_2_id = create_test_student(
+        &db.pool,
+        inst_id,
+        manager_2_uid,
+        manager_2_obj,
+        true,
+        Some("Ciência da Computação"),
+    )
+    .await;
+
+    let ca_2_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, created_by_id, name, acronym, description, status)
+         VALUES ($1, $2, $3, 'Centro Acadêmico de Ciência da Computação', 'CACC', 'CA 2', 'active')",
+    )
+    .bind(ca_2_id)
+    .bind(inst_id)
+    .bind(manager_2_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let manager_2_jwt = token_with_email(manager_2_uid, manager_2_obj, "241098766@aluno.unb.br");
+
+    // Cria demanda no CA 2
+    let create_path_ca2 = format!("/api/v1/academic-centers/{ca_2_id}/demands");
+    let (c_status, c_body) = request(
+        &app,
+        &create_path_ca2,
+        Some(&manager_2_jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "description": "Demanda criada e restrita ao CA 2"
+        })),
+    )
+    .await;
+    assert_eq!(c_status, StatusCode::CREATED, "{c_body}");
+    let demand_ca2_id = c_body["id"].as_str().unwrap();
+
+    // Gestor 1 tenta atualizar a demanda do CA 2 passando a URL do CA 1 -> 404 (isolamento estrito)
+    let patch_path_ca1 =
+        format!("/api/v1/academic-centers/{ca_1_id}/demands/{demand_ca2_id}/status");
+    let (p_status, p_body) = patch_request(
+        &app,
+        &patch_path_ca1,
+        Some(&manager_1_jwt),
+        Some(json!({
+            "status": "in_analysis",
+            "opinion": "Tentando atualizar demanda de outro CA"
+        })),
+    )
+    .await;
+
+    assert_eq!(p_status, StatusCode::NOT_FOUND, "{p_body}");
+    assert_eq!(p_body["error"]["code"], "demand_not_found");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_allow_getting_demand_details_and_history_with_200() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let manager_uid = "manager-get-details";
+    let manager_obj = Uuid::new_v4();
+    let (inst_id, ca_id, _manager_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Engenharia de Redes",
+        "CAER",
+        manager_uid,
+        manager_obj,
+        true,
+        Some("Engenharia de Redes"),
+        true,
+        "active",
+    )
+    .await;
+
+    let manager_jwt = token_with_email(manager_uid, manager_obj, "241098765@aluno.unb.br");
+
+    // Cria demanda
+    let create_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (c_status, c_body) = request(
+        &app,
+        &create_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "title": "Reparo de tomada",
+            "description": "Tomada com defeito no laboratório"
+        })),
+    )
+    .await;
+    assert_eq!(c_status, StatusCode::CREATED, "{c_body}");
+    let demand_id = c_body["id"].as_str().unwrap();
+
+    // Atualiza status para in_analysis
+    let patch_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/status");
+    let (p_status, _) = patch_request(
+        &app,
+        &patch_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "status": "in_analysis",
+            "opinion": "Técnico acionado para avaliação"
+        })),
+    )
+    .await;
+    assert_eq!(p_status, StatusCode::OK);
+
+    // Consulta detalhes da demanda por outro estudante qualquer
+    let student_uid = "student-observer";
+    let student_obj = Uuid::new_v4();
+    create_test_student(
+        &db.pool,
+        inst_id,
+        student_uid,
+        student_obj,
+        true,
+        Some("Engenharia Elétrica"),
+    )
+    .await;
+
+    let student_jwt = token_with_email(student_uid, student_obj, "241098766@aluno.unb.br");
+
+    let get_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}");
+    let (g_status, g_body) = get_request(&app, &get_path, Some(&student_jwt)).await;
+
+    assert_eq!(g_status, StatusCode::OK, "{g_body}");
+    assert_eq!(g_body["id"], demand_id);
+    assert_eq!(g_body["status"], "in_analysis");
+    let history = g_body["statusHistory"].as_array().expect("statusHistory");
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[1]["toStatus"], "in_analysis");
+    assert_eq!(history[1]["opinion"], "Técnico acionado para avaliação");
+
+    // Consulta pela rota de conveniência sem /api/v1
+    let alias_get_path = format!("/academic-centers/{ca_id}/demands/{demand_id}");
+    let (ga_status, ga_body) = get_request(&app, &alias_get_path, Some(&student_jwt)).await;
+    assert_eq!(ga_status, StatusCode::OK, "{ga_body}");
+    assert_eq!(ga_body["id"], demand_id);
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_student_of_another_course_from_getting_institutional_demand_details() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let manager_uid = "manager-inst-details";
+    let manager_obj = Uuid::new_v4();
+    let (inst_id, ca_id, _manager_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Engenharia de Redes",
+        "CAER",
+        manager_uid,
+        manager_obj,
+        true,
+        Some("Engenharia de Redes"),
+        true,
+        "active",
+    )
+    .await;
+
+    let manager_jwt = token_with_email(manager_uid, manager_obj, "241098765@aluno.unb.br");
+
+    // Cria demanda institucional do curso de Engenharia de Redes
+    let create_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (c_status, c_body) = request(
+        &app,
+        &create_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "forum": "institutional",
+            "courseName": "Engenharia de Redes",
+            "title": "Ajuste na grade curricular",
+            "description": "Discussão de pré-requisitos"
+        })),
+    )
+    .await;
+    assert_eq!(c_status, StatusCode::CREATED, "{c_body}");
+    let demand_id = c_body["id"].as_str().unwrap();
+
+    // Estudante de Letras (não pertence ao curso atendido pelo CA)
+    let outsider_uid = "student-outsider-letras";
+    let outsider_obj = Uuid::new_v4();
+    create_test_student(
+        &db.pool,
+        inst_id,
+        outsider_uid,
+        outsider_obj,
+        true,
+        Some("Letras"),
+    )
+    .await;
+
+    let outsider_jwt = token_with_email(outsider_uid, outsider_obj, "241098766@aluno.unb.br");
+
+    let get_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}");
+    let (g_status, g_body) = get_request(&app, &get_path, Some(&outsider_jwt)).await;
+
+    assert_eq!(g_status, StatusCode::FORBIDDEN, "{g_body}");
+    assert_eq!(g_body["error"]["code"], "user_not_permitted_in_ca");
 
     db.close().await;
 }

@@ -65,6 +65,81 @@ pub struct ListDemandsQueryParams {
     pub page_size: Option<usize>,
 }
 
+/// Payload de requisição para atualização de status de uma demanda pela gestão.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDemandStatusRequest {
+    /// Novo status pretendido para a demanda no ciclo de vida.
+    pub status: String,
+
+    /// Parecer ou justificativa obrigatória da alteração de status.
+    #[serde(
+        default,
+        alias = "reason",
+        alias = "comment",
+        alias = "justificativa",
+        alias = "parecer"
+    )]
+    pub opinion: Option<String>,
+}
+
+/// Representação serializada pública de um registro de histórico de status da demanda.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DemandStatusHistoryResponse {
+    /// Identificador do registro de histórico.
+    pub id: Uuid,
+
+    /// Identificador da demanda vinculada.
+    pub demand_id: Uuid,
+
+    /// Status anterior à alteração, se houver.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_status: Option<String>,
+
+    /// Novo status assumido pela demanda.
+    pub to_status: String,
+
+    /// Identificador do usuário que realizou a alteração.
+    pub changed_by_id: Uuid,
+
+    /// Parecer ou justificativa registrada (comentário da transição).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+
+    /// Parecer registrado (alias semântico para comment).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opinion: Option<String>,
+
+    /// Instante UTC da alteração de status.
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<&crate::modules::demands::domain::entities::DemandStatusHistoryEntry>
+    for DemandStatusHistoryResponse
+{
+    fn from(entry: &crate::modules::demands::domain::entities::DemandStatusHistoryEntry) -> Self {
+        Self {
+            id: entry.id(),
+            demand_id: entry.demand_id(),
+            from_status: entry.from_status().map(|s| s.as_str().to_string()),
+            to_status: entry.to_status().as_str().to_string(),
+            changed_by_id: entry.changed_by_id(),
+            comment: entry.comment().map(String::from),
+            opinion: entry.comment().map(String::from),
+            created_at: entry.created_at(),
+        }
+    }
+}
+
+impl From<crate::modules::demands::domain::entities::DemandStatusHistoryEntry>
+    for DemandStatusHistoryResponse
+{
+    fn from(entry: crate::modules::demands::domain::entities::DemandStatusHistoryEntry) -> Self {
+        Self::from(&entry)
+    }
+}
+
 /// Representação serializada pública de uma demanda acadêmica ou de espaço físico.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -104,10 +179,26 @@ pub struct DemandResponse {
 
     /// Instante da última modificação de estado em UTC.
     pub updated_at: DateTime<Utc>,
+
+    /// Histórico de alterações de status da demanda, presente em consultas detalhadas e após transição.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_history: Option<Vec<DemandStatusHistoryResponse>>,
 }
 
 impl From<&Demand> for DemandResponse {
     fn from(demand: &Demand) -> Self {
+        let status_history = if demand.status_history().is_empty() {
+            None
+        } else {
+            Some(
+                demand
+                    .status_history()
+                    .iter()
+                    .map(DemandStatusHistoryResponse::from)
+                    .collect(),
+            )
+        };
+
         Self {
             id: demand.id(),
             academic_center_id: demand.academic_center_id(),
@@ -120,6 +211,7 @@ impl From<&Demand> for DemandResponse {
             status: demand.status().as_str().to_string(),
             created_at: demand.created_at(),
             updated_at: demand.updated_at(),
+            status_history,
         }
     }
 }

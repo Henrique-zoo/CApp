@@ -56,6 +56,9 @@ pub enum DemandApplicationError {
     /// O Centro Acadêmico indicado não está ativo.
     AcademicCenterInactive(Uuid),
 
+    /// A demanda indicada não foi encontrada ou não pertence ao Centro Acadêmico informado.
+    DemandNotFound(Uuid),
+
     /// O autor não possui vínculo estudantil ativo na instituição.
     StudentMembershipRequired,
 
@@ -72,6 +75,9 @@ pub enum DemandApplicationError {
         /// Nome do curso não representado.
         course_name: String,
     },
+
+    /// A alteração de status exige justificativa ou parecer explicativo não vazio.
+    OpinionRequired,
 
     /// Violação de regra de negócio ou invariante do domínio de demandas.
     InvalidDemand(DemandError),
@@ -91,6 +97,9 @@ impl fmt::Display for DemandApplicationError {
             }
             Self::AcademicCenterInactive(id) => {
                 write!(f, "Centro Acadêmico '{id}' não está ativo")
+            }
+            Self::DemandNotFound(id) => {
+                write!(f, "demanda '{id}' não encontrada")
             }
             Self::StudentMembershipRequired => {
                 write!(
@@ -114,6 +123,12 @@ impl fmt::Display for DemandApplicationError {
                 write!(
                     f,
                     "o curso '{course_name}' não é representado pelo Centro Acadêmico '{ca_id}'"
+                )
+            }
+            Self::OpinionRequired => {
+                write!(
+                    f,
+                    "parecer ou justificativa é obrigatório para alterar o status da demanda"
                 )
             }
             Self::InvalidDemand(err) => write!(f, "{err}"),

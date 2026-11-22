@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: CApp API
-  version: 4.2.0
+  version: 4.3.0
   description: |
     Contrato das rotas atualmente implementadas no backend CApp.
     Os caminhos legados de autenticação e perfil são servidos sem prefixo /v1;
@@ -21,6 +21,9 @@ info:
     e de espaço físico em POST /api/v1/academic-centers/{academic_center_id}/demands.
     Desde 4.2.0, adicionada rota para listagem e filtragem de demandas nos fóruns institucional
     e de espaço físico em GET /api/v1/academic-centers/{academic_center_id}/demands.
+    Desde 4.3.0, adicionadas rotas para consulta detalhada de demandas e atualização de status
+    com registro de histórico em GET /api/v1/academic-centers/{academic_center_id}/demands/{demand_id}
+    e PATCH /api/v1/academic-centers/{academic_center_id}/demands/{demand_id}/status.
 
     A verificação institucional valida um Firebase ID token e um Microsoft access
     token da mesma pessoa, consulta a instituição pelo tenant Microsoft, verifica
@@ -803,6 +806,368 @@ paths:
           $ref: "#/components/responses/AccountInternalError"
         "503":
           $ref: "#/components/responses/AccountServiceUnavailable"
+  /api/v1/academic-centers/{academic_center_id}/demands/{demand_id}:
+    get:
+      operationId: getDemandDetails
+      tags: [Demandas]
+      summary: Consultar detalhes e histórico de uma demanda
+      description: |
+        Recupera os detalhes de uma demanda específica associada ao Centro Acadêmico,
+        incluindo o histórico completo de transições de status com pareceres e autores.
+
+        Exige autenticação institucional com vínculo estudantil ativo. Demandas sobre o
+        espaço físico são acessíveis a qualquer discente; demandas do fórum institucional
+        são restritas aos estudantes dos cursos atendidos e à gestão do CA.
+      parameters:
+        - name: academic_center_id
+          in: path
+          required: true
+          description: Identificador único do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+        - name: demand_id
+          in: path
+          required: true
+          description: Identificador único da demanda a ser consultada.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Detalhes e histórico da demanda recuperados com sucesso.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DemandResponse"
+              examples:
+                demandDetailsWithHistory:
+                  value:
+                    id: "11111111-1111-1111-1111-111111111111"
+                    academicCenterId: "00000000-0000-0000-0000-000000000001"
+                    authorId: "22222222-2222-2222-2222-222222222222"
+                    forum: physical_space
+                    title: Reparo no ar-condicionado
+                    description: Ar-condicionado da sala não refrigera
+                    category: Infraestrutura
+                    courseName: null
+                    status: in_analysis
+                    createdAt: "2026-11-20T12:00:00Z"
+                    updatedAt: "2026-11-20T13:00:00Z"
+                    statusHistory:
+                      - id: "33333333-3333-3333-3333-333333333333"
+                        demandId: "11111111-1111-1111-1111-111111111111"
+                        fromStatus: null
+                        toStatus: open
+                        changedById: "22222222-2222-2222-2222-222222222222"
+                        comment: null
+                        opinion: null
+                        createdAt: "2026-11-20T12:00:00Z"
+                      - id: "44444444-4444-4444-4444-444444444444"
+                        demandId: "11111111-1111-1111-1111-111111111111"
+                        fromStatus: open
+                        toStatus: in_analysis
+                        changedById: "55555555-5555-5555-5555-555555555555"
+                        comment: Análise técnica iniciada
+                        opinion: Análise técnica iniciada
+                        createdAt: "2026-11-20T13:00:00Z"
+        "400":
+          description: Identificador de Centro Acadêmico ou demanda em formato inválido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: bad_request
+                  message: Requisição inválida
+                  details: null
+        "401":
+          description: Credenciais ausentes ou inválidas.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                missingCredentials:
+                  value:
+                    error:
+                      code: unauthorized
+                      message: Autenticação necessária
+                      details: null
+        "403":
+          description: |
+            Acesso negado. Possíveis códigos:
+            - student_membership_required: usuário sem vínculo estudantil ativo;
+            - user_not_permitted_in_ca: usuário sem permissão para acessar demanda institucional deste CA.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                studentMembershipRequired:
+                  value:
+                    error:
+                      code: student_membership_required
+                      message: Vínculo estudantil ativo é obrigatório para registrar demandas
+                      details: null
+                userNotPermittedInCa:
+                  value:
+                    error:
+                      code: user_not_permitted_in_ca
+                      message: Usuário sem permissão para atuar no Centro Acadêmico informado
+                      details: null
+        "404":
+          description: |
+            Identificador não encontrado. Possíveis códigos:
+            - academic_center_not_found: Centro Acadêmico não encontrado;
+            - demand_not_found: demanda não encontrada ou pertencente a outro CA.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                academicCenterNotFound:
+                  value:
+                    error:
+                      code: academic_center_not_found
+                      message: Centro Acadêmico não encontrado
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+                demandNotFound:
+                  value:
+                    error:
+                      code: demand_not_found
+                      message: Demanda não encontrada
+                      details:
+                        demand_id: "11111111-1111-1111-1111-111111111111"
+        "422":
+          description: academic_center_inactive — Centro Acadêmico encontra-se desativado/arquivado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: academic_center_inactive
+                  message: Centro Acadêmico inativo
+                  details:
+                    academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+  /api/v1/academic-centers/{academic_center_id}/demands/{demand_id}/status:
+    patch:
+      operationId: updateDemandStatus
+      tags: [Demandas]
+      summary: Atualizar status de demanda pela gestão com parecer
+      description: |
+        Atualiza o status de atendimento de uma demanda vinculada ao Centro Acadêmico.
+        Apenas membros com cargo de gestão ativo no respectivo CA possuem permissão.
+        Exige obrigatoriamente parecer explicativo (`opinion`), valida a matriz de
+        transições de ciclo de vida e proíbe encaminhamento à coordenação para o fórum
+        de espaço físico. Registra nova entrada no histórico de status de forma atômica.
+      parameters:
+        - name: academic_center_id
+          in: path
+          required: true
+          description: Identificador único do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+        - name: demand_id
+          in: path
+          required: true
+          description: Identificador único da demanda a ser atualizada.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        description: Novo status pretendido e parecer explicativo da alteração.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDemandStatusRequest"
+            examples:
+              inAnalysis:
+                summary: Iniciar análise da demanda
+                value:
+                  status: in_analysis
+                  opinion: Demanda recebida pela diretoria acadêmica para triagem
+              completed:
+                summary: Concluir demanda com parecer resolutivo
+                value:
+                  status: completed
+                  opinion: Manutenção realizada e equipamento em pleno funcionamento
+      responses:
+        "200":
+          description: Status da demanda atualizado com sucesso e transição registrada no histórico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DemandResponse"
+              examples:
+                updatedDemandInAnalysis:
+                  summary: Demanda atualizada para em análise
+                  value:
+                    id: "11111111-1111-1111-1111-111111111111"
+                    academicCenterId: "00000000-0000-0000-0000-000000000001"
+                    authorId: "22222222-2222-2222-2222-222222222222"
+                    forum: physical_space
+                    title: Reparo no ar-condicionado
+                    description: Ar-condicionado da sala não refrigera
+                    category: Infraestrutura
+                    courseName: null
+                    status: in_analysis
+                    createdAt: "2026-11-20T12:00:00Z"
+                    updatedAt: "2026-11-20T13:00:00Z"
+                    statusHistory:
+                      - id: "33333333-3333-3333-3333-333333333333"
+                        demandId: "11111111-1111-1111-1111-111111111111"
+                        fromStatus: null
+                        toStatus: open
+                        changedById: "22222222-2222-2222-2222-222222222222"
+                        comment: null
+                        opinion: null
+                        createdAt: "2026-11-20T12:00:00Z"
+                      - id: "44444444-4444-4444-4444-444444444444"
+                        demandId: "11111111-1111-1111-1111-111111111111"
+                        fromStatus: open
+                        toStatus: in_analysis
+                        changedById: "55555555-5555-5555-5555-555555555555"
+                        comment: Demanda recebida pela diretoria acadêmica para triagem
+                        opinion: Demanda recebida pela diretoria acadêmica para triagem
+                        createdAt: "2026-11-20T13:00:00Z"
+        "400":
+          description: |
+            bad_request — JSON malformado ou ausente.
+            invalid_status — status de destino desconhecido ou inválido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                badRequest:
+                  value:
+                    error:
+                      code: bad_request
+                      message: Requisição inválida
+                      details: null
+                invalidStatus:
+                  value:
+                    error:
+                      code: invalid_status
+                      message: Status de demanda inválido
+                      details: null
+        "401":
+          description: Credenciais ausentes ou inválidas.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                missingCredentials:
+                  value:
+                    error:
+                      code: unauthorized
+                      message: Autenticação necessária
+                      details: null
+        "403":
+          description: |
+            Acesso negado. Possíveis códigos:
+            - student_membership_required: usuário sem vínculo estudantil ativo;
+            - user_not_permitted_in_ca: usuário sem cargo de gestão ativo no Centro Acadêmico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                studentMembershipRequired:
+                  value:
+                    error:
+                      code: student_membership_required
+                      message: Vínculo estudantil ativo é obrigatório para registrar demandas
+                      details: null
+                userNotPermittedInCa:
+                  value:
+                    error:
+                      code: user_not_permitted_in_ca
+                      message: Usuário sem permissão para atuar no Centro Acadêmico informado
+                      details: null
+        "404":
+          description: |
+            Identificador não encontrado. Possíveis códigos:
+            - academic_center_not_found: Centro Acadêmico não encontrado;
+            - demand_not_found: demanda não encontrada ou pertencente a outro CA.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                academicCenterNotFound:
+                  value:
+                    error:
+                      code: academic_center_not_found
+                      message: Centro Acadêmico não encontrado
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+                demandNotFound:
+                  value:
+                    error:
+                      code: demand_not_found
+                      message: Demanda não encontrada
+                      details:
+                        demand_id: "11111111-1111-1111-1111-111111111111"
+        "422":
+          description: |
+            Violação de regras de validação ou restrições de ciclo de vida. Possíveis códigos:
+            - opinion_required: parecer ou justificativa não informado ou vazio;
+            - comment_too_long: parecer excede o limite máximo de 1000 caracteres;
+            - coordination_forwarding_not_allowed: demandas de espaço físico não podem ser encaminhadas à coordenação;
+            - invalid_status_transition: transição de ciclo de vida inválida perante as regras do fórum;
+            - academic_center_inactive: Centro Acadêmico desativado/arquivado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                opinionRequired:
+                  value:
+                    error:
+                      code: opinion_required
+                      message: Parecer ou justificativa é obrigatório para alterar o status da demanda
+                      details: null
+                commentTooLong:
+                  value:
+                    error:
+                      code: comment_too_long
+                      message: O comentário de alteração de status excede o limite de 1000 caracteres
+                      details: null
+                coordinationForwardingNotAllowed:
+                  value:
+                    error:
+                      code: coordination_forwarding_not_allowed
+                      message: demandas do espaço físico não podem ser encaminhadas à coordenação do curso
+                      details: null
+                invalidStatusTransition:
+                  value:
+                    error:
+                      code: invalid_status_transition
+                      message: transição de status inválida
+                      details: null
+                academicCenterInactive:
+                  value:
+                    error:
+                      code: academic_center_inactive
+                      message: Centro Acadêmico inativo
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
 
 components:
   responses:
@@ -1159,3 +1524,75 @@ components:
           type: string
           format: date-time
           description: Instante UTC da última modificação da demanda.
+        statusHistory:
+          type: array
+          description: Histórico cronológico de alterações de status da demanda, presente em consultas detalhadas.
+          items:
+            $ref: "#/components/schemas/DemandStatusHistoryResponse"
+    DemandStatusHistoryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - demandId
+        - toStatus
+        - changedById
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único do registro de histórico.
+        demandId:
+          type: string
+          format: uuid
+          description: Identificador da demanda vinculada.
+        fromStatus:
+          type: [string, "null"]
+          enum: [open, in_analysis, forwarded_to_coordination, completed, null]
+          description: Status anterior à alteração, se houver.
+        toStatus:
+          type: string
+          enum: [open, in_analysis, forwarded_to_coordination, completed]
+          description: Novo status assumido pela demanda.
+        changedById:
+          type: string
+          format: uuid
+          description: Identificador do usuário responsável pela alteração.
+        comment:
+          type: [string, "null"]
+          maxLength: 1000
+          description: Parecer, justificativa ou comentário explicativo da transição de status.
+        opinion:
+          type: [string, "null"]
+          maxLength: 1000
+          description: Parecer registrado na alteração de status (alias semântico para comment).
+        createdAt:
+          type: string
+          format: date-time
+          description: Instante UTC da alteração de status.
+    UpdateDemandStatusRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - opinion
+      properties:
+        status:
+          type: string
+          enum: [open, in_analysis, forwarded_to_coordination, completed]
+          description: Novo status pretendido para a demanda no ciclo de vida.
+        opinion:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          pattern: '\S'
+          description: Parecer ou justificativa obrigatória da alteração de status.
+        reason:
+          type: string
+          maxLength: 1000
+          description: Alias para parecer ou justificativa.
+        comment:
+          type: string
+          maxLength: 1000
+          description: Alias para parecer ou justificativa.

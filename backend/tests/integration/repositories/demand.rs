@@ -848,3 +848,128 @@ async fn should_list_and_filter_demands_with_ca_isolation_in_postgres_repository
 
     db.close().await;
 }
+
+#[tokio::test]
+async fn should_update_demand_status_and_persist_history_entry_atomically() {
+    use backend::modules::demands::{
+        application::ports::DemandRepository, infrastructure::PostgresDemandRepository,
+    };
+
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "Universidade de Brasília").await;
+    let ca_id = create_test_ca(
+        &db.pool,
+        institution_id,
+        "Centro Acadêmico de Redes",
+        "CAER",
+    )
+    .await;
+    let author_id = create_test_user(&db.pool, "student-author-status-1").await;
+    let manager_id = create_test_user(&db.pool, "manager-status-1").await;
+
+    let repo = PostgresDemandRepository::new(db.pool.clone());
+    let now = chrono::DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).unwrap();
+
+    let mut demand = Demand::new(
+        Uuid::new_v4(),
+        ca_id,
+        author_id,
+        DemandForum::PhysicalSpace,
+        Some("Reparo no ar-condicionado".to_string()),
+        "Ar-condicionado da sala não refrigera".to_string(),
+        Some("Infraestrutura".to_string()),
+        None,
+        now,
+    )
+    .unwrap();
+
+    repo.create(&demand)
+        .await
+        .expect("deve criar demanda inicial");
+
+    // Reconstitui com status inicial
+    let retrieved = repo
+        .find_by_id(demand.id())
+        .await
+        .unwrap()
+        .expect("demanda criada deve existir");
+    assert_eq!(retrieved.status(), DemandStatus::Open);
+    assert_eq!(retrieved.status_history().len(), 1);
+    assert_eq!(
+        retrieved.status_history()[0].to_status(),
+        DemandStatus::Open
+    );
+
+    // Gestor avança status para in_analysis com parecer
+    let opinion_1 = "Análise técnica iniciada";
+    let at_1 = now + chrono::Duration::hours(1);
+    demand
+        .transition_to(
+            DemandStatus::InAnalysis,
+            manager_id,
+            Some(opinion_1.to_string()),
+            at_1,
+        )
+        .unwrap();
+
+    repo.update(&demand)
+        .await
+        .expect("deve atualizar status no repositório");
+
+    // Verifica persistência e reconstituição do histórico
+    let updated_1 = repo
+        .find_by_id(demand.id())
+        .await
+        .unwrap()
+        .expect("demanda deve existir");
+    assert_eq!(updated_1.status(), DemandStatus::InAnalysis);
+    assert_eq!(updated_1.updated_at(), at_1);
+    assert_eq!(updated_1.status_history().len(), 2);
+    assert_eq!(
+        updated_1.status_history()[1].from_status(),
+        Some(DemandStatus::Open)
+    );
+    assert_eq!(
+        updated_1.status_history()[1].to_status(),
+        DemandStatus::InAnalysis
+    );
+    assert_eq!(updated_1.status_history()[1].changed_by_id(), manager_id);
+    assert_eq!(updated_1.status_history()[1].comment(), Some(opinion_1));
+
+    // Gestor conclui demanda com parecer resolutivo
+    let opinion_2 = "Manutenção realizada e equipamento testado com sucesso";
+    let at_2 = at_1 + chrono::Duration::hours(2);
+    demand
+        .transition_to(
+            DemandStatus::Completed,
+            manager_id,
+            Some(opinion_2.to_string()),
+            at_2,
+        )
+        .unwrap();
+
+    repo.update(&demand)
+        .await
+        .expect("deve concluir demanda no repositório");
+
+    let updated_2 = repo
+        .find_by_id(demand.id())
+        .await
+        .unwrap()
+        .expect("demanda deve existir");
+    assert_eq!(updated_2.status(), DemandStatus::Completed);
+    assert_eq!(updated_2.updated_at(), at_2);
+    assert_eq!(updated_2.status_history().len(), 3);
+    assert_eq!(
+        updated_2.status_history()[2].from_status(),
+        Some(DemandStatus::InAnalysis)
+    );
+    assert_eq!(
+        updated_2.status_history()[2].to_status(),
+        DemandStatus::Completed
+    );
+    assert_eq!(updated_2.status_history()[2].changed_by_id(), manager_id);
+    assert_eq!(updated_2.status_history()[2].comment(), Some(opinion_2));
+
+    db.close().await;
+}
