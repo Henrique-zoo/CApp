@@ -296,15 +296,15 @@ fn then_o_registro_identifica_valor_como_eleitora_e_valor_como_sua_escolha(
     pending_step("o registro identifica {string} como eleitora e {string} como sua escolha");
 }
 
-/// Pendente: o registro público contém a identificação do eleitor, a cédula cifrada e a assinatura do eleitor.
+/// Pendente: o registro público contém o identificador da conta CApp do eleitor, a cédula cifrada e a assinatura do eleitor.
 #[then(
-    regex = r#"^o registro público contém a identificação do eleitor, a cédula cifrada e a assinatura do eleitor$"#
+    regex = r#"^o registro público contém o identificador da conta CApp do eleitor, a cédula cifrada e a assinatura do eleitor$"#
 )]
-fn then_o_registro_publico_contem_a_identificacao_do_eleitor_a_cedula_cifrada_e_a_assinatura_do_eleitor(
+fn then_o_registro_publico_contem_o_identificador_da_conta_e_a_cedula_assinada(
     _world: &mut AppWorld,
 ) {
     pending_step(
-        "o registro público contém a identificação do eleitor, a cédula cifrada e a assinatura do eleitor",
+        "o registro público contém o identificador da conta CApp do eleitor, a cédula cifrada e a assinatura do eleitor",
     );
 }
 
@@ -436,16 +436,16 @@ fn when_registra_seu_primeiro_voto_na_chapa_valor(_world: &mut AppWorld, _value_
     pending_step("registra seu primeiro voto na chapa \"{string}\"");
 }
 
-/// Pendente: a chave pública enviada na cédula é vinculada à conta autenticada de "{string}".
+/// Pendente: a chave pública da cédula é gravada no registro de participação de "{string}" nessa eleição.
 #[then(
-    regex = r#"^a chave pública enviada na cédula é vinculada à conta autenticada de "([^"]*)"$"#
+    regex = r#"^a chave pública da cédula é gravada no registro de participação de "([^"]*)" nessa eleição$"#
 )]
-fn then_a_chave_publica_enviada_na_cedula_e_vinculada_a_conta_autenticada_de_valor(
+fn then_a_chave_publica_da_cedula_e_gravada_na_participacao_de_valor(
     _world: &mut AppWorld,
     _value_1: String,
 ) {
     pending_step(
-        "a chave pública enviada na cédula é vinculada à conta autenticada de \"{string}\"",
+        "a chave pública da cédula é gravada no registro de participação de \"{string}\" nessa eleição",
     );
 }
 
@@ -486,20 +486,24 @@ fn given_valor_esta_autenticada_e_atende_aos_criterios_de_elegibilidade(
     pending_step("\"{string}\" está autenticada e atende aos critérios de elegibilidade");
 }
 
-/// Pendente: "{string}" envia uma cédula com o identificador eleitoral de "{string}".
-#[when(regex = r#"^"([^"]*)" envia uma cédula com o identificador eleitoral de "([^"]*)"$"#)]
-fn when_valor_envia_uma_cedula_com_o_identificador_eleitoral_de_valor(
+/// Pendente: "{string}" envia uma cédula com o identificador da conta CApp de "{string}".
+#[when(regex = r#"^"([^"]*)" envia uma cédula com o identificador da conta CApp de "([^"]*)"$"#)]
+fn when_valor_envia_uma_cedula_com_o_identificador_da_conta_de_valor(
     _world: &mut AppWorld,
     _value_1: String,
     _value_2: String,
 ) {
-    pending_step("\"{string}\" envia uma cédula com o identificador eleitoral de \"{string}\"");
+    pending_step("\"{string}\" envia uma cédula com o identificador da conta CApp de \"{string}\"");
 }
 
-/// Pendente: a cédula é recusada porque seu eleitor diverge da conta autenticada.
-#[then(regex = r#"^a cédula é recusada porque seu eleitor diverge da conta autenticada$"#)]
-fn then_a_cedula_e_recusada_porque_seu_eleitor_diverge_da_conta_autenticada(_world: &mut AppWorld) {
-    pending_step("a cédula é recusada porque seu eleitor diverge da conta autenticada");
+/// Pendente: a cédula é recusada porque o identificador da cédula diverge da conta autenticada.
+#[then(
+    regex = r#"^a cédula é recusada porque o identificador da cédula diverge da conta autenticada$"#
+)]
+fn then_a_cedula_e_recusada_porque_a_conta_diverge_da_autenticacao(_world: &mut AppWorld) {
+    pending_step(
+        "a cédula é recusada porque o identificador da cédula diverge da conta autenticada",
+    );
 }
 
 /// Pendente: submete uma cédula assinada com sua chave local, indicando a chapa "{string}".

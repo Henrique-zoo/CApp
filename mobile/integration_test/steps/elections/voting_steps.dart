@@ -65,7 +65,7 @@ final votingSteps = <StepDefinition>[
     r'^o registro identifica "([^"]*)" como eleitora e "([^"]*)" como sua escolha$',
   ),
   pendingStep(
-    r'^o registro público contém a identificação do eleitor, a cédula cifrada e a assinatura do eleitor$',
+    r'^o registro público contém o identificador da conta CApp do eleitor, a cédula cifrada e a assinatura do eleitor$',
   ),
   pendingStep(r'^o servidor fornece um recibo assinado da cédula recebida$'),
   pendingStep(
@@ -104,7 +104,7 @@ final votingSteps = <StepDefinition>[
   ),
   pendingStep(r'^registra seu primeiro voto na chapa "([^"]*)"$'),
   pendingStep(
-    r'^a chave pública enviada na cédula é vinculada à conta autenticada de "([^"]*)"$',
+    r'^a chave pública da cédula é gravada no registro de participação de "([^"]*)" nessa eleição$',
   ),
   pendingStep(r'^a chave privada permanece no dispositivo de "([^"]*)"$'),
   pendingStep(
@@ -117,10 +117,10 @@ final votingSteps = <StepDefinition>[
     r'^"([^"]*)" está autenticada e atende aos critérios de elegibilidade$',
   ),
   pendingStep(
-    r'^"([^"]*)" envia uma cédula com o identificador eleitoral de "([^"]*)"$',
+    r'^"([^"]*)" envia uma cédula com o identificador da conta CApp de "([^"]*)"$',
   ),
   pendingStep(
-    r'^a cédula é recusada porque seu eleitor diverge da conta autenticada$',
+    r'^a cédula é recusada porque o identificador da cédula diverge da conta autenticada$',
   ),
   pendingStep(
     r'^submete uma cédula assinada com sua chave local, indicando a chapa "([^"]*)"$',
