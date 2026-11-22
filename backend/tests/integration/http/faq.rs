@@ -336,6 +336,8 @@ async fn http_faq_creation_flows_and_authorization() {
     assert_eq!(body["category"], "Apoio Acadêmico");
     assert_eq!(body["academicCenterId"], active_ca_id.to_string());
     assert_eq!(body["createdBy"], manager_user_id.to_string());
+    let created_faq_id =
+        Uuid::parse_str(body["id"].as_str().expect("id da entrada")).expect("uuid valido");
 
     // CENÁRIO B: Alias sem /api/v1 também funciona (201 Created)
     let alias_payload = json!({
@@ -354,6 +356,8 @@ async fn http_faq_creation_flows_and_authorization() {
 
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body["question"], "Qual o horário de atendimento do CA?");
+    let alias_faq_id =
+        Uuid::parse_str(body["id"].as_str().expect("id da entrada")).expect("uuid valido");
 
     // CENÁRIO C: Usuário sem cargo de gestão no CA é recusado (403 user_not_permitted_in_ca)
     let (status, body) = request(
@@ -456,4 +460,367 @@ async fn http_faq_creation_flows_and_authorization() {
 
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
     assert_eq!(body["error"]["code"], "unauthorized");
+
+    // 4. Cadastra perguntas frequentes em outros CAs para validação de isolamento e status
+    let other_faq_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO faq_entry (id, academic_center_id, question, answer, category, created_by, updated_by, created_at, updated_at) \
+         VALUES ($1, $2, 'Pergunta do CA de Matemática?', 'Resposta do CA de Matemática.', NULL, $3, $3, $4, $4)",
+    )
+    .bind(other_faq_id)
+    .bind(other_ca_id)
+    .bind(other_creator_id)
+    .bind(now)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let inactive_faq_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO faq_entry (id, academic_center_id, question, answer, category, created_by, updated_by, created_at, updated_at) \
+         VALUES ($1, $2, 'Pergunta do CA Inativo?', 'Resposta do CA Inativo.', NULL, $3, $3, $4, $4)",
+    )
+    .bind(inactive_faq_id)
+    .bind(inactive_ca_id)
+    .bind(manager_user_id)
+    .bind(now)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    // CENÁRIO J: Edição com sucesso via PATCH /api/v1/academic-centers/{ca_id}/faq/{entry_id} (200 OK)
+    let update_payload = json!({
+        "question": "Como solicitar apoio pedagógico e acadêmico?",
+        "answer": "A solicitação deve ser feita pela plataforma online do CA.",
+        "category": "Apoio e Atendimento"
+    });
+
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{created_faq_id}"),
+        Some(&manager_jwt),
+        Some(update_payload),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["id"], created_faq_id.to_string());
+    assert_eq!(body["academicCenterId"], active_ca_id.to_string());
+    assert_eq!(
+        body["question"],
+        "Como solicitar apoio pedagógico e acadêmico?"
+    );
+    assert_eq!(
+        body["answer"],
+        "A solicitação deve ser feita pela plataforma online do CA."
+    );
+    assert_eq!(body["category"], "Apoio e Atendimento");
+    assert_eq!(body["updatedBy"], manager_user_id.to_string());
+
+    // CENÁRIO K: Edição via alias sem /api/v1 (200 OK)
+    let alias_update_payload = json!({
+        "question": "Qual o horário de atendimento presencial do CA?",
+        "answer": "De segunda a sexta das 10h às 19h."
+    });
+
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/academic-centers/{active_ca_id}/faq/{alias_faq_id}"),
+        Some(&manager_jwt),
+        Some(alias_update_payload),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["question"],
+        "Qual o horário de atendimento presencial do CA?"
+    );
+    assert_eq!(body["answer"], "De segunda a sexta das 10h às 19h.");
+
+    // CENÁRIO L: Edição parcial (somente resposta) preservando pergunta e categoria (200 OK)
+    let partial_update_payload = json!({
+        "answer": "Horário atualizado: seg a sex das 08h às 20h."
+    });
+
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{alias_faq_id}"),
+        Some(&manager_jwt),
+        Some(partial_update_payload),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["question"],
+        "Qual o horário de atendimento presencial do CA?"
+    );
+    assert_eq!(
+        body["answer"],
+        "Horário atualizado: seg a sex das 08h às 20h."
+    );
+
+    // CENÁRIO M: Tentativa de edição por estudante sem cargo de gestão (403 user_not_permitted_in_ca)
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{created_faq_id}"),
+        Some(&student_jwt),
+        Some(json!({"question": "Tentativa de alteração não autorizada"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "user_not_permitted_in_ca");
+
+    // CENÁRIO N: Isolamento entre CAs na edição: gestor do CA 1 tenta editar entrada do CA 2 (403 ou 404)
+    // N.1: Passando rota do CA 2 onde não tem gestão -> 403
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/academic-centers/{other_ca_id}/faq/{other_faq_id}"),
+        Some(&manager_jwt),
+        Some(json!({"question": "Tentativa invasão CA 2"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "user_not_permitted_in_ca");
+
+    // N.2: Passando rota do seu próprio CA ativo, mas ID de FAQ do CA 2 -> 404 faq_entry_not_found
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{other_faq_id}"),
+        Some(&manager_jwt),
+        Some(json!({"question": "Tentativa cruzada"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"]["code"], "faq_entry_not_found");
+
+    // CENÁRIO O: Edição de FAQ inexistente (404 faq_entry_not_found)
+    let non_existent_faq_id = Uuid::new_v4();
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{non_existent_faq_id}"),
+        Some(&manager_jwt),
+        Some(json!({"question": "Pergunta fantasma"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"]["code"], "faq_entry_not_found");
+
+    // CENÁRIO P: Edição em CA inexistente (404 academic_center_not_found)
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/academic-centers/{non_existent_ca_id}/faq/{created_faq_id}"),
+        Some(&manager_jwt),
+        Some(json!({"question": "CA inexistente"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"]["code"], "academic_center_not_found");
+
+    // CENÁRIO Q: Edição em CA inativo (422 academic_center_inactive)
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/academic-centers/{inactive_ca_id}/faq/{inactive_faq_id}"),
+        Some(&manager_jwt),
+        Some(json!({"question": "Edição em CA inativo"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "academic_center_inactive");
+
+    // CENÁRIO R: Edição com campos inválidos (422 empty_question / empty_answer)
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{created_faq_id}"),
+        Some(&manager_jwt),
+        Some(json!({"question": "   "})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "empty_question");
+
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{created_faq_id}"),
+        Some(&manager_jwt),
+        Some(json!({"answer": "   "})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "empty_answer");
+
+    // CENÁRIO S: Edição com body vazio {} (400 bad_request)
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{created_faq_id}"),
+        Some(&manager_jwt),
+        Some(json!({})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "bad_request");
+
+    // CENÁRIO T: Edição sem token (401 unauthorized)
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{created_faq_id}"),
+        None,
+        Some(json!({"question": "Sem token"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert_eq!(body["error"]["code"], "unauthorized");
+
+    // CENÁRIO U: Tentativa de remoção por estudante sem cargo de gestão (403 user_not_permitted_in_ca)
+    let (status, body) = request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{alias_faq_id}"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "user_not_permitted_in_ca");
+
+    // CENÁRIO V: Isolamento entre CAs na remoção
+    // V.1: Gestor do CA 1 tenta remover na rota do CA 2 -> 403 user_not_permitted_in_ca
+    let (status, body) = request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/academic-centers/{other_ca_id}/faq/{other_faq_id}"),
+        Some(&manager_jwt),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "user_not_permitted_in_ca");
+
+    // V.2: Gestor do CA 1 tenta remover no CA 1 um FAQ que pertence ao CA 2 -> 404 faq_entry_not_found
+    let (status, body) = request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{other_faq_id}"),
+        Some(&manager_jwt),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"]["code"], "faq_entry_not_found");
+
+    // CENÁRIO W: Remoção de FAQ inexistente (404 faq_entry_not_found)
+    let (status, body) = request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{non_existent_faq_id}"),
+        Some(&manager_jwt),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"]["code"], "faq_entry_not_found");
+
+    // CENÁRIO X: Remoção em CA inexistente (404 academic_center_not_found)
+    let (status, body) = request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/academic-centers/{non_existent_ca_id}/faq/{alias_faq_id}"),
+        Some(&manager_jwt),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"]["code"], "academic_center_not_found");
+
+    // CENÁRIO Y: Remoção em CA inativo (422 academic_center_inactive)
+    let (status, body) = request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/academic-centers/{inactive_ca_id}/faq/{inactive_faq_id}"),
+        Some(&manager_jwt),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "academic_center_inactive");
+
+    // CENÁRIO Z: Remoção sem token (401 unauthorized)
+    let (status, body) = request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{alias_faq_id}"),
+        None,
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert_eq!(body["error"]["code"], "unauthorized");
+
+    // CENÁRIO AA: Remoção com sucesso via alias sem /api/v1 (204 No Content)
+    let (status, body) = request(
+        &app,
+        "DELETE",
+        &format!("/academic-centers/{active_ca_id}/faq/{alias_faq_id}"),
+        Some(&manager_jwt),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    // CENÁRIO AB: Remoção com sucesso via /api/v1 (204 No Content)
+    let (status, body) = request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{created_faq_id}"),
+        Some(&manager_jwt),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    // Confirma que a entrada removida não pode mais ser editada (404 faq_entry_not_found)
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{created_faq_id}"),
+        Some(&manager_jwt),
+        Some(json!({"question": "Tentativa pós remoção"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"]["code"], "faq_entry_not_found");
 }

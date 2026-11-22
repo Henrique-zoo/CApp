@@ -139,4 +139,24 @@ impl crate::modules::faq::application::ports::FaqRepository for PgDatabase {
         repo.check_ca_management_access(academic_center_id, user_id)
             .await
     }
+
+    async fn update(
+        &self,
+        entry: &crate::modules::faq::domain::entities::faq_entry::FaqEntry,
+    ) -> Result<(), crate::modules::faq::application::error::FaqRepositoryError> {
+        let repo = crate::modules::faq::infrastructure::repository::PostgresFaqRepository::new(
+            self.pool.clone(),
+        );
+        repo.update(entry).await
+    }
+
+    async fn delete(
+        &self,
+        id: &uuid::Uuid,
+    ) -> Result<bool, crate::modules::faq::application::error::FaqRepositoryError> {
+        let repo = crate::modules::faq::infrastructure::repository::PostgresFaqRepository::new(
+            self.pool.clone(),
+        );
+        repo.delete(id).await
+    }
 }

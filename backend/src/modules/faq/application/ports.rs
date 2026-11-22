@@ -51,6 +51,13 @@ pub trait FaqRepository: Send + Sync {
         academic_center_id: Uuid,
         user_id: Uuid,
     ) -> Result<CaManagementAccess, FaqRepositoryError>;
+
+    /// Atualiza os dados de uma entrada de FAQ existente.
+    async fn update(&self, entry: &FaqEntry) -> Result<(), FaqRepositoryError>;
+
+    /// Remove uma entrada de FAQ pelo seu identificador único.
+    /// Retorna `true` se o registro foi removido ou `false` se não existia.
+    async fn delete(&self, id: &Uuid) -> Result<bool, FaqRepositoryError>;
 }
 
 #[async_trait::async_trait]
@@ -80,5 +87,13 @@ impl<T: FaqRepository + ?Sized> FaqRepository for &T {
         (**self)
             .check_ca_management_access(academic_center_id, user_id)
             .await
+    }
+
+    async fn update(&self, entry: &FaqEntry) -> Result<(), FaqRepositoryError> {
+        (**self).update(entry).await
+    }
+
+    async fn delete(&self, id: &Uuid) -> Result<bool, FaqRepositoryError> {
+        (**self).delete(id).await
     }
 }

@@ -18,10 +18,18 @@ use crate::{
     },
     modules::{
         faq::{
-            api::dto::{CreateFaqEntryRequest, FaqEntryResponse},
+            api::dto::{CreateFaqEntryRequest, FaqEntryResponse, UpdateFaqEntryRequest},
             application::{
-                commands::create_faq_entry::CreateFaqEntryCommand,
-                services::create_faq_entry::CreateFaqEntryUseCase,
+                commands::{
+                    create_faq_entry::CreateFaqEntryCommand,
+                    delete_faq_entry::DeleteFaqEntryCommand,
+                    update_faq_entry::UpdateFaqEntryCommand,
+                },
+                services::{
+                    create_faq_entry::CreateFaqEntryUseCase,
+                    delete_faq_entry::DeleteFaqEntryUseCase,
+                    update_faq_entry::UpdateFaqEntryUseCase,
+                },
             },
         },
         identity::{
@@ -31,30 +39,13 @@ use crate::{
     },
 };
 
-/// Cadastra uma nova pergunta e resposta de FAQ no Centro Acadêmico especificado.
-///
-/// # Rotas
-///
-/// - `POST /api/v1/academic-centers/{academic_center_id}/faq`
-/// - `POST /academic-centers/{academic_center_id}/faq`
-///
-/// # Respostas
-///
-/// - `201 Created`: Pergunta e resposta cadastradas com sucesso.
-/// - `400 Bad Request`: Payload JSON malformado ou inválido.
-/// - `401 Unauthorized`: Credenciais ausentes ou inválidas.
-/// - `403 Forbidden`: Usuário sem cargo de gestão ativo no Centro Acadêmico.
-/// - `404 Not Found`: Centro Acadêmico não encontrado.
-/// - `422 Unprocessable Entity`: Violação de regras de validação (pergunta/resposta vazia ou excedendo limites, CA inativo).
-pub async fn create_faq_entry(
-    State(state): State<AppState>,
-    Path(academic_center_id): Path<Uuid>,
-    headers: HeaderMap,
-    body: Result<Json<CreateFaqEntryRequest>, JsonRejection>,
-) -> ApiResult<impl IntoResponse> {
-    let Json(payload) = body.map_err(|_| ApiError::bad_request())?;
-
-    let author_id = if let Ok(token) = extractors::firebase_bearer_token(&headers) {
+/// Extrai e valida a identidade autenticada do usuário a partir dos headers da requisição.
+async fn resolve_authenticated_user_id(
+    state: &AppState,
+    headers: &HeaderMap,
+    fallback_author_id: Option<Uuid>,
+) -> ApiResult<Uuid> {
+    if let Ok(token) = extractors::firebase_bearer_token(headers) {
         let identity = timeout(
             Duration::from_secs(10),
             authentication::authenticate_institutional_request(
@@ -85,14 +76,11 @@ pub async fn create_faq_entry(
 
         let authenticated_user_id = user.id();
 
-        if payload
-            .author_id
-            .is_some_and(|body_author| body_author != authenticated_user_id)
-        {
+        if fallback_author_id.is_some_and(|body_author| body_author != authenticated_user_id) {
             return Err(ApiError::forbidden());
         }
 
-        authenticated_user_id
+        Ok(authenticated_user_id)
     } else {
         #[cfg(feature = "test-support")]
         {
@@ -101,19 +89,46 @@ pub async fn create_faq_entry(
                     .to_str()
                     .ok()
                     .and_then(|s| s.parse::<Uuid>().ok())
-                    .ok_or_else(ApiError::bad_request)?
-            } else if let Some(body_author) = payload.author_id {
-                body_author
+                    .ok_or_else(ApiError::bad_request)
+            } else if let Some(body_author) = fallback_author_id {
+                Ok(body_author)
             } else {
-                return Err(ApiError::unauthorized());
+                Err(ApiError::unauthorized())
             }
         }
 
         #[cfg(not(feature = "test-support"))]
         {
-            return Err(ApiError::unauthorized());
+            let _ = fallback_author_id;
+            Err(ApiError::unauthorized())
         }
-    };
+    }
+}
+
+/// Cadastra uma nova pergunta e resposta de FAQ no Centro Acadêmico especificado.
+///
+/// # Rotas
+///
+/// - `POST /api/v1/academic-centers/{academic_center_id}/faq`
+/// - `POST /academic-centers/{academic_center_id}/faq`
+///
+/// # Respostas
+///
+/// - `201 Created`: Pergunta e resposta cadastradas com sucesso.
+/// - `400 Bad Request`: Payload JSON malformado ou inválido.
+/// - `401 Unauthorized`: Credenciais ausentes ou inválidas.
+/// - `403 Forbidden`: Usuário sem cargo de gestão ativo no Centro Acadêmico.
+/// - `404 Not Found`: Centro Acadêmico não encontrado.
+/// - `422 Unprocessable Entity`: Violação de regras de validação (pergunta/resposta vazia ou excedendo limites, CA inativo).
+pub async fn create_faq_entry(
+    State(state): State<AppState>,
+    Path(academic_center_id): Path<Uuid>,
+    headers: HeaderMap,
+    body: Result<Json<CreateFaqEntryRequest>, JsonRejection>,
+) -> ApiResult<impl IntoResponse> {
+    let Json(payload) = body.map_err(|_| ApiError::bad_request())?;
+
+    let author_id = resolve_authenticated_user_id(&state, &headers, payload.author_id).await?;
 
     let command = CreateFaqEntryCommand::new(
         academic_center_id,
@@ -127,4 +142,78 @@ pub async fn create_faq_entry(
     let entry = use_case.execute(command).await?;
 
     Ok((StatusCode::CREATED, Json(FaqEntryResponse::from(entry))))
+}
+
+/// Atualiza uma pergunta e resposta de FAQ existente no Centro Acadêmico especificado.
+///
+/// # Rotas
+///
+/// - `PATCH /api/v1/academic-centers/{academic_center_id}/faq/{faq_entry_id}`
+/// - `PATCH /academic-centers/{academic_center_id}/faq/{faq_entry_id}`
+///
+/// # Respostas
+///
+/// - `200 OK`: Pergunta e resposta atualizadas com sucesso.
+/// - `400 Bad Request`: Payload JSON malformado, vazio ou sem campos a atualizar.
+/// - `401 Unauthorized`: Credenciais ausentes ou inválidas.
+/// - `403 Forbidden`: Usuário sem cargo de gestão ativo no Centro Acadêmico.
+/// - `404 Not Found`: Centro Acadêmico ou pergunta frequente não encontrados.
+/// - `422 Unprocessable Entity`: Violação de regras de validação (pergunta/resposta vazia ou excedendo limites, CA inativo).
+pub async fn update_faq_entry(
+    State(state): State<AppState>,
+    Path((academic_center_id, faq_entry_id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+    body: Result<Json<UpdateFaqEntryRequest>, JsonRejection>,
+) -> ApiResult<impl IntoResponse> {
+    let Json(payload) = body.map_err(|_| ApiError::bad_request())?;
+
+    if payload.question.is_none() && payload.answer.is_none() && payload.category.is_none() {
+        return Err(ApiError::bad_request());
+    }
+
+    let author_id = resolve_authenticated_user_id(&state, &headers, None).await?;
+
+    let command = UpdateFaqEntryCommand::new(
+        academic_center_id,
+        faq_entry_id,
+        author_id,
+        payload.question,
+        payload.answer,
+        payload.category,
+    );
+
+    let use_case = UpdateFaqEntryUseCase::new(&state.pg_database);
+    let entry = use_case.execute(command).await?;
+
+    Ok((StatusCode::OK, Json(FaqEntryResponse::from(entry))))
+}
+
+/// Remove uma pergunta e resposta de FAQ existente no Centro Acadêmico especificado.
+///
+/// # Rotas
+///
+/// - `DELETE /api/v1/academic-centers/{academic_center_id}/faq/{faq_entry_id}`
+/// - `DELETE /academic-centers/{academic_center_id}/faq/{faq_entry_id}`
+///
+/// # Respostas
+///
+/// - `204 No Content`: Pergunta e resposta removidas com sucesso.
+/// - `400 Bad Request`: Identificadores inválidos na rota.
+/// - `401 Unauthorized`: Credenciais ausentes ou inválidas.
+/// - `403 Forbidden`: Usuário sem cargo de gestão ativo no Centro Acadêmico.
+/// - `404 Not Found`: Centro Acadêmico ou pergunta frequente não encontrados.
+/// - `422 Unprocessable Entity`: Centro Acadêmico inativo.
+pub async fn delete_faq_entry(
+    State(state): State<AppState>,
+    Path((academic_center_id, faq_entry_id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+) -> ApiResult<impl IntoResponse> {
+    let author_id = resolve_authenticated_user_id(&state, &headers, None).await?;
+
+    let command = DeleteFaqEntryCommand::new(academic_center_id, faq_entry_id, author_id);
+
+    let use_case = DeleteFaqEntryUseCase::new(&state.pg_database);
+    use_case.execute(command).await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }

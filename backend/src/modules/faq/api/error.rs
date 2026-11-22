@@ -31,6 +31,12 @@ impl From<FaqApplicationError> for ApiError {
                 "Usuário sem permissão para cadastrar FAQ neste Centro Acadêmico",
                 None,
             ),
+            FaqApplicationError::FaqEntryNotFound(entry_id) => Self::new(
+                StatusCode::NOT_FOUND,
+                "faq_entry_not_found",
+                format!("Pergunta frequente '{entry_id}' não encontrada"),
+                Some(json!({ "faq_entry_id": entry_id })),
+            ),
             FaqApplicationError::InvalidEntry(domain_err) => {
                 let (status, code) = match &domain_err {
                     FaqError::EmptyQuestion => (StatusCode::UNPROCESSABLE_ENTITY, "empty_question"),
