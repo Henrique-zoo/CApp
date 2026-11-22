@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::modules::demands::domain::entities::Demand;
+use crate::modules::demands::domain::entities::{Demand, DemandNotification};
 
 /// Payload de requisição para criação de uma nova demanda.
 #[derive(Debug, Clone, Deserialize)]
@@ -50,6 +50,28 @@ pub struct ListDemandsQueryParams {
     /// Quando verdadeiro, restringe os resultados às demandas registradas pelo usuário autenticado.
     #[serde(default)]
     pub mine: Option<bool>,
+
+    /// Quantidade máxima de registros retornados (paginação).
+    pub limit: Option<usize>,
+
+    /// Deslocamento inicial de registros para paginação.
+    pub offset: Option<usize>,
+
+    /// Número da página baseada em 1 (conveniência para clientes).
+    pub page: Option<usize>,
+
+    /// Tamanho da página (alias para limite de registros).
+    #[serde(alias = "page_size")]
+    pub page_size: Option<usize>,
+}
+
+/// Parâmetros de consulta via query string para listagem de notificações de demandas.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ListDemandNotificationsQueryParams {
+    /// Quando verdadeiro, restringe os resultados às notificações ainda não lidas (`readAt == null`).
+    #[serde(default, alias = "unread_only")]
+    pub unread_only: Option<bool>,
 
     /// Quantidade máxima de registros retornados (paginação).
     pub limit: Option<usize>,
@@ -219,5 +241,59 @@ impl From<&Demand> for DemandResponse {
 impl From<Demand> for DemandResponse {
     fn from(demand: Demand) -> Self {
         Self::from(&demand)
+    }
+}
+
+/// Representação serializada pública de uma notificação de demanda entregue a um estudante.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DemandNotificationResponse {
+    /// Identificador único da notificação.
+    pub id: Uuid,
+
+    /// Identificador da demanda vinculada.
+    pub demand_id: Uuid,
+
+    /// Identificador do estudante destinatário.
+    pub recipient_user_id: Uuid,
+
+    /// Identificador do Centro Acadêmico responsável pelo contexto da demanda.
+    pub academic_center_id: Uuid,
+
+    /// Tipo de evento gerador da notificação (`status_updated`, `official_response`).
+    pub event_type: String,
+
+    /// Título ou resumo da notificação.
+    pub title: String,
+
+    /// Mensagem ou conteúdo detalhado da notificação.
+    pub message: String,
+
+    /// Instante UTC de leitura pelo estudante, ou `null` caso ainda não lida.
+    pub read_at: Option<DateTime<Utc>>,
+
+    /// Instante UTC de criação da notificação.
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<&DemandNotification> for DemandNotificationResponse {
+    fn from(n: &DemandNotification) -> Self {
+        Self {
+            id: n.id(),
+            demand_id: n.demand_id(),
+            recipient_user_id: n.recipient_user_id(),
+            academic_center_id: n.academic_center_id(),
+            event_type: n.event_type().as_str().to_string(),
+            title: n.title().to_string(),
+            message: n.message().to_string(),
+            read_at: n.read_at(),
+            created_at: n.created_at(),
+        }
+    }
+}
+
+impl From<DemandNotification> for DemandNotificationResponse {
+    fn from(n: DemandNotification) -> Self {
+        Self::from(&n)
     }
 }

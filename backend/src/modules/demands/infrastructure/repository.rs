@@ -15,9 +15,15 @@ use uuid::Uuid;
 use crate::modules::demands::{
     application::{
         error::{AffiliationError, DemandRepositoryError},
-        ports::{AcademicAffiliation, AcademicAffiliationPort, DemandFilter, DemandRepository},
+        ports::{
+            AcademicAffiliation, AcademicAffiliationPort, DemandFilter,
+            DemandNotificationRepository, DemandRepository,
+        },
     },
-    domain::entities::{Demand, DemandForum, DemandStatus, DemandStatusHistoryEntry},
+    domain::entities::{
+        Demand, DemandForum, DemandNotification, DemandNotificationEventType, DemandStatus,
+        DemandStatusHistoryEntry,
+    },
 };
 
 /// Estrutura de linha dedicada para mapeamento relacional da tabela `demand`.
@@ -141,6 +147,116 @@ impl DemandRepository for InMemoryDemandRepository {
         };
 
         Ok(result)
+    }
+}
+
+/// Estrutura de linha dedicada para mapeamento relacional da tabela `demand_notification`.
+#[derive(Debug, sqlx::FromRow)]
+struct DemandNotificationRow {
+    id: Uuid,
+    demand_id: Uuid,
+    recipient_user_id: Uuid,
+    academic_center_id: Uuid,
+    event_type: String,
+    title: String,
+    message: String,
+    read_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+}
+
+/// Repositório de notificações de demandas em memória para testes unitários determinísticos.
+#[derive(Debug, Clone, Default)]
+pub struct InMemoryDemandNotificationRepository {
+    notifications: Arc<RwLock<HashMap<Uuid, DemandNotification>>>,
+}
+
+impl InMemoryDemandNotificationRepository {
+    /// Cria uma nova instância vazia do repositório de notificações em memória.
+    pub fn new() -> Self {
+        Self {
+            notifications: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Retorna todas as notificações armazenadas.
+    pub fn all(&self) -> Vec<DemandNotification> {
+        let guard = self.notifications.read().unwrap();
+        guard.values().cloned().collect()
+    }
+
+    /// Quantidade de notificações armazenadas.
+    pub fn count(&self) -> usize {
+        let guard = self.notifications.read().unwrap();
+        guard.len()
+    }
+
+    /// Limpa todas as notificações armazenadas.
+    pub fn clear(&self) {
+        let mut guard = self.notifications.write().unwrap();
+        guard.clear();
+    }
+}
+
+#[async_trait::async_trait]
+impl DemandNotificationRepository for InMemoryDemandNotificationRepository {
+    async fn create(&self, notification: &DemandNotification) -> Result<(), DemandRepositoryError> {
+        let mut guard = self.notifications.write().unwrap();
+        guard.insert(notification.id(), notification.clone());
+        Ok(())
+    }
+
+    async fn find_by_id(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<DemandNotification>, DemandRepositoryError> {
+        let guard = self.notifications.read().unwrap();
+        Ok(guard.get(&id).cloned())
+    }
+
+    async fn list_by_recipient(
+        &self,
+        recipient_user_id: Uuid,
+        unread_only: bool,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<Vec<DemandNotification>, DemandRepositoryError> {
+        let guard = self.notifications.read().unwrap();
+        let mut filtered: Vec<DemandNotification> = guard
+            .values()
+            .filter(|n| {
+                if n.recipient_user_id() != recipient_user_id {
+                    return false;
+                }
+                if unread_only && n.is_read() {
+                    return false;
+                }
+                true
+            })
+            .cloned()
+            .collect();
+
+        // Ordenação determinística: created_at DESC, id DESC
+        filtered.sort_by(|a, b| {
+            b.created_at()
+                .cmp(&a.created_at())
+                .then_with(|| b.id().cmp(&a.id()))
+        });
+
+        let offset = offset.unwrap_or(0);
+        let iter = filtered.into_iter().skip(offset);
+        let result = if let Some(limit) = limit {
+            iter.take(limit).collect()
+        } else {
+            iter.collect()
+        };
+
+        Ok(result)
+    }
+
+    async fn update(&self, notification: &DemandNotification) -> Result<(), DemandRepositoryError> {
+        let mut guard = self.notifications.write().unwrap();
+        guard.insert(notification.id(), notification.clone());
+        Ok(())
     }
 }
 
@@ -590,5 +706,167 @@ impl AcademicAffiliationPort for PostgresDemandRepository {
             ca_represented_courses: represented_courses,
             is_ca_manager,
         })
+    }
+}
+
+/// Implementação do repositório de notificações de demandas sobre o PostgreSQL.
+#[derive(Debug, Clone)]
+pub struct PostgresDemandNotificationRepository {
+    pool: PgPool,
+}
+
+impl PostgresDemandNotificationRepository {
+    /// Cria um novo repositório de notificações com o pool PostgreSQL fornecido.
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// Retorna uma referência ao pool de conexões PostgreSQL subjacente.
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+}
+
+#[async_trait::async_trait]
+impl DemandNotificationRepository for PostgresDemandNotificationRepository {
+    async fn create(&self, notification: &DemandNotification) -> Result<(), DemandRepositoryError> {
+        sqlx::query(
+            "INSERT INTO demand_notification (
+                id, demand_id, recipient_user_id, academic_center_id, event_type,
+                title, message, read_at, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        )
+        .bind(notification.id())
+        .bind(notification.demand_id())
+        .bind(notification.recipient_user_id())
+        .bind(notification.academic_center_id())
+        .bind(notification.event_type().as_str())
+        .bind(notification.title())
+        .bind(notification.message())
+        .bind(notification.read_at())
+        .bind(notification.created_at())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DemandRepositoryError::Internal(e.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn find_by_id(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<DemandNotification>, DemandRepositoryError> {
+        let row = sqlx::query_as::<_, DemandNotificationRow>(
+            "SELECT id, demand_id, recipient_user_id, academic_center_id, event_type,
+                    title, message, read_at, created_at
+             FROM demand_notification
+             WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| DemandRepositoryError::Internal(e.to_string()))?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let event_type: DemandNotificationEventType = row
+            .event_type
+            .parse()
+            .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
+
+        let notification = DemandNotification::reconstitute(
+            row.id,
+            row.demand_id,
+            row.recipient_user_id,
+            row.academic_center_id,
+            event_type,
+            row.title,
+            row.message,
+            row.read_at,
+            row.created_at,
+        )
+        .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
+
+        Ok(Some(notification))
+    }
+
+    async fn list_by_recipient(
+        &self,
+        recipient_user_id: Uuid,
+        unread_only: bool,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<Vec<DemandNotification>, DemandRepositoryError> {
+        let mut builder = sqlx::QueryBuilder::new(
+            "SELECT id, demand_id, recipient_user_id, academic_center_id, event_type, \
+                    title, message, read_at, created_at \
+             FROM demand_notification \
+             WHERE recipient_user_id = ",
+        );
+        builder.push_bind(recipient_user_id);
+
+        if unread_only {
+            builder.push(" AND read_at IS NULL");
+        }
+
+        builder.push(" ORDER BY created_at DESC, id DESC");
+
+        if let Some(limit) = limit {
+            builder.push(" LIMIT ");
+            builder.push_bind(limit as i64);
+        }
+
+        if let Some(offset) = offset {
+            builder.push(" OFFSET ");
+            builder.push_bind(offset as i64);
+        }
+
+        let rows = builder
+            .build_query_as::<DemandNotificationRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DemandRepositoryError::Internal(e.to_string()))?;
+
+        let mut notifications = Vec::with_capacity(rows.len());
+        for row in rows {
+            let event_type: DemandNotificationEventType = row
+                .event_type
+                .parse()
+                .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
+
+            let notification = DemandNotification::reconstitute(
+                row.id,
+                row.demand_id,
+                row.recipient_user_id,
+                row.academic_center_id,
+                event_type,
+                row.title,
+                row.message,
+                row.read_at,
+                row.created_at,
+            )
+            .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
+
+            notifications.push(notification);
+        }
+
+        Ok(notifications)
+    }
+
+    async fn update(&self, notification: &DemandNotification) -> Result<(), DemandRepositoryError> {
+        sqlx::query(
+            "UPDATE demand_notification
+             SET read_at = $1
+             WHERE id = $2",
+        )
+        .bind(notification.read_at())
+        .bind(notification.id())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DemandRepositoryError::Internal(e.to_string()))?;
+
+        Ok(())
     }
 }

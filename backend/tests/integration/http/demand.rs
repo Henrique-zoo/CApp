@@ -1931,3 +1931,265 @@ async fn should_reject_student_of_another_course_from_getting_institutional_dema
 
     db.close().await;
 }
+
+#[tokio::test]
+async fn should_dispatch_notification_to_student_when_ca_manager_updates_status_and_allow_reading()
+{
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let manager_uid = "manager-notif-http-1";
+    let manager_obj = Uuid::new_v4();
+    let (inst_id, ca_id, _manager_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        manager_uid,
+        manager_obj,
+        true,
+        Some("Ciência da Computação"),
+        true, // is_ca_manager = true
+        "active",
+    )
+    .await;
+    let manager_jwt = token_with_email(manager_uid, manager_obj, "241098765@aluno.unb.br");
+
+    let student_uid = "student-notif-http-author";
+    let student_obj = Uuid::new_v4();
+    let student_id = create_test_student(
+        &db.pool,
+        inst_id,
+        student_uid,
+        student_obj,
+        true,
+        Some("Ciência da Computação"),
+    )
+    .await;
+    let student_jwt = token_with_email(student_uid, student_obj, "241098766@aluno.unb.br");
+
+    // Estudante cria demanda
+    let create_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (c_status, c_body) = request(
+        &app,
+        &create_path,
+        Some(&student_jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "title": "Projetor com defeito",
+            "description": "O projetor da sala de reuniões do CA não liga"
+        })),
+    )
+    .await;
+    assert_eq!(c_status, StatusCode::CREATED, "{c_body}");
+    let demand_id = c_body["id"].as_str().unwrap();
+
+    // Gestor atualiza status da demanda para em análise com parecer
+    let status_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/status");
+    let (u_status, u_body) = patch_request(
+        &app,
+        &status_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "status": "in_analysis",
+            "opinion": "Técnico acionado para avaliar a lâmpada do projetor"
+        })),
+    )
+    .await;
+    assert_eq!(u_status, StatusCode::OK, "{u_body}");
+    assert_eq!(u_body["status"], "in_analysis");
+
+    // Estudante autor consulta notificações
+    let notifs_path = "/api/v1/demands/notifications";
+    let (n_status, n_body) = get_request(&app, notifs_path, Some(&student_jwt)).await;
+    assert_eq!(n_status, StatusCode::OK, "{n_body}");
+
+    let notifs = n_body.as_array().expect("deve retornar array");
+    assert_eq!(
+        notifs.len(),
+        1,
+        "deve existir 1 notificação para o estudante"
+    );
+    let notif = &notifs[0];
+    assert_eq!(notif["demandId"], demand_id);
+    assert_eq!(notif["recipientUserId"], student_id.to_string());
+    assert_eq!(notif["academicCenterId"], ca_id.to_string());
+    assert_eq!(notif["eventType"], "status_updated");
+    assert_eq!(notif["title"], "Demanda em análise");
+    assert!(
+        notif["message"]
+            .as_str()
+            .unwrap()
+            .contains("Técnico acionado para avaliar a lâmpada do projetor")
+    );
+    assert!(notif["readAt"].is_null());
+
+    let notification_id = notif["id"].as_str().unwrap();
+
+    // Estudante marca notificação como lida
+    let read_path = format!("/api/v1/demands/notifications/{notification_id}/read");
+    let (r_status, r_body) = patch_request(&app, &read_path, Some(&student_jwt), None).await;
+    assert_eq!(r_status, StatusCode::OK, "{r_body}");
+    assert_eq!(r_body["id"], notification_id);
+    assert!(!r_body["readAt"].is_null());
+
+    // Consulta filtrando por não lidas (deve retornar vazio)
+    let unread_path = "/api/v1/demands/notifications?unreadOnly=true";
+    let (un_status, un_body) = get_request(&app, unread_path, Some(&student_jwt)).await;
+    assert_eq!(un_status, StatusCode::OK, "{un_body}");
+    let unread_list = un_body.as_array().unwrap();
+    assert!(
+        unread_list.is_empty(),
+        "não deve haver notificações não lidas"
+    );
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_marking_notification_as_read_by_different_student_with_403() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let manager_uid = "manager-notif-403";
+    let manager_obj = Uuid::new_v4();
+    let (inst_id, ca_id, _manager_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        manager_uid,
+        manager_obj,
+        true,
+        Some("Ciência da Computação"),
+        true,
+        "active",
+    )
+    .await;
+    let manager_jwt = token_with_email(manager_uid, manager_obj, "241098765@aluno.unb.br");
+
+    let student_owner_uid = "student-owner";
+    let student_owner_obj = Uuid::new_v4();
+    create_test_student(
+        &db.pool,
+        inst_id,
+        student_owner_uid,
+        student_owner_obj,
+        true,
+        Some("Ciência da Computação"),
+    )
+    .await;
+    let student_owner_jwt = token_with_email(
+        student_owner_uid,
+        student_owner_obj,
+        "241098766@aluno.unb.br",
+    );
+
+    let student_intruder_uid = "student-intruder";
+    let student_intruder_obj = Uuid::new_v4();
+    create_test_student(
+        &db.pool,
+        inst_id,
+        student_intruder_uid,
+        student_intruder_obj,
+        true,
+        Some("Ciência da Computação"),
+    )
+    .await;
+    let student_intruder_jwt = token_with_email(
+        student_intruder_uid,
+        student_intruder_obj,
+        "241098767@aluno.unb.br",
+    );
+
+    // Estudante A cria demanda
+    let create_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (c_status, c_body) = request(
+        &app,
+        &create_path,
+        Some(&student_owner_jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "title": "Janela emperrada",
+            "description": "A janela não abre"
+        })),
+    )
+    .await;
+    assert_eq!(c_status, StatusCode::CREATED, "{c_body}");
+    let demand_id = c_body["id"].as_str().unwrap();
+
+    // Gestor atualiza status
+    let status_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/status");
+    let (u_status, u_body) = patch_request(
+        &app,
+        &status_path,
+        Some(&manager_jwt),
+        Some(json!({
+            "status": "in_analysis",
+            "opinion": "Verificando mecanismo da janela"
+        })),
+    )
+    .await;
+    assert_eq!(u_status, StatusCode::OK, "{u_body}");
+
+    // Estudante A obtém id da notificação
+    let notifs_path = "/api/v1/demands/notifications";
+    let (n_status, n_body) = get_request(&app, notifs_path, Some(&student_owner_jwt)).await;
+    assert_eq!(n_status, StatusCode::OK, "{n_body}");
+    let notification_id = n_body[0]["id"].as_str().unwrap();
+
+    // Estudante B tenta marcar notificação do Estudante A como lida
+    let read_path = format!("/api/v1/demands/notifications/{notification_id}/read");
+    let (r_status, r_body) =
+        patch_request(&app, &read_path, Some(&student_intruder_jwt), None).await;
+    assert_eq!(r_status, StatusCode::FORBIDDEN, "{r_body}");
+    assert_eq!(r_body["error"]["code"], "notification_forbidden");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_return_404_when_notification_does_not_exist() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let student_uid = "student-notif-404";
+    let student_obj = Uuid::new_v4();
+    let (_inst_id, _ca_id, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        student_uid,
+        student_obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+    let student_jwt = token_with_email(student_uid, student_obj, "241098765@aluno.unb.br");
+
+    let fake_id = Uuid::new_v4();
+    let read_path = format!("/api/v1/demands/notifications/{fake_id}/read");
+    let (r_status, r_body) = patch_request(&app, &read_path, Some(&student_jwt), None).await;
+    assert_eq!(r_status, StatusCode::NOT_FOUND, "{r_body}");
+    assert_eq!(r_body["error"]["code"], "notification_not_found");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_reject_unauthenticated_notifications_requests_with_401() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    // GET sem autenticação
+    let (g_status, g_body) = get_request(&app, "/api/v1/demands/notifications", None).await;
+    assert_eq!(g_status, StatusCode::UNAUTHORIZED, "{g_body}");
+
+    // PATCH sem autenticação
+    let fake_id = Uuid::new_v4();
+    let read_path = format!("/api/v1/demands/notifications/{fake_id}/read");
+    let (p_status, p_body) = patch_request(&app, &read_path, None, None).await;
+    assert_eq!(p_status, StatusCode::UNAUTHORIZED, "{p_body}");
+
+    db.close().await;
+}

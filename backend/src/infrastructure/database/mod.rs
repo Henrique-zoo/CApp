@@ -152,3 +152,60 @@ impl crate::modules::demands::application::ports::AcademicAffiliationPort for Pg
         repo.get_affiliation(author_id, academic_center_id).await
     }
 }
+
+#[async_trait::async_trait]
+impl crate::modules::demands::application::ports::DemandNotificationRepository for PgDatabase {
+    async fn create(
+        &self,
+        notification: &crate::modules::demands::domain::entities::DemandNotification,
+    ) -> Result<(), crate::modules::demands::application::error::DemandRepositoryError> {
+        let repo =
+            crate::modules::demands::infrastructure::PostgresDemandNotificationRepository::new(
+                self.pool.clone(),
+            );
+        repo.create(notification).await
+    }
+
+    async fn find_by_id(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<
+        Option<crate::modules::demands::domain::entities::DemandNotification>,
+        crate::modules::demands::application::error::DemandRepositoryError,
+    > {
+        let repo =
+            crate::modules::demands::infrastructure::PostgresDemandNotificationRepository::new(
+                self.pool.clone(),
+            );
+        repo.find_by_id(id).await
+    }
+
+    async fn list_by_recipient(
+        &self,
+        recipient_user_id: uuid::Uuid,
+        unread_only: bool,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<
+        Vec<crate::modules::demands::domain::entities::DemandNotification>,
+        crate::modules::demands::application::error::DemandRepositoryError,
+    > {
+        let repo =
+            crate::modules::demands::infrastructure::PostgresDemandNotificationRepository::new(
+                self.pool.clone(),
+            );
+        repo.list_by_recipient(recipient_user_id, unread_only, limit, offset)
+            .await
+    }
+
+    async fn update(
+        &self,
+        notification: &crate::modules::demands::domain::entities::DemandNotification,
+    ) -> Result<(), crate::modules::demands::application::error::DemandRepositoryError> {
+        let repo =
+            crate::modules::demands::infrastructure::PostgresDemandNotificationRepository::new(
+                self.pool.clone(),
+            );
+        repo.update(notification).await
+    }
+}

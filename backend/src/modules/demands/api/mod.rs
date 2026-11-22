@@ -19,6 +19,8 @@ pub mod handlers;
 /// - `GET /api/v1/academic-centers/{academic_center_id}/demands`: Listagem e filtragem de demandas nos fóruns.
 /// - `GET /api/v1/academic-centers/{academic_center_id}/demands/{demand_id}`: Detalhes e histórico da demanda.
 /// - `PATCH /api/v1/academic-centers/{academic_center_id}/demands/{demand_id}/status`: Atualização de status com parecer.
+/// - `GET /api/v1/demands/notifications`: Consulta das notificações de demandas do estudante autenticado.
+/// - `PATCH /api/v1/demands/notifications/{notification_id}/read`: Marcação de notificação como lida.
 /// - Rotas equivalentes sem o prefixo `/api/v1` para conveniência e retrocompatibilidade.
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -45,5 +47,21 @@ pub fn router() -> Router<AppState> {
         .route(
             "/academic-centers/{academic_center_id}/demands/{demand_id}/status",
             axum::routing::patch(handlers::handle_update_demand_status),
+        )
+        .route(
+            "/api/v1/demands/notifications",
+            axum::routing::get(handlers::handle_list_notifications),
+        )
+        .route(
+            "/demands/notifications",
+            axum::routing::get(handlers::handle_list_notifications),
+        )
+        .route(
+            "/api/v1/demands/notifications/{notification_id}/read",
+            axum::routing::patch(handlers::handle_mark_notification_as_read),
+        )
+        .route(
+            "/demands/notifications/{notification_id}/read",
+            axum::routing::patch(handlers::handle_mark_notification_as_read),
         )
 }

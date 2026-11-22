@@ -99,6 +99,30 @@ pub enum DemandError {
         /// Identificador encontrado na entrada do histórico.
         actual: Uuid,
     },
+
+    /// O título da notificação não pode ser vazio.
+    EmptyNotificationTitle,
+
+    /// O título da notificação ultrapassou o comprimento máximo permitido.
+    NotificationTitleTooLong {
+        /// Limite máximo permitido.
+        max: usize,
+    },
+
+    /// A mensagem da notificação não pode ser vazia.
+    EmptyNotificationMessage,
+
+    /// A mensagem da notificação ultrapassou o comprimento máximo permitido.
+    NotificationMessageTooLong {
+        /// Limite máximo permitido.
+        max: usize,
+    },
+
+    /// O tipo de evento de notificação informado não é reconhecido.
+    InvalidNotificationEventType(String),
+
+    /// Tentativa inválida de gerar notificação para o próprio autor da ação.
+    SelfNotificationNotAllowed,
 }
 
 impl fmt::Display for DemandError {
@@ -180,6 +204,33 @@ impl fmt::Display for DemandError {
                 write!(
                     f,
                     "registro de histórico pertence à demanda '{actual}', divergindo da demanda '{expected}'"
+                )
+            }
+            Self::EmptyNotificationTitle => {
+                write!(f, "o título da notificação não pode ser vazio")
+            }
+            Self::NotificationTitleTooLong { max } => {
+                write!(
+                    f,
+                    "o título da notificação excede o limite de {max} caracteres"
+                )
+            }
+            Self::EmptyNotificationMessage => {
+                write!(f, "a mensagem da notificação não pode ser vazia")
+            }
+            Self::NotificationMessageTooLong { max } => {
+                write!(
+                    f,
+                    "a mensagem da notificação excede o limite de {max} caracteres"
+                )
+            }
+            Self::InvalidNotificationEventType(t) => {
+                write!(f, "tipo de evento de notificação desconhecido: '{t}'")
+            }
+            Self::SelfNotificationNotAllowed => {
+                write!(
+                    f,
+                    "não é permitido gerar notificação para o próprio autor da ação"
                 )
             }
         }

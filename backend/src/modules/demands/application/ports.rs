@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::modules::demands::{
     application::error::{AffiliationError, DemandRepositoryError},
-    domain::entities::{Demand, DemandForum, DemandStatus},
+    domain::entities::{Demand, DemandForum, DemandNotification, DemandStatus},
 };
 
 /// Critérios de filtragem para listagem de demandas no repositório.
@@ -59,6 +59,99 @@ impl<T: DemandRepository + ?Sized> DemandRepository for &T {
 
     async fn update(&self, demand: &Demand) -> Result<(), DemandRepositoryError> {
         (**self).update(demand).await
+    }
+}
+
+/// Contrato de persistência para notificações de demandas acadêmicas e de espaço físico.
+#[async_trait::async_trait]
+pub trait DemandNotificationRepository: Send + Sync {
+    /// Persiste uma nova notificação de demanda.
+    async fn create(&self, notification: &DemandNotification) -> Result<(), DemandRepositoryError>;
+
+    /// Localiza uma notificação por seu identificador único estável.
+    async fn find_by_id(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<DemandNotification>, DemandRepositoryError>;
+
+    /// Lista notificações destinadas a um estudante específico com paginação e filtro opcional por não lidas.
+    async fn list_by_recipient(
+        &self,
+        recipient_user_id: Uuid,
+        unread_only: bool,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<Vec<DemandNotification>, DemandRepositoryError>;
+
+    /// Atualiza o estado da notificação (ex.: registro de leitura).
+    async fn update(&self, notification: &DemandNotification) -> Result<(), DemandRepositoryError>;
+}
+
+#[async_trait::async_trait]
+impl<T: DemandNotificationRepository + ?Sized> DemandNotificationRepository for &T {
+    async fn create(&self, notification: &DemandNotification) -> Result<(), DemandRepositoryError> {
+        (**self).create(notification).await
+    }
+
+    async fn find_by_id(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<DemandNotification>, DemandRepositoryError> {
+        (**self).find_by_id(id).await
+    }
+
+    async fn list_by_recipient(
+        &self,
+        recipient_user_id: Uuid,
+        unread_only: bool,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<Vec<DemandNotification>, DemandRepositoryError> {
+        (**self)
+            .list_by_recipient(recipient_user_id, unread_only, limit, offset)
+            .await
+    }
+
+    async fn update(&self, notification: &DemandNotification) -> Result<(), DemandRepositoryError> {
+        (**self).update(notification).await
+    }
+}
+
+/// Implementação no-op de conveniência para casos onde notificações não são capturadas.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoopNotificationRepository;
+
+#[async_trait::async_trait]
+impl DemandNotificationRepository for NoopNotificationRepository {
+    async fn create(
+        &self,
+        _notification: &DemandNotification,
+    ) -> Result<(), DemandRepositoryError> {
+        Ok(())
+    }
+
+    async fn find_by_id(
+        &self,
+        _id: Uuid,
+    ) -> Result<Option<DemandNotification>, DemandRepositoryError> {
+        Ok(None)
+    }
+
+    async fn list_by_recipient(
+        &self,
+        _recipient_user_id: Uuid,
+        _unread_only: bool,
+        _limit: Option<usize>,
+        _offset: Option<usize>,
+    ) -> Result<Vec<DemandNotification>, DemandRepositoryError> {
+        Ok(Vec::new())
+    }
+
+    async fn update(
+        &self,
+        _notification: &DemandNotification,
+    ) -> Result<(), DemandRepositoryError> {
+        Ok(())
     }
 }
 

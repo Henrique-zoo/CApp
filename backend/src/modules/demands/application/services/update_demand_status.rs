@@ -5,40 +5,65 @@
 //! e persistência transacional com histórico.
 
 use chrono::Utc;
+use uuid::Uuid;
 
 use crate::modules::demands::{
     application::{
         commands::UpdateDemandStatusCommand,
         error::DemandApplicationError,
-        ports::{AcademicAffiliationPort, DemandRepository},
+        ports::{
+            AcademicAffiliationPort, DemandNotificationRepository, DemandRepository,
+            NoopNotificationRepository,
+        },
     },
     domain::{
         entities::{Demand, DemandError, DemandForum, DemandStatus},
+        events::DemandStatusUpdatedEvent,
         rules::validate_comment,
     },
 };
 
 /// Serviço para atualização de status de demandas pela gestão do Centro Acadêmico.
 #[derive(Debug, Clone)]
-pub struct UpdateDemandStatusUseCase<R, A> {
+pub struct UpdateDemandStatusUseCase<R, A, N = NoopNotificationRepository> {
     demand_repository: R,
     affiliation_port: A,
+    notification_repository: N,
 }
 
-impl<R, A> UpdateDemandStatusUseCase<R, A>
-where
-    R: DemandRepository,
-    A: AcademicAffiliationPort,
-{
-    /// Inicializa o caso de uso com os adaptadores de repositório e afiliação.
+impl<R, A> UpdateDemandStatusUseCase<R, A, NoopNotificationRepository> {
+    /// Inicializa o caso de uso com os adaptadores de repositório e afiliação (sem disparo de notificação).
     pub fn new(demand_repository: R, affiliation_port: A) -> Self {
         Self {
             demand_repository,
             affiliation_port,
+            notification_repository: NoopNotificationRepository,
         }
     }
+}
 
-    /// Executa a atualização de status da demanda.
+impl<R, A, N> UpdateDemandStatusUseCase<R, A, N> {
+    /// Inicializa o caso de uso com captura e persistência de notificações.
+    pub fn with_notifications(
+        demand_repository: R,
+        affiliation_port: A,
+        notification_repository: N,
+    ) -> Self {
+        Self {
+            demand_repository,
+            affiliation_port,
+            notification_repository,
+        }
+    }
+}
+
+impl<R, A, N> UpdateDemandStatusUseCase<R, A, N>
+where
+    R: DemandRepository,
+    A: AcademicAffiliationPort,
+    N: DemandNotificationRepository,
+{
+    /// Executa a atualização de status da demanda e dispara notificação caso o autor não seja o próprio gestor.
     ///
     /// # Regras de Negócio e Segurança
     ///
@@ -53,6 +78,8 @@ where
     ///    ([`DemandError::CoordinationForwardingNotAllowed`]).
     /// 7. A transição deve ser válida perante o ciclo de vida da demanda e seu histórico é registrado.
     /// 8. A persistência atualiza o status da demanda e grava atomicamente o registro de histórico.
+    /// 9. Caso o gestor que atualizou não seja o próprio autor da demanda, gera uma notificação de
+    ///    atualização de status destinada ao estudante autor.
     pub async fn execute(
         &self,
         command: UpdateDemandStatusCommand,
@@ -107,6 +134,8 @@ where
         }
 
         let now = Utc::now();
+        let from_status = Some(demand.status());
+
         demand.transition_to(
             command.new_status,
             command.manager_id,
@@ -115,6 +144,24 @@ where
         )?;
 
         self.demand_repository.update(&demand).await?;
+
+        // Notificação de atualização de status
+        // Regra de negócio: nunca notificar o próprio usuário por uma ação executada por ele mesmo.
+        let status_event = DemandStatusUpdatedEvent {
+            demand_id: demand.id(),
+            academic_center_id: demand.academic_center_id(),
+            author_id: demand.author_id(),
+            changed_by_id: command.manager_id,
+            from_status,
+            to_status: command.new_status,
+            opinion: trimmed_opinion.to_string(),
+            occurred_at: now,
+        };
+
+        if let Some(notification_res) = status_event.to_notification(Uuid::new_v4()) {
+            let notification = notification_res?;
+            self.notification_repository.create(&notification).await?;
+        }
 
         Ok(demand)
     }
@@ -133,6 +180,27 @@ where
     UpdateDemandStatusUseCase::new(demand_repository, affiliation_port)
         .execute(command)
         .await
+}
+
+/// Função de conveniência para execução com disparo e persistência de notificações.
+pub async fn update_demand_status_with_notifications<R, A, N>(
+    demand_repository: R,
+    affiliation_port: A,
+    notification_repository: N,
+    command: UpdateDemandStatusCommand,
+) -> Result<Demand, DemandApplicationError>
+where
+    R: DemandRepository,
+    A: AcademicAffiliationPort,
+    N: DemandNotificationRepository,
+{
+    UpdateDemandStatusUseCase::with_notifications(
+        demand_repository,
+        affiliation_port,
+        notification_repository,
+    )
+    .execute(command)
+    .await
 }
 
 #[cfg(test)]
@@ -549,5 +617,105 @@ mod tests {
             })) => (),
             other => panic!("esperava InvalidStatusTransition, obteve {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn should_dispatch_notification_to_student_author_when_manager_updates_status() {
+        use crate::modules::demands::infrastructure::InMemoryDemandNotificationRepository;
+
+        let ca_id = sample_ca_id();
+        let manager_id = sample_manager_id();
+        let author_id = sample_student_id();
+
+        let demand_repo = InMemoryDemandRepository::new();
+        let notif_repo = InMemoryDemandNotificationRepository::new();
+        let demand = create_test_demand(ca_id, author_id, DemandForum::PhysicalSpace);
+        let demand_id = demand.id();
+        demand_repo.create(&demand).await.unwrap();
+
+        let affiliation_port = InMemoryAcademicAffiliationPort::new();
+        affiliation_port.set_affiliation(
+            manager_id,
+            ca_id,
+            AcademicAffiliation::new(true, true, true, None, vec![], true),
+        );
+
+        let command = UpdateDemandStatusCommand::new(
+            ca_id,
+            demand_id,
+            manager_id,
+            DemandStatus::InAnalysis,
+            "A vistoria foi agendada".to_string(),
+        );
+
+        let updated = update_demand_status_with_notifications(
+            &demand_repo,
+            &affiliation_port,
+            &notif_repo,
+            command,
+        )
+        .await
+        .expect("deve atualizar com sucesso");
+
+        assert_eq!(updated.status(), DemandStatus::InAnalysis);
+
+        // Verifica notificação gerada
+        let notifs = notif_repo.all();
+        assert_eq!(notifs.len(), 1);
+        let notif = &notifs[0];
+        assert_eq!(notif.demand_id(), demand_id);
+        assert_eq!(notif.recipient_user_id(), author_id);
+        assert_eq!(notif.academic_center_id(), ca_id);
+        assert_eq!(notif.title(), "Demanda em análise");
+        assert!(notif.message().contains("A vistoria foi agendada"));
+        assert!(!notif.is_read());
+    }
+
+    #[tokio::test]
+    async fn should_not_dispatch_notification_when_manager_updates_own_demand() {
+        use crate::modules::demands::infrastructure::InMemoryDemandNotificationRepository;
+
+        let ca_id = sample_ca_id();
+        let manager_id = sample_manager_id();
+
+        let demand_repo = InMemoryDemandRepository::new();
+        let notif_repo = InMemoryDemandNotificationRepository::new();
+        // O próprio gestor é o autor da demanda!
+        let demand = create_test_demand(ca_id, manager_id, DemandForum::PhysicalSpace);
+        let demand_id = demand.id();
+        demand_repo.create(&demand).await.unwrap();
+
+        let affiliation_port = InMemoryAcademicAffiliationPort::new();
+        affiliation_port.set_affiliation(
+            manager_id,
+            ca_id,
+            AcademicAffiliation::new(true, true, true, None, vec![], true),
+        );
+
+        let command = UpdateDemandStatusCommand::new(
+            ca_id,
+            demand_id,
+            manager_id,
+            DemandStatus::InAnalysis,
+            "Eu mesmo estou analisando".to_string(),
+        );
+
+        let updated = update_demand_status_with_notifications(
+            &demand_repo,
+            &affiliation_port,
+            &notif_repo,
+            command,
+        )
+        .await
+        .expect("deve atualizar com sucesso");
+
+        assert_eq!(updated.status(), DemandStatus::InAnalysis);
+
+        // Regra de negócio: nunca notificar o próprio usuário por ação executada por ele mesmo
+        let notifs = notif_repo.all();
+        assert!(
+            notifs.is_empty(),
+            "nenhuma notificação deve ser gerada para ação própria"
+        );
     }
 }

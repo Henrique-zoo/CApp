@@ -22,14 +22,21 @@ use crate::{
     modules::{
         demands::{
             api::dto::{
-                CreateDemandRequest, DemandResponse, ListDemandsQueryParams,
+                CreateDemandRequest, DemandNotificationResponse, DemandResponse,
+                ListDemandNotificationsQueryParams, ListDemandsQueryParams,
                 UpdateDemandStatusRequest,
             },
             application::{
-                commands::{CreateDemandCommand, UpdateDemandStatusCommand},
+                commands::{
+                    CreateDemandCommand, MarkDemandNotificationAsReadCommand,
+                    UpdateDemandStatusCommand,
+                },
                 error::DemandApplicationError,
-                queries::{GetDemandQuery, ListDemandsQuery},
-                services::{create_demand, get_demand, list_demands, update_demand_status},
+                queries::{GetDemandQuery, ListDemandNotificationsQuery, ListDemandsQuery},
+                services::{
+                    create_demand, get_demand, list_demand_notifications, list_demands,
+                    mark_demand_notification_as_read, update_demand_status_with_notifications,
+                },
             },
             domain::entities::{DemandForum, DemandStatus},
         },
@@ -300,7 +307,89 @@ pub async fn handle_update_demand_status(
         opinion,
     );
 
-    let demand = update_demand_status(&state.pg_database, &state.pg_database, command).await?;
+    let demand = update_demand_status_with_notifications(
+        &state.pg_database,
+        &state.pg_database,
+        &state.pg_database,
+        command,
+    )
+    .await?;
 
     Ok((StatusCode::OK, Json(DemandResponse::from(demand))))
+}
+
+/// Consulta a lista de notificações de demandas do estudante autenticado.
+///
+/// # Rota
+///
+/// `GET /api/v1/demands/notifications`
+///
+/// # Query Params
+///
+/// - `unread_only`: Quando `true`, restringe aos avisos não lidos.
+/// - `limit`: Quantidade máxima de registros retornados.
+/// - `offset`: Quantidade de registros a pular.
+///
+/// # Respostas
+///
+/// - `200 OK`: Lista de notificações destinadas ao estudante autenticado.
+/// - `401 Unauthorized`: Credenciais ausentes ou inválidas.
+pub async fn handle_list_notifications(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<ListDemandNotificationsQueryParams>,
+) -> ApiResult<impl IntoResponse> {
+    let user_id = authenticate_caller(&state, &headers).await?;
+
+    let limit = params.limit.or(params.page_size);
+    let offset = params.offset.or_else(|| {
+        params
+            .page
+            .map(|p| p.saturating_sub(1) * limit.unwrap_or(50))
+    });
+
+    let query = ListDemandNotificationsQuery::new(
+        user_id,
+        params.unread_only.unwrap_or(false),
+        limit,
+        offset,
+    );
+
+    let notifications = list_demand_notifications(&state.pg_database, query).await?;
+
+    let response: Vec<DemandNotificationResponse> = notifications
+        .into_iter()
+        .map(DemandNotificationResponse::from)
+        .collect();
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+/// Marca uma notificação de demanda como lida pelo estudante destinatário.
+///
+/// # Rota
+///
+/// `PATCH /api/v1/demands/notifications/{notification_id}/read`
+///
+/// # Respostas
+///
+/// - `200 OK`: Notificação marcada como lida com sucesso.
+/// - `401 Unauthorized`: Credenciais ausentes ou inválidas.
+/// - `403 Forbidden`: Notificação pertence a outro usuário.
+/// - `404 Not Found`: Notificação inexistente.
+pub async fn handle_mark_notification_as_read(
+    State(state): State<AppState>,
+    Path(notification_id): Path<Uuid>,
+    headers: HeaderMap,
+) -> ApiResult<impl IntoResponse> {
+    let user_id = authenticate_caller(&state, &headers).await?;
+
+    let command = MarkDemandNotificationAsReadCommand::new(notification_id, user_id);
+
+    let notification = mark_demand_notification_as_read(&state.pg_database, command).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(DemandNotificationResponse::from(notification)),
+    ))
 }

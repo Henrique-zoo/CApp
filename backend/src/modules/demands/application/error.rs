@@ -87,6 +87,12 @@ pub enum DemandApplicationError {
 
     /// Falha na verificação de vínculo acadêmico ou representação do CA.
     Affiliation(AffiliationError),
+
+    /// A notificação de demanda solicitada não foi encontrada.
+    DemandNotificationNotFound(Uuid),
+
+    /// O usuário não tem permissão para acessar ou modificar a notificação informada.
+    DemandNotificationForbidden,
 }
 
 impl fmt::Display for DemandApplicationError {
@@ -134,6 +140,15 @@ impl fmt::Display for DemandApplicationError {
             Self::InvalidDemand(err) => write!(f, "{err}"),
             Self::Repository(err) => write!(f, "{err}"),
             Self::Affiliation(err) => write!(f, "{err}"),
+            Self::DemandNotificationNotFound(id) => {
+                write!(f, "notificação de demanda '{id}' não encontrada")
+            }
+            Self::DemandNotificationForbidden => {
+                write!(
+                    f,
+                    "usuário não tem permissão para acessar ou modificar esta notificação"
+                )
+            }
         }
     }
 }
