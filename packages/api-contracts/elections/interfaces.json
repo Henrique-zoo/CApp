@@ -44,27 +44,6 @@
   ],
   "ports": [
     {
-      "name": "AuthenticatedElector",
-      "owner": "B",
-      "implementedBy": "Adaptador Firebase/identidade na integração #386",
-      "input": [
-        "principal autenticado",
-        "electionId"
-      ],
-      "output": [
-        "userId interno",
-        "voterId opaco por conta/eleição",
-        "decisão de elegibilidade e validade institucional"
-      ],
-      "contract": [
-        "UID vem do token validado, nunca do corpo do voto.",
-        "Comunicação app/backend usa HTTPS e valida o certificado do servidor; tokens não são enviados inicialmente por HTTP para depois seguir redirecionamento.",
-        "Curso vem da evidência institucional vigente, sem declaração manual.",
-        "A consulta de contexto não reserva voto; nova participação reavalia elegibilidade.",
-        "Consulta de recibo aceito não exige nova chave ou permanência no curso."
-      ]
-    },
-    {
       "name": "CryptographicCodec",
       "owner": "C",
       "implementedBy": "Adaptadores puro Rust/Dart e implementação independente do auditor",
@@ -115,20 +94,24 @@
         {
           "name": "recordBallot",
           "input": [
-            "userId autenticado",
+            "par (electionId,userId) da eleição solicitada e da conta CApp autenticada",
             "SignedBallot",
             "manifesto/calendário esperados",
             "acumulador atualizado e revisão da eleição esperada para votação secreta"
           ],
           "output": [
-            "aceite com BoardEntry e Receipt persistidos",
-            "recuperação idempotente",
+            "Receipt assinado na votação secreta, inclusive na repetição do mesmo envio",
+            "confirmação sem conteúdo na votação identificada",
             "recusa ou conflito para repetir com nova leitura"
           ],
           "invariants": [
             "UNIQUE(electionId,userId).",
+            "A conta vem da autenticação. O voterId assinado deve corresponder ao userId dessa conta.",
+            "Um novo voto exige que o curso da evidência institucional vigente corresponda ao curso vinculado ao CA da eleição.",
+            "A participação guarda a cédula aceita com a chave pública de assinatura gerada para essa eleição.",
             "Mesmo submissionId com payload diferente é recusado.",
             "Mesmo voto/operação recupera recibo existente inclusive depois do encerramento, sem alterar o acumulador.",
+            "A consulta de recibo aceito exige a conta autenticada e dispensa nova chave ou permanência no curso.",
             "Outro submissionId depois de um voto aceito não registra voto novo.",
             "Índice, encadeamento, voto, participação, recibo e acumulador são confirmados juntos.",
             "Sem recibo para gravação abortada.",
