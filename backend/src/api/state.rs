@@ -5,8 +5,11 @@
 //! Firebase; não contêm identidade ou tokens de uma requisição específica.
 //! Nos testes, o adaptador PostgreSQL usa o banco associado ao cenário.
 
+use std::sync::Arc;
+
 use crate::{
     infrastructure::database::PgDatabase,
+    modules::elections::{crypto_wire::ServerSigner, infrastructure::PgElectionBoard},
     modules::identity::infrastructure::{
         firebase::{AppCheckVerifier, FirebaseTokenVerifier},
         microsoft::MicrosoftGraphClient,
@@ -72,6 +75,9 @@ pub struct AppState {
 
     /// Clientes externos compartilhados, sem credenciais de usuários armazenadas.
     pub clients: Clients,
+
+    /// O quadro de escrita existe quando a instalação fornece a chave de recibos.
+    pub(crate) election_board: Option<PgElectionBoard>,
 }
 
 impl AppState {
@@ -130,6 +136,13 @@ impl AppState {
         Self {
             pg_database,
             clients,
+            election_board: None,
         }
+    }
+
+    /// Habilita o aceite transacional de cédulas usando a chave prevista no manifesto.
+    pub fn with_election_signer(mut self, signer: Arc<ServerSigner>) -> Self {
+        self.election_board = Some(PgElectionBoard::new(self.pg_database.pool.clone(), signer));
+        self
     }
 }

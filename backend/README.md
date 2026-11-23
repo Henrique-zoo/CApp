@@ -380,6 +380,43 @@ exigem Firebase Auth e App Check. Após a confirmação, o `GET` devolve o
 identificador eleitoral opaco, a chave pública e o indicador de participação.
 Cadastrar a chave deixa a participação disponível para a votação.
 
+### Enviar e conferir um voto pelo Android
+
+O backend lê a chave de assinatura do servidor em `ELECTION_SIGNING_KEY_FILE`.
+Use um arquivo privado PEM PKCS#8 cuja chave pública corresponde à publicada
+no manifesto. Para executar o backend pelo Compose, defina essa variável com
+o caminho do arquivo no host e monte a chave usando o complemento eleitoral:
+
+```sh
+docker compose -f compose.yaml -f compose.elections.yaml --profile backend up --build
+```
+
+Com a sessão Firebase ativa, configure o endereço HTTPS do backend no app.
+Obtenha da comissão o hash do manifesto oficial para a eleição. O serviço
+abaixo usa a chave que o eleitor cadastrou na preparação.
+
+```dart
+final session = await dependencies.secretVoting.open(
+  electionId,
+  trustedManifestHash: manifestHash,
+);
+final vote = await session.savedVote() ?? await session.prepare(optionId);
+final accepted = await session.submit(vote);
+final included = await session.isIncluded(accepted);
+```
+
+`prepare` cifra a escolha no dispositivo e guarda a cédula assinada.
+`POST /elections/{id}/ballots` devolve o registro e o recibo com HTTP 201.
+Se a conexão cair, reenviar a cédula guardada recupera os mesmos documentos
+com HTTP 200. Uma nova submissão da mesma conta, depois do aceite, recebe
+HTTP 409. O cliente confere as assinaturas e consulta o quadro público para
+verificar a inclusão. Somente a cédula cifrada chega ao servidor.
+
+Os testes da entrega acadêmica cobrem o calendário inicial assinado.
+Reagendamento e cancelamento são tratados na #132. A assinatura e a validação
+das cifras comprovam a autoria e a estrutura da mensagem. A validade de uma
+única escolha por cédula depende do cliente neste protocolo (ver #383).
+
 O aceite recebe a conta autenticada e os bytes da cédula assinada. O banco
 fornece o identificador eleitoral e a chave cadastrada. O backend confere o
 vínculo institucional vigente antes de aceitar um novo voto. A chave privada

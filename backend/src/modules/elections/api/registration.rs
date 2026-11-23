@@ -4,17 +4,13 @@ use std::time::Duration;
 
 use axum::{
     Json,
-    body::Bytes,
-    extract::{Path, State, rejection::BytesRejection},
-    http::{
-        HeaderMap, StatusCode,
-        header::{CACHE_CONTROL, CONTENT_TYPE},
-    },
+    extract::{Path, State},
+    http::{StatusCode, header::CACHE_CONTROL},
     response::IntoResponse,
 };
 use uuid::Uuid;
 
-use super::account::AuthenticatedAccount;
+use super::{account::AuthenticatedAccount, signed_json::SignedJson};
 use crate::{
     api::{
         error::{ApiError, ApiResult},
@@ -45,37 +41,8 @@ pub(super) async fn register(
     State(state): State<AppState>,
     AuthenticatedAccount(identity): AuthenticatedAccount,
     Path(election_id): Path<Uuid>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
+    SignedJson(raw): SignedJson,
 ) -> ApiResult<impl IntoResponse> {
-    let mut types = headers.get_all(CONTENT_TYPE).iter();
-    let media_type = types
-        .next()
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next());
-    if types.next().is_some()
-        || !media_type.is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"))
-    {
-        return Err(ApiError::new(
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "unsupported_media_type",
-            "Envie a prova como application/json.",
-            None,
-        ));
-    }
-    let raw = body.map_err(|error| {
-        if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
-            ApiError::new(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "payload_too_large",
-                "Prova de cadastro excede o limite.",
-                None,
-            )
-        } else {
-            ApiError::bad_request()
-        }
-    })?;
-    // O codec verifica o JSON original para detectar propriedades duplicadas na prova assinada.
     let result = tokio::time::timeout(
         Duration::from_secs(15),
         PgVoterRegistry::register(&state.pg_database.pool, election_id, identity, &raw),

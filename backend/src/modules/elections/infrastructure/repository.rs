@@ -741,7 +741,9 @@ fn validate_signing_origin(board: &BoardRow, signer: &ServerSigner) -> Result<()
             "origem ou chave de assinatura divergente",
         ));
     }
-    verify_signed_object(&board.manifest, &key)?;
-    verify_signed_object(&board.calendar_origin, &key)?;
+    verify_signed_object(&board.manifest, &key)
+        .map_err(|_| BoardError::InvalidArtifact("assinatura do manifesto armazenado"))?;
+    verify_signed_object(&board.calendar_origin, &key)
+        .map_err(|_| BoardError::InvalidArtifact("assinatura do calendário armazenado"))?;
     Ok(())
 }

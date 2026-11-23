@@ -7,6 +7,8 @@
 //!   e sem espaços em branco. Não é verificada a existência externa do projeto.
 //! - `FIREBASE_PROJECT_NUMBER`: número do projeto usado no emissor/audiência App Check.
 //! - `FIREBASE_APP_CHECK_APP_IDS`: App IDs permitidos, separados por vírgula.
+//! - `ELECTION_SIGNING_KEY_FILE`: arquivo PEM PKCS#8 da chave RSA da eleição.
+//!   Quando ausente, o servidor atende as rotas de leitura e cadastro e o envio de votos retorna 503.
 //! - `RUST_LOG`: filtro opcional do `tracing`; ausente ou inválido usa `info`.
 //! - Endereço HTTP: `0.0.0.0:3000`, fixo nesta implementação.
 //!
@@ -34,6 +36,7 @@ use backend::{
         state::{AppState, Clients},
     },
     infrastructure::database::{MIGRATOR, PgDatabase},
+    modules::elections::crypto_wire::ServerSigner,
     modules::identity::infrastructure::{
         firebase::{AppCheckVerifier, FirebaseTokenVerifier},
         microsoft::MicrosoftGraphClient,
@@ -120,13 +123,22 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Migrations do banco de dados atualizadas");
 
-    let pg_database = PgDatabase::new(pool);
+    let mut state = AppState::new(PgDatabase::new(pool), clients);
+    if let Some(path) = env::var_os("ELECTION_SIGNING_KEY_FILE") {
+        let pem = tokio::fs::read_to_string(path)
+            .await
+            .context("Não foi possível ler ELECTION_SIGNING_KEY_FILE")?;
+        let signer = ServerSigner::from_pkcs8_pem(&pem).context(
+            "ELECTION_SIGNING_KEY_FILE exige chave RSA privada PEM PKCS#8 do protocolo eleitoral",
+        )?;
+        state = state.with_election_signer(signer.into());
+    }
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await
         .context("Não foi possível criar o socket TCP")?;
 
-    let service = api::router::create_router(AppState::new(pg_database, clients));
+    let service = api::router::create_router(state);
 
     axum::serve(listener, service).await?;
 

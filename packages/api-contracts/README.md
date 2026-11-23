@@ -92,6 +92,7 @@ contrato contra a qual foi desenvolvida e testada.
 | --- | --- | --- |
 | 4.0.0 | 1.0.0+1 | Curso institucional validado e sugestão transitória de e-mail. |
 | 4.2.0 | 1.0.0+1 | Cadastro eleitoral prévio e consulta da própria participação no cliente móvel. |
+| 4.3.0 | 1.0.0+1 | Envio da cédula assinada e recuperação do recibo no Android. |
 
 A tabela deve ser atualizada ao preparar uma nova versão do aplicativo ou
 do contrato. Versões não registradas não recebem garantia de compatibilidade
@@ -112,6 +113,7 @@ compatibilidade durante a evolução da API.
 | `GET /health` | `backend/src/api/router.rs` | `mobile/lib/src/infrastructure/backend/monitoring/monitoring_api.dart` | `mobile/test/src/infrastructure/backend/monitoring/monitoring_api_test.dart` |
 | `GET /ready` | `backend/src/api/router.rs` | `mobile/lib/src/infrastructure/backend/monitoring/monitoring_api.dart` | `mobile/test/src/infrastructure/backend/monitoring/monitoring_api_test.dart` |
 | `GET /elections/{id}/registration/me`, `PUT /elections/{id}/registration/me` | `backend/src/modules/elections/api/registration.rs` | `mobile/lib/src/infrastructure/backend/elections/registration_api.dart` | `backend/tests/integration/repositories/election_board/registration.rs`, `mobile/test/src/modules/elections/voter_registration_client_test.dart` |
+| `POST /elections/{id}/ballots` | `backend/src/modules/elections/api/ballots.rs` | `mobile/lib/src/infrastructure/backend/elections/ballot_api.dart` | `backend/tests/integration/repositories/election_board/ballots.rs` |
 | `POST /auth/institutional/verify` | `backend/src/modules/identity/api/` | `mobile/lib/src/infrastructure/backend/identity/identity_api.dart` | `backend/src/modules/identity/api/tests.rs`, `backend/tests/integration/http/identity.rs`, `mobile/test/src/infrastructure/backend/identity/identity_api_test.dart` e `mobile/test/src/modules/identity/infrastructure/backend/backend_institutional_identity_gateway_test.dart` |
 | `GET /auth/session` | `backend/src/modules/identity/api/` | `mobile/lib/src/infrastructure/backend/identity/identity_api.dart` | `backend/tests/integration/http/identity.rs`, `mobile/test/src/infrastructure/backend/identity/identity_api_test.dart` e `mobile/test/src/modules/identity/application/account_session_test.dart` |
 | `PUT /users/me/profile` | `backend/src/modules/identity/api/` | `mobile/lib/src/infrastructure/backend/identity/identity_api.dart` | `backend/tests/integration/http/identity.rs`, `mobile/test/src/infrastructure/backend/identity/identity_api_test.dart` e `mobile/test/src/modules/identity/application/account_session_test.dart` |
