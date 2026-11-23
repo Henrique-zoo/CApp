@@ -52,6 +52,11 @@ pub fn identity_router() -> Router<AppState> {
     crate::modules::identity::api::router().route("/protected", get(protected_identity))
 }
 
+/// Compõe as rotas reais de identidade e de Centros Acadêmicos para os testes de integração.
+pub fn academic_center_router() -> Router<AppState> {
+    crate::modules::identity::api::router().merge(crate::modules::ca::api::router())
+}
+
 /// Expõe o resultado do extractor para que o teste confira a identidade autenticada.
 async fn protected_identity(identity: AuthenticatedInstitutionalIdentity) -> Json<Value> {
     Json(json!({

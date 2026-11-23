@@ -4,5 +4,7 @@
 //! invariantes e integridade estrutural.
 
 mod academic_center;
+mod poll;
 
 pub use academic_center::*;
+pub use poll::*;

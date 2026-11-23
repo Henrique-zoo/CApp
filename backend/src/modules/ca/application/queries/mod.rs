@@ -1,4 +1,7 @@
-//! Espaço reservado para consultas do módulo de Centros Acadêmicos.
-//!
-//! Ainda não define operações. Este módulo organizará os casos de uso de leitura
-//! e a obtenção dos dados necessários às respostas da aplicação.
+//! Consultas (queries) do módulo de Centros Acadêmicos.
+
+pub mod get_poll;
+pub mod list_polls;
+
+pub use get_poll::*;
+pub use list_polls::*;
