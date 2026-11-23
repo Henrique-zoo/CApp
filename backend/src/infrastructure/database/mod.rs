@@ -80,4 +80,83 @@ impl PgDatabase {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+
+    /// Retorna uma referência ao pool de conexões compartilhado.
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::modules::faq::application::ports::FaqRepository for PgDatabase {
+    async fn save(
+        &self,
+        entry: &crate::modules::faq::domain::entities::faq_entry::FaqEntry,
+    ) -> Result<(), crate::modules::faq::application::error::FaqRepositoryError> {
+        let repo = crate::modules::faq::infrastructure::repository::PostgresFaqRepository::new(
+            self.pool.clone(),
+        );
+        repo.save(entry).await
+    }
+
+    async fn find_by_id(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<
+        Option<crate::modules::faq::domain::entities::faq_entry::FaqEntry>,
+        crate::modules::faq::application::error::FaqRepositoryError,
+    > {
+        let repo = crate::modules::faq::infrastructure::repository::PostgresFaqRepository::new(
+            self.pool.clone(),
+        );
+        repo.find_by_id(id).await
+    }
+
+    async fn find_by_academic_center_id(
+        &self,
+        academic_center_id: uuid::Uuid,
+    ) -> Result<
+        Vec<crate::modules::faq::domain::entities::faq_entry::FaqEntry>,
+        crate::modules::faq::application::error::FaqRepositoryError,
+    > {
+        let repo = crate::modules::faq::infrastructure::repository::PostgresFaqRepository::new(
+            self.pool.clone(),
+        );
+        repo.find_by_academic_center_id(academic_center_id).await
+    }
+
+    async fn check_ca_management_access(
+        &self,
+        academic_center_id: uuid::Uuid,
+        user_id: uuid::Uuid,
+    ) -> Result<
+        crate::modules::faq::application::ports::CaManagementAccess,
+        crate::modules::faq::application::error::FaqRepositoryError,
+    > {
+        let repo = crate::modules::faq::infrastructure::repository::PostgresFaqRepository::new(
+            self.pool.clone(),
+        );
+        repo.check_ca_management_access(academic_center_id, user_id)
+            .await
+    }
+
+    async fn update(
+        &self,
+        entry: &crate::modules::faq::domain::entities::faq_entry::FaqEntry,
+    ) -> Result<(), crate::modules::faq::application::error::FaqRepositoryError> {
+        let repo = crate::modules::faq::infrastructure::repository::PostgresFaqRepository::new(
+            self.pool.clone(),
+        );
+        repo.update(entry).await
+    }
+
+    async fn delete(
+        &self,
+        id: &uuid::Uuid,
+    ) -> Result<bool, crate::modules::faq::application::error::FaqRepositoryError> {
+        let repo = crate::modules::faq::infrastructure::repository::PostgresFaqRepository::new(
+            self.pool.clone(),
+        );
+        repo.delete(id).await
+    }
 }

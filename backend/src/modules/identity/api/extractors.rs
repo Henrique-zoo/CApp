@@ -29,6 +29,7 @@ use crate::{
 /// chaves públicas se seu cache precisar de atualização. A identidade extraída
 /// não concede permissões específicas como administração de CA.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct AuthenticatedInstitutionalIdentity(
     /// Identidade disponibilizada à operação protegida.
     pub(crate) AuthenticatedIdentity,

@@ -80,6 +80,7 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         .merge(crate::modules::identity::api::router())
         .merge(crate::modules::elections::api::protected_receipt_routes())
+        .merge(crate::modules::faq::api::router())
         .route("/health", get(|| async { "O servidor está saudável." }))
         .route(
             "/ready",
