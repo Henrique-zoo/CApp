@@ -1028,7 +1028,7 @@ async fn http_faq_navigation_and_search_flows() {
     let (status, body) = request(
         &app,
         "GET",
-        &format!("/api/v1/academic-centers/{active_ca_id}/faq?q=matrícula"),
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq?q=matr%C3%ADcula"),
         Some(&student_jwt),
         None,
     )
@@ -1045,7 +1045,7 @@ async fn http_faq_navigation_and_search_flows() {
     let (status, body) = request(
         &app,
         "GET",
-        &format!("/api/v1/academic-centers/{active_ca_id}/faq?search=matrícula"),
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq?search=matr%C3%ADcula"),
         Some(&student_jwt),
         None,
     )
@@ -1074,7 +1074,9 @@ async fn http_faq_navigation_and_search_flows() {
     let (status, body) = request(
         &app,
         "GET",
-        &format!("/api/v1/academic-centers/{active_ca_id}/faq?q=termo sem correspondência"),
+        &format!(
+            "/api/v1/academic-centers/{active_ca_id}/faq?q=termo%20sem%20correspond%C3%AAncia"
+        ),
         Some(&student_jwt),
         None,
     )
@@ -1114,7 +1116,7 @@ async fn http_faq_navigation_and_search_flows() {
     let (status, body) = request(
         &app,
         "GET",
-        &format!("/api/v1/academic-centers/{active_ca_id}/faq?category=Apoio Acadêmico"),
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq?category=Apoio%20Acad%C3%AAmico"),
         Some(&student_jwt),
         None,
     )
