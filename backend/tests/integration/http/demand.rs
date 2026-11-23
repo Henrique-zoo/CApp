@@ -285,7 +285,7 @@ async fn create_test_student(
     course_name: Option<&str>,
 ) -> Uuid {
     let institution = sqlx::query(
-        "SELECT microsoft_tenant_id, microsoft_student_group_id FROM institution WHERE id = ",
+        "SELECT microsoft_tenant_id, microsoft_student_group_id FROM institution WHERE id = $1",
     )
     .bind(institution_id)
     .fetch_one(pool)
