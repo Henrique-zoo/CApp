@@ -1,4 +1,4 @@
-//! Espaço reservado para eventos de domínio do módulo de demandas.
+//! Eventos de domínio do módulo de demandas.
 //!
-//! Ainda não define eventos ou mecanismos de publicação. Os tipos futuros
-//! representarão fatos relevantes ocorridos no negócio.
+//! Representam os fatos relevantes ocorridos no ciclo de vida das demandas,
+//! tais como abertura de solicitações e transições de status.

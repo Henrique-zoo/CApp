@@ -1,4 +1,8 @@
-//! Espaço reservado para entidades do módulo de demandas.
+//! Entidades do módulo de demandas.
 //!
-//! Ainda não define tipos. Os modelos de domínio deverão expressar identidade
-//! e estado do negócio sem depender dos formatos HTTP ou SQL.
+//! Reúne os modelos de domínio de demanda acadêmica, histórico de alterações,
+//! fóruns e estados do ciclo de vida.
+
+mod demand;
+
+pub use demand::*;

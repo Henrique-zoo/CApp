@@ -1,8 +1,8 @@
-//! Camada de domínio prevista para o módulo de demandas.
+//! Camada de domínio do módulo de demandas.
 //!
-//! [`entities`], [`rules`] e [`events`] reservarão os modelos, suas invariantes
-//! e os fatos relevantes do negócio. Ainda não há regras implementadas;
-//! essa camada deve permanecer independente de HTTP e banco de dados.
+//! [`entities`], [`rules`] e [`events`] organizam os modelos de demandas,
+//! suas invariantes estruturais e as regras de ciclo de vida nos fóruns
+//! institucional e de espaço físico do CA.
 
 pub mod entities;
 pub mod events;
