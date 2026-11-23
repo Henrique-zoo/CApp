@@ -529,3 +529,119 @@ async fn should_enforce_mandate_database_constraints() {
 
     db.close().await;
 }
+
+#[tokio::test]
+async fn should_preserve_concluded_mandates_and_members_history() {
+    use backend::infrastructure::database::PgDatabase;
+    use backend::modules::ca::application::ports::MandateRepository;
+    use backend::modules::ca::domain::entities::{Mandate, MandateMember};
+    use chrono::{Duration, NaiveDate};
+
+    let db = TestDatabase::new().await;
+    let institution_id =
+        create_test_institution(&db.pool, "Universidade Historico Repositorio").await;
+    let user_id = Uuid::new_v4();
+    let ca_id = Uuid::new_v4();
+
+    sqlx::query("INSERT INTO app_user (id, firebase_uid) VALUES ($1, $2)")
+        .bind(user_id)
+        .bind(format!("firebase-{user_id}"))
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, created_by_id, name, acronym, status) \
+         VALUES ($1, $2, $3, 'CA Histórico', 'CAH', 'active')",
+    )
+    .bind(ca_id)
+    .bind(institution_id)
+    .bind(user_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let repo = PgDatabase::new(db.pool.clone());
+
+    // 1. Cria primeiro mandato com membros
+    let mut m1 = Mandate::new(
+        ca_id,
+        user_id,
+        Some("Gestão 2025"),
+        NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
+    )
+    .unwrap();
+
+    let member_1 = MandateMember::new("Presidente 2025", "Presidente", Some(user_id)).unwrap();
+    let member_2 = MandateMember::new("Secretário Geral", "Secretário", None).unwrap();
+    m1.add_member(member_1.clone());
+    m1.add_member(member_2.clone());
+
+    repo.save(&m1).await.expect("salva m1 com membros");
+
+    // 2. Conclui m1 e desliga um membro antes
+    m1.disaffiliate_member(member_2.id(), m1.created_at() + Duration::days(180))
+        .unwrap();
+    m1.conclude(m1.created_at() + Duration::days(365)).unwrap();
+    repo.save(&m1).await.expect("atualiza m1 concluído");
+
+    // 3. Cria segundo mandato com novo membro
+    let mut m2 = Mandate::new(
+        ca_id,
+        user_id,
+        Some("Gestão 2026"),
+        NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+        NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
+    )
+    .unwrap();
+    let member_3 = MandateMember::new("Presidente 2026", "Presidente", Some(user_id)).unwrap();
+    m2.add_member(member_3);
+    repo.save(&m2).await.expect("salva m2");
+
+    // 4. Consulta histórico completo (find_all_by_academic_center_id)
+    let all = repo.find_all_by_academic_center_id(ca_id).await.unwrap();
+    assert_eq!(all.len(), 2);
+    // Ordenação: mais recente primeiro (start_date DESC)
+    assert_eq!(all[0].id(), m2.id());
+    assert_eq!(all[1].id(), m1.id());
+
+    // Verifica integridade imutável dos dados preservados de m1
+    let loaded_m1 = &all[1];
+    assert!(loaded_m1.is_concluded());
+    assert!(loaded_m1.concluded_at().is_some());
+    assert_eq!(loaded_m1.members().len(), 2);
+
+    let loaded_m1_m2 = loaded_m1
+        .members()
+        .iter()
+        .find(|m| m.id() == member_2.id())
+        .unwrap();
+    assert!(!loaded_m1_m2.is_active());
+    assert!(loaded_m1_m2.left_at().is_some());
+
+    let loaded_m1_m1 = loaded_m1
+        .members()
+        .iter()
+        .find(|m| m.id() == member_1.id())
+        .unwrap();
+    assert!(loaded_m1_m1.is_active());
+
+    // 5. find_active_by_academic_center_id retorna apenas m2
+    let active = repo
+        .find_active_by_academic_center_id(ca_id)
+        .await
+        .unwrap()
+        .expect("deve ter ativo");
+    assert_eq!(active.id(), m2.id());
+
+    // 6. find_by_id recupera mandate com membros
+    let by_id = repo
+        .find_by_id(m1.id())
+        .await
+        .unwrap()
+        .expect("encontra m1 por id");
+    assert_eq!(by_id.members().len(), 2);
+
+    db.close().await;
+}

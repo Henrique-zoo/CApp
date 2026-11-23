@@ -25,6 +25,30 @@ pub fn router() -> Router<AppState> {
             get(handlers::get_current_mandate),
         )
         .route(
+            "/academic-centers/{id}/mandates/history",
+            get(handlers::get_mandates_history),
+        )
+        .route(
+            "/academic-centers/{id}/mandates/conclude",
+            post(handlers::conclude_active_mandate),
+        )
+        .route(
+            "/academic-centers/{id}/mandates/transition",
+            post(handlers::transition_mandate),
+        )
+        .route(
+            "/academic-centers/{id}/mandates/{mandate_id}",
+            get(handlers::get_mandate_by_id),
+        )
+        .route(
+            "/academic-centers/{id}/mandates/{mandate_id}/members",
+            post(handlers::add_mandate_member),
+        )
+        .route(
+            "/academic-centers/{id}/mandates/{mandate_id}/members/{member_id}/disaffiliate",
+            post(handlers::disaffiliate_mandate_member),
+        )
+        .route(
             "/academic-centers/{id}/mandate",
             post(handlers::configure_initial_mandate).get(handlers::get_current_mandate),
         )
@@ -35,6 +59,30 @@ pub fn router() -> Router<AppState> {
         .route(
             "/api/v1/academic-centers/{id}/mandates/current",
             get(handlers::get_current_mandate),
+        )
+        .route(
+            "/api/v1/academic-centers/{id}/mandates/history",
+            get(handlers::get_mandates_history),
+        )
+        .route(
+            "/api/v1/academic-centers/{id}/mandates/conclude",
+            post(handlers::conclude_active_mandate),
+        )
+        .route(
+            "/api/v1/academic-centers/{id}/mandates/transition",
+            post(handlers::transition_mandate),
+        )
+        .route(
+            "/api/v1/academic-centers/{id}/mandates/{mandate_id}",
+            get(handlers::get_mandate_by_id),
+        )
+        .route(
+            "/api/v1/academic-centers/{id}/mandates/{mandate_id}/members",
+            post(handlers::add_mandate_member),
+        )
+        .route(
+            "/api/v1/academic-centers/{id}/mandates/{mandate_id}/members/{member_id}/disaffiliate",
+            post(handlers::disaffiliate_mandate_member),
         )
         .route(
             "/api/v1/academic-centers/{id}/mandate",

@@ -20,7 +20,9 @@ use crate::{
             AcademicCenterRepository, AcademicCenterRepositoryError, MandateRepository,
             MandateRepositoryError,
         },
-        domain::entities::{AcademicCenter, AcademicCenterStatus, Mandate, MandateStatus},
+        domain::entities::{
+            AcademicCenter, AcademicCenterStatus, Mandate, MandateMember, MandateStatus,
+        },
     },
 };
 
@@ -85,6 +87,8 @@ pub struct MandateRow {
     pub end_date: NaiveDate,
     /// Situação do mandato ('active', 'concluded' ou 'archived').
     pub status: String,
+    /// Instante UTC de encerramento do mandato, se houver.
+    pub concluded_at: Option<DateTime<Utc>>,
     /// Instante UTC de registro da configuração do mandato.
     pub created_at: DateTime<Utc>,
     /// Instante UTC da última modificação do registro.
@@ -93,7 +97,10 @@ pub struct MandateRow {
 
 impl MandateRow {
     /// Converte o registro SQL para a entidade de domínio [`Mandate`].
-    pub fn into_entity(self) -> Result<Mandate, MandateRepositoryError> {
+    pub fn into_entity(
+        self,
+        members: Vec<MandateMember>,
+    ) -> Result<Mandate, MandateRepositoryError> {
         let status = MandateStatus::from_str(&self.status)
             .map_err(|e| MandateRepositoryError::Internal(e.to_string()))?;
 
@@ -105,8 +112,47 @@ impl MandateRow {
             self.start_date,
             self.end_date,
             status,
+            self.concluded_at,
+            members,
             self.created_at,
             self.updated_at,
+        )
+        .map_err(|e| MandateRepositoryError::Internal(e.to_string()))
+    }
+}
+
+/// Estrutura de mapeamento relacional (Row) da tabela `academic_center_mandate_member`.
+#[derive(Debug, sqlx::FromRow)]
+pub struct MandateMemberRow {
+    /// Identificador único do vínculo do integrante.
+    pub id: Uuid,
+    /// Identificador do mandato correspondente.
+    pub mandate_id: Uuid,
+    /// Identificador opcional do usuário associado.
+    pub user_id: Option<Uuid>,
+    /// Nome do integrante.
+    pub name: String,
+    /// Cargo ocupado.
+    pub role: String,
+    /// Se o vínculo ativo permanece ativo.
+    pub is_active: bool,
+    /// Instante UTC de início da vinculação.
+    pub joined_at: DateTime<Utc>,
+    /// Instante UTC de desvinculação, se aplicável.
+    pub left_at: Option<DateTime<Utc>>,
+}
+
+impl MandateMemberRow {
+    /// Converte o registro SQL para a entidade de domínio [`MandateMember`].
+    pub fn into_entity(self) -> Result<MandateMember, MandateRepositoryError> {
+        MandateMember::reconstitute(
+            self.id,
+            self.user_id,
+            self.name,
+            self.role,
+            self.is_active,
+            self.joined_at,
+            self.left_at,
         )
         .map_err(|e| MandateRepositoryError::Internal(e.to_string()))
     }
@@ -142,15 +188,21 @@ impl AcademicCenterRepository for PgDatabase {
 #[async_trait]
 impl MandateRepository for PgDatabase {
     async fn save(&self, mandate: &Mandate) -> Result<(), MandateRepositoryError> {
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            tracing::error!(%e, "Falha ao iniciar transação para persistir mandato");
+            MandateRepositoryError::Internal(e.to_string())
+        })?;
+
         let result = sqlx::query(
             "INSERT INTO academic_center_mandate ( \
-                 id, academic_center_id, created_by_id, title, start_date, end_date, status, created_at, updated_at \
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+                 id, academic_center_id, created_by_id, title, start_date, end_date, status, concluded_at, created_at, updated_at \
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
              ON CONFLICT (id) DO UPDATE SET \
                  title = EXCLUDED.title, \
                  start_date = EXCLUDED.start_date, \
                  end_date = EXCLUDED.end_date, \
                  status = EXCLUDED.status, \
+                 concluded_at = EXCLUDED.concluded_at, \
                  updated_at = EXCLUDED.updated_at",
         )
         .bind(mandate.id())
@@ -160,28 +212,68 @@ impl MandateRepository for PgDatabase {
         .bind(mandate.start_date())
         .bind(mandate.end_date())
         .bind(mandate.status().as_str())
+        .bind(mandate.concluded_at())
         .bind(mandate.created_at())
         .bind(mandate.updated_at())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await;
 
         match result {
-            Ok(_) => Ok(()),
             Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
-                Err(MandateRepositoryError::Conflict(
+                return Err(MandateRepositoryError::Conflict(
                     "já existe um mandato de gestão ativo para este Centro Acadêmico".into(),
-                ))
+                ));
             }
             Err(e) => {
                 tracing::error!(%e, id = %mandate.id(), "Falha ao persistir mandato");
-                Err(MandateRepositoryError::Internal(e.to_string()))
+                return Err(MandateRepositoryError::Internal(e.to_string()));
             }
+            Ok(_) => {}
         }
+
+        for member in mandate.members() {
+            sqlx::query(
+                "INSERT INTO academic_center_mandate_member ( \
+                     id, mandate_id, user_id, name, role, is_active, joined_at, left_at, created_at, updated_at \
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
+                 ON CONFLICT (id) DO UPDATE SET \
+                     user_id = EXCLUDED.user_id, \
+                     name = EXCLUDED.name, \
+                     role = EXCLUDED.role, \
+                     is_active = EXCLUDED.is_active, \
+                     joined_at = EXCLUDED.joined_at, \
+                     left_at = EXCLUDED.left_at, \
+                     updated_at = EXCLUDED.updated_at",
+            )
+            .bind(member.id())
+            .bind(mandate.id())
+            .bind(member.user_id())
+            .bind(member.name())
+            .bind(member.role())
+            .bind(member.is_active())
+            .bind(member.joined_at())
+            .bind(member.left_at())
+            .bind(member.joined_at())
+            .bind(mandate.updated_at())
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                tracing::error!(%e, member_id = %member.id(), "Falha ao persistir integrante de mandato");
+                MandateRepositoryError::Internal(e.to_string())
+            })?;
+        }
+
+        tx.commit().await.map_err(|e| {
+            tracing::error!(%e, "Falha ao comitar transação de mandato");
+            MandateRepositoryError::Internal(e.to_string())
+        })?;
+
+        Ok(())
     }
 
     async fn find_by_id(&self, id: Uuid) -> Result<Option<Mandate>, MandateRepositoryError> {
         let row = sqlx::query_as::<_, MandateRow>(
-            "SELECT id, academic_center_id, created_by_id, title, start_date, end_date, status, created_at, updated_at \
+            "SELECT id, academic_center_id, created_by_id, title, start_date, end_date, status, concluded_at, created_at, updated_at \
              FROM academic_center_mandate \
              WHERE id = $1",
         )
@@ -193,7 +285,30 @@ impl MandateRepository for PgDatabase {
             MandateRepositoryError::Internal(e.to_string())
         })?;
 
-        row.map(MandateRow::into_entity).transpose()
+        if let Some(row) = row {
+            let member_rows = sqlx::query_as::<_, MandateMemberRow>(
+                "SELECT id, mandate_id, user_id, name, role, is_active, joined_at, left_at, created_at, updated_at \
+                 FROM academic_center_mandate_member \
+                 WHERE mandate_id = $1 \
+                 ORDER BY joined_at ASC",
+            )
+            .bind(id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                tracing::error!(%e, %id, "Falha ao consultar integrantes de mandato");
+                MandateRepositoryError::Internal(e.to_string())
+            })?;
+
+            let members = member_rows
+                .into_iter()
+                .map(MandateMemberRow::into_entity)
+                .collect::<Result<Vec<_>, _>>()?;
+
+            row.into_entity(members).map(Some)
+        } else {
+            Ok(None)
+        }
     }
 
     async fn find_active_by_academic_center_id(
@@ -201,7 +316,7 @@ impl MandateRepository for PgDatabase {
         academic_center_id: Uuid,
     ) -> Result<Option<Mandate>, MandateRepositoryError> {
         let row = sqlx::query_as::<_, MandateRow>(
-            "SELECT id, academic_center_id, created_by_id, title, start_date, end_date, status, created_at, updated_at \
+            "SELECT id, academic_center_id, created_by_id, title, start_date, end_date, status, concluded_at, created_at, updated_at \
              FROM academic_center_mandate \
              WHERE academic_center_id = $1 AND status = 'active' \
              ORDER BY created_at DESC \
@@ -215,7 +330,30 @@ impl MandateRepository for PgDatabase {
             MandateRepositoryError::Internal(e.to_string())
         })?;
 
-        row.map(MandateRow::into_entity).transpose()
+        if let Some(row) = row {
+            let member_rows = sqlx::query_as::<_, MandateMemberRow>(
+                "SELECT id, mandate_id, user_id, name, role, is_active, joined_at, left_at, created_at, updated_at \
+                 FROM academic_center_mandate_member \
+                 WHERE mandate_id = $1 \
+                 ORDER BY joined_at ASC",
+            )
+            .bind(row.id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                tracing::error!(%e, mandate_id = %row.id, "Falha ao consultar integrantes de mandato ativo");
+                MandateRepositoryError::Internal(e.to_string())
+            })?;
+
+            let members = member_rows
+                .into_iter()
+                .map(MandateMemberRow::into_entity)
+                .collect::<Result<Vec<_>, _>>()?;
+
+            row.into_entity(members).map(Some)
+        } else {
+            Ok(None)
+        }
     }
 
     async fn find_all_by_academic_center_id(
@@ -223,10 +361,10 @@ impl MandateRepository for PgDatabase {
         academic_center_id: Uuid,
     ) -> Result<Vec<Mandate>, MandateRepositoryError> {
         let rows = sqlx::query_as::<_, MandateRow>(
-            "SELECT id, academic_center_id, created_by_id, title, start_date, end_date, status, created_at, updated_at \
+            "SELECT id, academic_center_id, created_by_id, title, start_date, end_date, status, concluded_at, created_at, updated_at \
              FROM academic_center_mandate \
              WHERE academic_center_id = $1 \
-             ORDER BY start_date DESC",
+             ORDER BY start_date DESC, created_at DESC",
         )
         .bind(academic_center_id)
         .fetch_all(&self.pool)
@@ -236,7 +374,31 @@ impl MandateRepository for PgDatabase {
             MandateRepositoryError::Internal(e.to_string())
         })?;
 
-        rows.into_iter().map(MandateRow::into_entity).collect()
+        let mut mandates = Vec::with_capacity(rows.len());
+        for row in rows {
+            let member_rows = sqlx::query_as::<_, MandateMemberRow>(
+                "SELECT id, mandate_id, user_id, name, role, is_active, joined_at, left_at, created_at, updated_at \
+                 FROM academic_center_mandate_member \
+                 WHERE mandate_id = $1 \
+                 ORDER BY joined_at ASC",
+            )
+            .bind(row.id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                tracing::error!(%e, mandate_id = %row.id, "Falha ao listar integrantes do mandato");
+                MandateRepositoryError::Internal(e.to_string())
+            })?;
+
+            let members = member_rows
+                .into_iter()
+                .map(MandateMemberRow::into_entity)
+                .collect::<Result<Vec<_>, _>>()?;
+
+            mandates.push(row.into_entity(members)?);
+        }
+
+        Ok(mandates)
     }
 }
 
@@ -292,7 +454,7 @@ impl MandateRepository for InMemoryMandateRepository {
     async fn save(&self, mandate: &Mandate) -> Result<(), MandateRepositoryError> {
         let mut list = self.mandates.write().unwrap();
 
-        // Verifica unicidade de mandato ativo
+        // Verifica unicidade de mandato ativo por Centro Acadêmico
         if mandate.is_active() {
             let conflict = list.iter().any(|m| {
                 m.id() != mandate.id()
@@ -338,13 +500,22 @@ impl MandateRepository for InMemoryMandateRepository {
         &self,
         academic_center_id: Uuid,
     ) -> Result<Vec<Mandate>, MandateRepositoryError> {
-        Ok(self
+        let mut list: Vec<Mandate> = self
             .mandates
             .read()
             .unwrap()
             .iter()
             .filter(|m| m.academic_center_id() == academic_center_id)
             .cloned()
-            .collect())
+            .collect();
+
+        // Ordenação cronológica estrita: start_date DESC, created_at DESC
+        list.sort_by(|a, b| {
+            b.start_date()
+                .cmp(&a.start_date())
+                .then_with(|| b.created_at().cmp(&a.created_at()))
+        });
+
+        Ok(list)
     }
 }
