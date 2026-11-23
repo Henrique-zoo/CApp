@@ -1,0 +1,123 @@
+//! Três sessões registram as próprias chaves e conferem seus votos no mesmo quadro.
+
+use super::{
+    fixtures::{COURSE, Origin, Voter, institutional_evidence, server},
+    public_evidence,
+    session::SessionApi,
+};
+use crate::support::TestDatabase;
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
+use backend::modules::elections::{
+    application::board::ElectionBoard,
+    crypto_wire::{BallotContext, object_digest, verify_record},
+    infrastructure::{PgElectionBoard, PgVoterRegistry},
+};
+use chrono::{Duration, Utc};
+use serde_json::{Value, json};
+use std::collections::HashSet;
+use uuid::Uuid;
+
+#[tokio::test]
+async fn three_distinct_voters_can_verify_their_receipts_in_submission_order() {
+    let db = TestDatabase::new().await;
+    let signer = server();
+    let api = SessionApi::with_signer(&db.pool, Some(signer.clone())).await;
+    let mut voters = Vec::new();
+    for template in ["valid/ballot-0", "valid/ballot-1", "valid/ballot-0"] {
+        let voter = Voter::new(&db.pool, template).await;
+        institutional_evidence(&db.pool, voter.account).await;
+        voters.push(voter);
+    }
+    let starts = Utc::now() + Duration::seconds(15);
+    let origin = Origin::scheduled(&signer, starts, starts + Duration::hours(1));
+    let id = origin.election;
+    let manifest = &origin.manifest["payload"];
+    let manifest_hash = object_digest(manifest).unwrap();
+    let options: Vec<Uuid> = manifest["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| serde_json::from_value(o["id"].clone()).unwrap())
+        .collect();
+    let store = PgElectionBoard::new(db.pool.clone(), signer.clone());
+    store.open(origin.frozen()).await.unwrap();
+    PgVoterRegistry::configure_course(&db.pool, id, COURSE)
+        .await
+        .unwrap();
+
+    let mut keys = HashSet::new();
+    let mut voter_ids = HashSet::new();
+    let mut contexts = Vec::new();
+    let mut ballots = Vec::new();
+    for voter in &voters {
+        let request = Request::put(format!("/elections/{id}/registration/me"))
+            .header("content-type", "application/json")
+            .body(Body::from(voter.proof(id)))
+            .unwrap();
+        let (status, registration) = api.send(voter.account, request).await;
+        assert_eq!(status, StatusCode::OK, "{registration}");
+        let voter_id: Uuid = serde_json::from_value(registration["voterId"].clone()).unwrap();
+        let key = registration["publicKey"].as_str().unwrap().to_owned();
+        assert_eq!(voter.payload["publicKey"], key);
+        assert!(keys.insert(key.clone()));
+        assert!(voter_ids.insert(voter_id));
+        let mut payload = voter.payload.clone();
+        payload["voterId"] = json!(voter_id);
+        payload["submissionId"] = json!(Uuid::new_v4());
+        ballots.push(voter.sign(&origin, payload));
+        contexts.push(BallotContext {
+            election_id: id,
+            manifest_hash: manifest_hash.clone(),
+            voter_id,
+            registered_public_key: Some(key),
+            option_ids: options.clone(),
+        });
+    }
+    sqlx::query("SELECT pg_sleep(GREATEST(0,EXTRACT(EPOCH FROM ($1::timestamptz-clock_timestamp())))::float8)")
+        .bind(starts).execute(&db.pool).await.unwrap();
+
+    // A ordem pública segue a entrega, independentemente da ordem de inscrição.
+    let order = [2, 0, 1];
+    let mut records = Vec::new();
+    for i in order {
+        let request = Request::post(format!("/elections/{id}/ballots"))
+            .header("content-type", "application/json")
+            .body(Body::from(ballots[i].clone()))
+            .unwrap();
+        let (status, record) = api.send(voters[i].account, request).await;
+        assert_eq!(status, StatusCode::CREATED, "{record}");
+        records.push(record);
+    }
+    let board = public_evidence(&db.pool, &format!("/elections/{id}/board"), StatusCode::OK).await;
+    let entries = board["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), order.len());
+    let exported = board.to_string();
+    let mut previous = manifest_hash;
+    for (index, i) in order.into_iter().enumerate() {
+        let request = Request::get(format!("/elections/{id}/receipts/me"))
+            .body(Body::empty())
+            .unwrap();
+        let (status, receipt) = api.send(voters[i].account, request).await;
+        assert_eq!(status, StatusCode::OK, "{receipt}");
+        assert_eq!(receipt, records[index]["receipt"]);
+        assert_eq!(entries[index], records[index]["entry"]);
+        let ballot: Value = serde_json::from_slice(&ballots[i]).unwrap();
+        assert_eq!(entries[index]["payload"]["ballot"], ballot);
+        assert!(!exported.contains(&voters[i].account.to_string()));
+        let record = verify_record(
+            &serde_json::to_vec(&entries[index]).unwrap(),
+            &serde_json::to_vec(&receipt).unwrap(),
+            &contexts[i],
+            (index + 1) as u32,
+            &previous,
+            &signer.public_key_base64().unwrap(),
+        )
+        .unwrap();
+        previous = record.entry_hash;
+    }
+    assert_eq!(board["checkpoint"], records.last().unwrap()["receipt"]);
+    db.close().await;
+}

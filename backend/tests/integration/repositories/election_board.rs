@@ -9,6 +9,8 @@ mod receipts;
 mod registration;
 #[cfg(feature = "test-support")]
 mod session;
+#[cfg(feature = "test-support")]
+mod three_voters;
 
 use crate::support::TestDatabase;
 use axum::{
