@@ -21,19 +21,14 @@ pub struct FrozenBoard {
     pub calendar_origin: Vec<u8>,
 }
 
-/// Decisão confiável de identidade/elegibilidade, produzida pelo consumidor #137.
+/// Identidade e elegibilidade verificadas pelo caso de uso de votação.
 ///
-/// Nunca construir com campos de identidade ou chave extraídos apenas do corpo
-/// da requisição. No fluxo acadêmico, `registered_public_key` vem do cadastro
-/// anterior à abertura. O repositório compara a chave da cédula com essa chave.
-/// A validade é reavaliada pelo relógio do banco depois da aquisição do lock.
+/// O caso de uso obtém a conta da autenticação e o prazo da evidência
+/// institucional. O repositório compara o prazo com o relógio do banco após
+/// adquirir o lock da eleição.
 pub struct EligibleVoter {
-    /// Conta interna autenticada; não integra a exportação pública.
+    /// UUID da conta autenticada, exigido no campo `voterId` de um novo voto.
     pub account_id: Uuid,
-    /// Identificador público opaco, estável para a conta nesta eleição.
-    pub voter_id: Uuid,
-    /// Chave pública confiável do eleitor, em DER SPKI/base64url sem padding.
-    pub registered_public_key: String,
     /// Limite exclusivo de validade da evidência institucional.
     pub eligible_until: DateTime<Utc>,
 }
@@ -50,7 +45,7 @@ pub struct RecordedBallot {
     pub recovered: bool,
 }
 
-/// Fotografia pública consistente; não contém contas, tokens ou segredos.
+/// Exportação consistente das evidências públicas do quadro.
 ///
 /// O wrapper não é assinado. Cada artefato preserva seu envelope do contrato.
 /// `checkpoint` é o último recibo: seu índice/hash ancoram a cabeça do quadro.
@@ -100,7 +95,7 @@ pub enum BoardError {
     /// A mesma operação foi reapresentada com outro envelope.
     #[error("Conteúdo diferente para a mesma submissão")]
     SubmissionConflict,
-    /// Identificador opaco já associado a outra conta.
+    /// Identificador do voto incompatível com a conta.
     #[error("Identificador eleitoral incompatível com a conta")]
     VoterMismatch,
     /// Limite público de participantes atingido.
@@ -130,6 +125,7 @@ pub trait ElectionBoard: Send + Sync {
     async fn open(&self, board: FrozenBoard) -> Result<BoardSnapshot, BoardError>;
 
     /// Verifica, acumula e confirma um voto ou recupera o mesmo envelope aceito.
+    /// A primeira cédula aceita vincula a chave pública à participação.
     async fn record(
         &self,
         election_id: Uuid,
