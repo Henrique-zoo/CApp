@@ -98,7 +98,7 @@ final eventManagementSteps = <StepDefinition>[
     r'^o gestor "([^"]*)" cria e publica diretamente em "([^"]*)" um evento com os seguintes dados:$',
   ),
   pendingStep(
-    r'^o gestor "([^"]*)" cria em "([^"]*)" um evento com título, descrição, início e local válidos sem informar o término$',
+    r'^o gestor "([^"]*)" tenta criar em "([^"]*)" um evento com título, descrição, início e local válidos sem informar o término$',
   ),
   pendingStep(
     r'^o gestor "([^"]*)" edita o evento "([^"]*)" em "([^"]*)" para:$',

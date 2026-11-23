@@ -2195,9 +2195,7 @@ mod tests {
         )
         .expect("deve criar evento publicado");
 
-        event
-            .cancel()
-            .expect("deve cancelar evento publicado");
+        event.cancel().expect("deve cancelar evento publicado");
         assert_eq!(event.status(), EventPublicationStatus::Cancelled);
 
         let snapshot = event.clone();

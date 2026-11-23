@@ -548,17 +548,17 @@ fn when_o_gestor_valor_cria_e_publica_diretamente_em_valor_um_evento_com_os_segu
     );
 }
 
-/// Pendente: o gestor {string} cria em {string} um evento com título, descrição, início e local válidos sem informar o término.
+/// Pendente: o gestor {string} tenta criar em {string} um evento com título, descrição, início e local válidos sem informar o término.
 #[when(
-    regex = r#"^o gestor "([^"]*)" cria em "([^"]*)" um evento com título, descrição, início e local válidos sem informar o término$"#
+    regex = r#"^o gestor "([^"]*)" tenta criar em "([^"]*)" um evento com título, descrição, início e local válidos sem informar o término$"#
 )]
-fn when_o_gestor_valor_cria_em_valor_um_evento_com_titulo_descricao_inicio_e_local_validos_sem_informar_o_te(
+fn when_o_gestor_valor_tenta_criar_em_valor_um_evento_com_titulo_descricao_inicio_e_local_validos_sem_informar_o_te(
     _world: &mut AppWorld,
     _value_1: String,
     _value_2: String,
 ) {
     pending_step(
-        "o gestor {string} cria em {string} um evento com título, descrição, início e local válidos sem informar o término",
+        "o gestor {string} tenta criar em {string} um evento com título, descrição, início e local válidos sem informar o término",
     );
 }
 
