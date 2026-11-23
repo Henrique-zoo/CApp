@@ -1,0 +1,64 @@
+name: Demo HTTPS
+
+on:
+  pull_request:
+    paths: &paths
+      - "compose.yaml"
+      - "compose.https.yaml"
+      - "deploy/https/**"
+      - "backend/Dockerfile"
+      - "mobile/lib/src/infrastructure/backend/**"
+      - "mobile/pubspec.lock"
+      - "mobile/tool/backend_tls_test.dart"
+      - "mobile/tool/test_backend_tls.py"
+      - "mobile/integration_test/backend_tls_test.dart"
+      - ".github/workflows/demo-https.yml"
+  push:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  https:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_FILE: compose.yaml:compose.https.yaml
+      COMPOSE_PROJECT_NAME: capp-demo-ci
+      CAPP_TLS_HOST: localhost
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.4"
+          channel: stable
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Start the HTTPS demo with test configuration
+        run: docker compose --env-file .env.example up --build --wait --wait-timeout 150
+      - name: Check that only the HTTPS proxy publishes a port
+        run: |
+          for service in backend postgres; do
+            id=$(docker compose --env-file .env.example ps -q "$service")
+            test "$(docker inspect --format '{{len .HostConfig.PortBindings}}' "$id")" = 0
+          done
+          docker compose --env-file .env.example port caddy 443
+          if curl --noproxy '*' --silent --max-time 3 http://127.0.0.1:3000/ready; then
+            echo 'The backend answered directly over HTTP.' >&2
+            exit 1
+          fi
+          docker compose --env-file .env.example cp caddy:/data/caddy/pki/authorities/local/root.crt "$RUNNER_TEMP/capp-demo-root.crt"
+      - name: Test the Flutter transport and the live Caddy endpoint
+        working-directory: mobile
+        run: |
+          python -m pip install cryptography
+          flutter pub get --enforce-lockfile
+          python tool/test_backend_tls.py --caddy-ca "$RUNNER_TEMP/capp-demo-root.crt" --caddy-url https://localhost:8443
+      - name: Stop the CI demo
+        if: always()
+        run: docker compose --env-file .env.example down --volumes

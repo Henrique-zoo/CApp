@@ -1,0 +1,43 @@
+name: capp-https
+
+services:
+  postgres:
+    ports: !reset []
+    networks: [database]
+
+  backend:
+    profiles: !reset []
+    ports: !reset []
+    networks: [proxy, database]
+
+  caddy:
+    image: caddy:2.11.9-alpine
+    environment:
+      CAPP_TLS_HOST: ${CAPP_TLS_HOST:-10.0.2.2}
+      CAPP_TLS_MODE: ${CAPP_TLS_MODE:-local}
+    ports:
+      - "${CAPP_HTTPS_BIND:-127.0.0.1}:${CAPP_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./deploy/https/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    networks: [proxy]
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q -O /dev/null http://127.0.0.1:2019/config/
+          && { [ "$${CAPP_TLS_MODE}" = public ] || test -s /data/caddy/pki/authorities/local/root.crt; }
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+networks:
+  proxy: {}
+  database:
+    internal: true
+
+volumes:
+  caddy_data:

@@ -118,7 +118,7 @@ final class AppDependencies {
   /// A inicialização não abre interfaces de autenticação.
   ///
   /// Falhas de configuração ou inicialização são propagadas.
-  /// [backendBaseUrl] aponta para a raiz HTTP, sem prefixo de versão.
+  /// [backendBaseUrl] aponta para a raiz HTTPS, sem prefixo de versão.
   /// [microsoftClientId] e [microsoftAndroidRedirectUri] são configurações públicas
   /// do registro Android; valores vazios são rejeitados antes de montar a interface.
   /// Os recursos retornados são compartilhados até [dispose].

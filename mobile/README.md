@@ -493,21 +493,39 @@ O filtro de `BrowserTabActivity` em `android/app/src/main/AndroidManifest.xml`
 deve corresponder à redirect URI do registro. A configuração de múltiplas contas
 fica em `assets/auth/msal_config.json`, declarado no `pubspec.yaml`.
 
-A partir de `mobile`, forneça os valores públicos do seu registro Microsoft:
+A partir de `mobile`, execute o CApp com o domínio HTTPS do backend e os
+valores públicos do registro Microsoft.
 
 ~~~bash
 flutter run \
   --dart-define=MSAL_CLIENT_ID='<application-client-id>' \
   --dart-define=MSAL_ANDROID_REDIRECT_URI='<redirect-uri-do-registro-android>' \
-  --dart-define=BACKEND_BASE_URL=http://10.0.2.2:3000
+  --dart-define=BACKEND_BASE_URL='https://api.seu-dominio.example'
 ~~~
 
 Use a redirect URI no formato fornecido pelo registro; o `android:path` do
 manifesto contém o hash da assinatura sem a codificação percentual da URI.
 Não há client secret no aplicativo. Os dois parâmetros MSAL são obrigatórios;
-valores vazios interrompem a inicialização. O endereço de backend mostrado
-atende ao emulador Android; dispositivos físicos precisam de um endereço
-alcançável. A composição MSAL atual ainda não configura as outras plataformas.
+valores vazios interrompem a inicialização. A composição MSAL atual ainda não
+configura as outras plataformas.
+
+Para a demonstração local, o endereço padrão do emulador Android é
+`https://10.0.2.2:8443`. Exporte o certificado **público** da CA do Caddy
+para `capp-demo-root.crt` no diretório temporário do computador, conforme o
+[roteiro HTTPS](../deploy/https/README.md). No PowerShell, execute a partir de
+`mobile`:
+
+~~~powershell
+$demoCa = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $env:TEMP 'capp-demo-root.crt')))
+flutter run --debug --dart-define=MSAL_CLIENT_ID='<application-client-id>' --dart-define=MSAL_ANDROID_REDIRECT_URI='<redirect-uri-do-registro-android>' "--dart-define=CAPP_DEMO_CA_PEM_BASE64=$demoCa"
+~~~
+
+Em Bash, obtenha o mesmo valor com `base64 < "${TMPDIR:-/tmp}/capp-demo-root.crt" | tr -d '\r\n'`.
+A CA adicional vale somente para o transporte do backend no build de debug.
+O cliente confere a cadeia, a validade e o nome do certificado e inicia as
+requisições diretamente em HTTPS. Em um Android físico, use em
+`BACKEND_BASE_URL` um nome ou IP alcançável pelo aparelho e presente no
+certificado do servidor.
 
 ## Documentação e validação
 
