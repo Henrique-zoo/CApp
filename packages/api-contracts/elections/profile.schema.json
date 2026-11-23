@@ -18,7 +18,6 @@
     "premises",
     "signatureInput",
     "objectDigest",
-    "keyFingerprint",
     "signers",
     "rules",
     "proofChallenges"
@@ -199,9 +198,6 @@
     "objectDigest": {
       "const": "SHA256(signatureInput), excluding the outer signature"
     },
-    "keyFingerprint": {
-      "const": "SHA256(public key DER), lowercase hex"
-    },
     "signers": {
       "type": "object",
       "required": [
@@ -211,7 +207,7 @@
       ],
       "properties": {
         "ballot": {
-          "const": "payload.publicKey, bound by backend to the authenticated voter"
+          "const": "payload.publicKey from the signing pair generated for this election, stored with the accepted ballot for (electionId, userId)"
         },
         "decryption-share": {
           "const": "signingKey of authorityId in the manifest"

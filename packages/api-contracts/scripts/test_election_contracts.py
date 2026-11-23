@@ -85,7 +85,16 @@ class ElectionContractTests(unittest.TestCase):
 
     def test_schema_rejects_invalid_wire_representations(self):
         """Representações numéricas não canônicas e campos extras são recusados."""
-        for key, value in [("a", 2), ("a", "02"), ("b", "-1"), ("a", "1e3")]:
+        for key, value in [
+            ("a", 2),
+            ("a", ""),
+            ("a", "02"),
+            ("a", "+1"),
+            ("b", "-1"),
+            ("a", "1e3"),
+            ("b", "1_000"),
+            ("a", "1" + "0" * 617),
+        ]:
             payload = self.payload("valid/ballot-0")
             payload["ciphertexts"][0][key] = value
             self.assertTrue(
@@ -150,13 +159,17 @@ class ElectionContractTests(unittest.TestCase):
             verify_signature(value, case["signature"], value["publicKey"], self.profile)
 
     def test_signature_rejects_other_public_key(self):
-        """Chaves legítimas de outros participantes não verificam a mesma assinatura."""
+        """A chave pública participa do digest e precisa corresponder à assinatura."""
         case = self.cases["valid/ballot-0"]
+        other_key = self.corpus["keys"]["voter-1"]
+        altered = {**case["payload"], "publicKey": other_key}
+        self.assertNotEqual(case["sha256"], digest(altered, self.profile))
+
         with self.assertRaises(ContractError):
             verify_signature(
                 case["payload"],
                 case["signature"],
-                self.corpus["keys"]["voter-1"],
+                other_key,
                 self.profile,
             )
 
@@ -209,21 +222,31 @@ class ElectionContractTests(unittest.TestCase):
             self.relations(value)
 
     def test_snapshot_rejects_duplicate_voter(self):
-        """Identificadores públicos repetidos não passam pela fotografia de referência."""
+        """Recusa duas cédulas com o mesmo UUID de conta CApp no quadro."""
         closure = self.payload("valid/closure")
         last = copy.deepcopy(self.index[closure["headHash"]])
         previous = self.index[last["previousHash"]]
         last["ballot"]["payload"]["voterId"] = previous["ballot"]["payload"]["voterId"]
         index = {**self.index, closure["headHash"]: last}
-        with self.assertRaises(ContractError):
+        with self.assertRaisesRegex(ContractError, "Conta repetida no quadro"):
             self.relations(closure, index)
 
     def test_receipt_matches_record(self):
-        """Índice, cédula e hash do registro precisam corresponder ao recibo."""
-        value = self.payload("valid/receipt-0")
-        value["index"] = 2
-        with self.assertRaises(ContractError):
-            self.relations(value)
+        """O recibo identifica a mesma eleição, posição e cédula do quadro público."""
+        other_entry = self.cases["excess/entry-0"]
+        other_ballot = self.payload("valid/entry-1")["ballot"]["payload"]
+
+        for field, replacement, error in (
+            ("index", 2, "Índice do recibo divergente"),
+            ("ballotHash", digest(other_ballot, self.profile), "Recibo de outra cédula"),
+            ("entryHash", other_entry["sha256"], "Recibo de outro manifesto"),
+            ("electionId", other_entry["payload"]["electionId"], "Eleição divergente"),
+        ):
+            with self.subTest(field=field):
+                receipt = self.payload("valid/receipt-0")
+                receipt[field] = replacement
+                with self.assertRaisesRegex(ContractError, error):
+                    self.relations(receipt)
 
     def test_schedule_rejects_unchanged_or_earlier_end(self):
         """Adiamento exige um novo fim estritamente posterior ao anterior."""

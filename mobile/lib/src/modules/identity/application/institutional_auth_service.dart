@@ -38,8 +38,8 @@ library;
 
 import 'package:capp/src/modules/identity/application/ports/institutional_identity_gateway.dart';
 
-import 'errors/session_identity_changed_exception.dart';
-import 'errors/identity_exception.dart';
+import 'error/session_identity_changed_exception.dart';
+import 'error/identity_exception.dart';
 import 'ports/auth_session.dart';
 import 'models/account_session_result.dart';
 import 'models/internal_user.dart';

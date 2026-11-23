@@ -336,13 +336,15 @@
           "$ref": "#/$defs/Hash"
         },
         "voterId": {
-          "$ref": "#/$defs/Uuid"
+          "$ref": "#/$defs/Uuid",
+          "description": "UUID da conta CApp autenticada. O quadro público usa esse identificador para verificar uma participação por conta na eleição."
         },
         "submissionId": {
           "$ref": "#/$defs/Uuid"
         },
         "publicKey": {
-          "$ref": "#/$defs/Base64Url"
+          "$ref": "#/$defs/Base64Url",
+          "description": "Chave pública do par de assinatura gerado para esta eleição. Persiste junto da cédula aceita na participação identificada por eleição e conta."
         },
         "ciphertexts": {
           "$ref": "#/$defs/Ciphertexts"

@@ -1,5 +1,8 @@
 # Contratos da API CApp
 
+Para verificar uma exportação eleitoral contra recibos guardados fora do
+servidor, consulte o [auditor independente do quadro](elections/AUDITOR.md).
+
 ## Fonte de verdade
 
 O arquivo `openapi.yaml` é a especificação OpenAPI dos endpoints implementados

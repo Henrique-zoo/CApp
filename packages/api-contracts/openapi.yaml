@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: CApp API
-  version: 4.0.0
+  version: 4.1.0
   description: |
     Contrato das rotas atualmente implementadas no backend CApp.
     Os caminhos são servidos sem prefixo /v1.
@@ -16,6 +16,7 @@ info:
     perfil interno não aceita courseName declarado pelo usuário. O e-mail do Graph
     é retornado apenas como suggestedEmail durante o cadastro, fora da evidência
     institucional, e não é persistido. Contas ativas preservam o e-mail escolhido.
+    A partir de 4.1.0, as leituras do quadro eleitoral e de seu checkpoint são públicas.
 
     A verificação institucional valida um Firebase ID token e um Microsoft access
     token da mesma pessoa, consulta a instituição pelo tenant Microsoft, verifica
@@ -32,8 +33,95 @@ tags:
     description: Verificação das credenciais e do vínculo institucional.
   - name: Centros Acadêmicos
     description: Gestão, mandatos e governança dos Centros Acadêmicos.
+  - name: Eleições
+    description: Distribuição de evidências para verificação pelos eleitores e autoridades.
 
 paths:
+  /elections/{id}/board:
+    parameters:
+      - $ref: "#/components/parameters/ElectionId"
+    get:
+      operationId: getElectionBoard
+      tags: [Eleições]
+      summary: Exportar o quadro eleitoral público
+      description: Retorna uma única fotografia confirmada, com os registros em ordem de aceite.
+      security: []
+      responses:
+        "200":
+          description: Evidências públicas do protocolo eleitoral v1.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ElectionBoardSnapshot"
+        "400":
+          description: O identificador da eleição precisa ser um UUID.
+        "404":
+          $ref: "#/components/responses/BoardNotFound"
+        "500":
+          description: Falha de consistência nas evidências armazenadas.
+        "503":
+          description: Falha ao ler o armazenamento eleitoral.
+
+  /elections/{id}/board/checkpoint:
+    parameters:
+      - $ref: "#/components/parameters/ElectionId"
+    get:
+      operationId: getElectionBoardCheckpoint
+      tags: [Eleições]
+      summary: Obter a âncora atual do quadro
+      description: Guardar fora do servidor para comparar com uma exportação posterior da mesma eleição.
+      security: []
+      responses:
+        "200":
+          description: Último recibo assinado, ou o manifesto assinado quando o quadro está vazio.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ElectionEvidence"
+        "400":
+          description: O identificador da eleição precisa ser um UUID.
+        "404":
+          $ref: "#/components/responses/BoardNotFound"
+        "500":
+          description: Falha de consistência nas evidências armazenadas.
+        "503":
+          description: Falha ao ler o armazenamento eleitoral.
+
+  /elections/{id}/receipts/me:
+    parameters:
+      - $ref: "#/components/parameters/ElectionId"
+    get:
+      operationId: getOwnElectionReceipt
+      tags: [Eleições]
+      summary: Recuperar o recibo original da conta autenticada
+      description: Aceita a consulta depois do encerramento e da expiração da elegibilidade eleitoral.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      responses:
+        "200":
+          description: Recibo assinado e persistido quando a cédula foi aceita.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ElectionEvidence"
+        "400":
+          description: O identificador da eleição precisa ser um UUID.
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          $ref: "#/components/responses/AccountAccessDenied"
+        "404":
+          description: Conta ainda não provisionada ou sem recibo nessa eleição.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Falha interna ao resolver a conta ou o recibo.
+        "503":
+          description: Não foi possível autenticar ou ler o armazenamento.
+
   /health:
     get:
       operationId: getHealth
@@ -622,7 +710,22 @@ paths:
           $ref: "#/components/responses/AccountServiceUnavailable"
 
 components:
+  parameters:
+    ElectionId:
+      in: path
+      name: id
+      required: true
+      description: UUID da eleição publicado no manifesto.
+      schema:
+        type: string
+        format: uuid
   responses:
+    BoardNotFound:
+      description: A eleição ainda não possui quadro publicado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
     InvalidAccountCredential:
       description: Credencial Firebase ausente, inválida, expirada ou identidade divergente.
       content:
@@ -656,7 +759,7 @@ components:
         JWT Firebase App Check emitido para um App ID permitido do mesmo projeto.
         Comprova o aplicativo, independentemente do usuário. Não enviar o token de
         depuração do Console neste cabeçalho; o SDK o troca por um JWT App Check.
-        Obrigatório em todas as rotas de negócio; /health e /ready são públicos.
+        Obrigatório nas rotas autenticadas. Saúde, prontidão e leituras do quadro são públicos.
     FirebaseIdToken:
       type: http
       scheme: bearer
@@ -666,6 +769,50 @@ components:
         microsoft.com vinculada. Enviar um único Authorization: Bearer <ID_TOKEN>.
         O access token Microsoft é enviado separadamente no corpo da verificação.
   schemas:
+    ElectionEvidence:
+      type: object
+      description: Envelope assinado do quadro eleitoral, com payload do protocolo v1.
+      additionalProperties: false
+      required: [payload, signature]
+      properties:
+        signature:
+          $ref: "./elections/schemas.json#/$defs/Base64Url"
+        payload:
+          oneOf:
+            - $ref: "./elections/schemas.json#/$defs/CalendarOrigin"
+            - $ref: "./elections/schemas.json#/$defs/Manifest"
+            - $ref: "./elections/schemas.json#/$defs/BoardEntry"
+            - $ref: "./elections/schemas.json#/$defs/Receipt"
+            - $ref: "./elections/schemas.json#/$defs/Closure"
+            - $ref: "./elections/schemas.json#/$defs/Aggregate"
+    ElectionBoardSnapshot:
+      type: object
+      additionalProperties: false
+      required: [manifest, calendarOrigin, entries, checkpoint, closure, aggregate]
+      properties:
+        manifest:
+          $ref: "#/components/schemas/ElectionEvidence"
+        calendarOrigin:
+          $ref: "#/components/schemas/ElectionEvidence"
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ElectionEvidence"
+        checkpoint:
+          description: Último recibo confirmado. Nulo antes do primeiro voto.
+          anyOf:
+            - $ref: "#/components/schemas/ElectionEvidence"
+            - type: "null"
+        closure:
+          description: Termo assinado ao encerrar a votação.
+          anyOf:
+            - $ref: "#/components/schemas/ElectionEvidence"
+            - type: "null"
+        aggregate:
+          description: Produto das cifras vinculado ao termo de encerramento.
+          anyOf:
+            - $ref: "#/components/schemas/ElectionEvidence"
+            - type: "null"
     InternalUserResponse:
       type: object
       required: [id, status, nickname, email, currentSemester, institutionEntrySemester]
@@ -896,8 +1043,7 @@ components:
           description: Data de término do mandato da gestão (AAAA-MM-DD). Deve ser estritamente posterior à data de início.
           example: "2026-12-31"
         title:
-          type: string
-          nullable: true
+          type: [string, "null"]
           description: Título ou nome opcional da chapa ou gestão.
           example: "Gestão 2026-2027"
     MandateResponse:
@@ -930,8 +1076,7 @@ components:
           description: Identificador do usuário que registrou a configuração inicial do mandato.
           example: "018f0000-0000-7000-8000-000000000003"
         title:
-          type: string
-          nullable: true
+          type: [string, "null"]
           description: Título ou nome da chapa/gestão.
           example: "Gestão 2026-2027"
         startDate:

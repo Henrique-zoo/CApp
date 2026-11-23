@@ -34,7 +34,7 @@
 /// do provedor para as categorias consumidas pela aplicação.
 library;
 
-import '../errors/microsoft_interaction_required_exception.dart';
+import '../error/microsoft_interaction_required_exception.dart';
 
 /// Operações de autenticação e credenciais consumidas pelo caso de uso.
 ///

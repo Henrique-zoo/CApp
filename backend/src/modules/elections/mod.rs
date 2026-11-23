@@ -6,10 +6,60 @@
 //! em `packages/api-contracts/elections/` fixa formatos, bytes, parâmetros e vetores
 //! antes de as quatro frentes implementarem seus próprios adaptadores.
 //!
-//! Este módulo conserva os espaços de [`api`], [`application`], [`domain`] e
-//! [`infrastructure`]. Os contratos da issue #377 não implementam endpoints,
-//! entidades, persistência ou telas: essas entregas pertencem às issues consumidoras.
-//! O validador das fixtures é uma ferramenta de teste do contrato.
+//! O [`domain`] modela as entidades e invariantes da #130.
+//! [`application::board`] define a porta transacional da #381. [`infrastructure`]
+//! persiste as evidências em PostgreSQL e [`api`] publica o quadro e os recibos.
+//! [`crypto_wire`] verifica os envelopes do contrato da #377.
+//!
+//! # Modelo implementado na #130
+//!
+//! A comissão escolhe [`domain::entities::election::ElectionModality`] ao
+//! criar [`domain::entities::election::Election`]. O calendário existe antes da
+//! configuração. A identificada recebe opções validadas e associa a conta à
+//! escolha; a confidencial recebe manifesto verificado e conserva somente cifras.
+//! Nulo é opção própria; sua posição final é obrigatória no manifesto confidencial.
+//!
+//! [`domain::entities::election::Election::advance`] conclui a preparação,
+//! registra a abertura e encerra a votação. A configuração pronta é imutável
+//! desde a publicação. A eleição mantém e valida o período vigente. O contrato
+//! público descreve os registros assinados que documentam as revisões.
+//!
+//! Ao encerrar a votação, a eleição registra o instante e o total de
+//! participantes. A apuração começa quando as contribuições exigidas estão
+//! verificadas e produz um resultado válido ou anulado ao finalizar. Uma
+//! eleição cancelada guarda o instante, o motivo e o responsável pela decisão.
+//! A publicação do registro assinado de encerramento usa os dados confirmados
+//! pela aplicação. O repositório definirá o mapeamento para o banco de dados.
+//!
+//! [`domain::entities::vote::Vote`] vincula a conta interna à eleição e contém a
+//! cédula aceita, sua chave pública de assinatura e o instante do aceite. A
+//! repetição usa o ID da operação e o digest do payload para recuperar o mesmo
+//! voto, inclusive após o encerramento.
+//! O repositório de #381 confirma o voto e suas evidências na mesma transação,
+//! conforme [`application::ports::BallotStore`].
+//! [`domain::entities::vote::board_entry::BoardEntry`] projeta a cédula original do
+//! voto e sua posição encadeada para a auditoria. O repositório confirma atomicamente a
+//! cédula, seu registro no quadro e o recibo correspondente na modalidade
+//! confidencial. A resposta contém somente o recibo persistido, inclusive
+//! na retransmissão. Na modalidade identificada, o aceite confirma o voto
+//! sem corpo de resposta.
+//!
+//! `VerifiedManifest` representa a configuração validada antes da publicação.
+//! A porta `BallotVerifier` verifica cédulas e devolve `VerifiedBallot` para o
+//! aceite. Os construtores de evidência criptográfica são restritos ao crate.
+//! As primitivas ElGamal ficam no domínio. O [`infrastructure::codec`] converte
+//! hashes, chaves e assinaturas entre bytes e sua forma textual. A verificação
+//! de RSA-PSS, a codificação JCS e a publicação dos registros cabem aos adaptadores.
+//!
+//! As entidades não implementam `Deserialize`: DTOs dos adaptadores devem chamar
+//! construtores validados. Nenhum tipo persistido contém segredos de autoridades,
+//! chave RSA privada do eleitor ou aleatoriedade de cifragem. A integridade de um
+//! histórico completo depende das assinaturas e do backend confiável da #377.
+//!
+//! Os testes unitários cobrem ambas as modalidades, participação, calendário,
+//! estados e referências do quadro, sem banco ou cloud. Leem os casos semânticos
+//! de `vectors.json`, incluindo a irregularidade compensada. Isso não substitui
+//! verificação criptográfica dos vetores ou automação funcional dos BDDs.
 //!
 //! # Participação no fluxo
 //!
@@ -19,19 +69,22 @@
 //! guarda seu segredo ElGamal; o servidor possui somente seu próprio segredo e
 //! a chave RSA de assinatura dos seus registros. Nunca recebe os demais segredos.
 //!
-//! O eleitor entra com a conta Firebase do CApp. O adaptador de identidade fornece
-//! um principal confiável, e a porta de elegibilidade confere o vínculo institucional
-//! vigente no instante do novo voto. Curso vem do Graph, não de declaração manual.
-//! O identificador eleitoral público é opaco por conta/eleição; não é o UID Firebase.
-//! Um contexto de tela pode antecipar a decisão, mas o aceite precisa reavaliá-la.
+//! O eleitor entra com a conta Firebase do CApp. A aplicação monta a chave do
+//! voto com a conta CApp autenticada e o ID da eleição solicitada. No aceite,
+//! a transação compara o curso da evidência institucional vigente com o curso
+//! vinculado ao CA da eleição. Somente a correspondência autoriza um novo voto.
+//! A cédula assina o UUID da conta CApp no campo `voterId`. No quadro público,
+//! esse UUID permite conferir que cada conta aparece uma vez na eleição.
+//! A conta é resolvida pelo backend a partir da autenticação Firebase.
 //!
-//! Não há inscrição ou chave do eleitor obrigatória antes da abertura. Ao preparar
-//! a cédula, o dispositivo gera uma chave RSA, cifra cada opção com aleatoriedade
-//! nova e assina o payload completo. A primeira cédula aceita associa a chave à
-//! conta autenticada. O pacote assinado permite repetição após falha de transporte;
-//! consulta de participação/recibo em outro dispositivo dispensa a chave privada.
+//! O dispositivo usa um par RSA próprio da eleição e assina o payload completo.
+//! Na eleição secreta, cifra cada opção com aleatoriedade nova.
+//! A linha de participação, identificada pelo par `(election_id, account_id)`,
+//! guarda a chave pública junto da cédula aceita. O pacote assinado permite
+//! repetir o envio após uma falha de transporte. A consulta do recibo em outro
+//! dispositivo usa a conta autenticada.
 //!
-//! O armazenamento deve confirmar voto, participação, índice, cadeia, recibo e
+//! O armazenamento deve confirmar voto, índice, cadeia, recibo e
 //! atualização do acumulador de cifras na mesma transação, com unicidade por
 //! conta/eleição. O mesmo envio recupera o aceite mesmo depois do encerramento,
 //! sem atualizar o acumulador novamente. Outro envio não cria nova participação.
@@ -77,6 +130,8 @@
 //! `electionId`. A publicação torna o manifesto imutável, mesmo que a eleição
 //! ainda não tenha recebido cédulas. Se for preciso alterar a configuração
 //! publicada, a comissão cancela a eleição e cria outra com um novo ID.
+//! A designação do representante criptográfico da comissão fica protegida
+//! da revogação entre a publicação do manifesto e o fim da eleição.
 //!
 //! As chaves públicas ElGamal das autoridades e a chave conjunta `h` só são
 //! divulgadas no manifesto assinado, após validar as chaves e as provas de
@@ -95,6 +150,8 @@
 //! duração; todo novo fim é estritamente posterior ao anterior. Depois de aberta,
 //! somente o fim pode ser prorrogado, antes de vencer o prazo vigente. Não há
 //! encerramento antecipado válido nem reabertura de uma eleição encerrada.
+//! As comparações do domínio preservam as frações de segundo do relógio. Ao
+//! montar um registro assinado, o codec trunca o timestamp para segundos UTC.
 //!
 //! O calendário inicial é um objeto assinado independente, disponível antes de
 //! as chaves estarem prontas. O manifesto referencia sua origem. Revisões
@@ -107,10 +164,10 @@
 //!
 //! A comissão pode cancelar uma eleição não terminal, inclusive por criação
 //! equivocada em preparação. O backend registra ator, motivo e instante, conserva
-//! o histórico e não apura antecipadamente. Cancelamento administrativo produz
-//! `cancelled`; falha do guardrail produz `annulled`; falta de contribuição válida
-//! produz `incomplete`. Sanção por descumprimento de autoridade não recupera uma
-//! chave ou contribuição e será detalhada na governança, fora deste contrato.
+//! o histórico. No contrato de auditoria, a publicação usa `cancelled` para
+//! registrar essa decisão e `incomplete` para informar que faltam contribuições
+//! válidas. `annulled` publica o desfecho de uma apuração que encontrou contagens
+//! inconsistentes. Sanções por descumprimento serão detalhadas na governança.
 //!
 //! # Apuração e limites deliberados
 //!
@@ -167,8 +224,8 @@
 //!
 //! # Fronteiras de implementação e validação
 //!
-//! `interfaces.json` fixa entradas, saídas e atomicidade esperadas das portas de
-//! elegibilidade, codec, criptografia, persistência, relógio, aleatoriedade e leitura
+//! `interfaces.json` fixa entradas, saídas e atomicidade esperadas para o
+//! codec, a criptografia, a persistência, o relógio, a aleatoriedade e a leitura
 //! pública. Não exige que o domínio execute HTTP, banco ou geração de segredo.
 //! `security-matrix.json` associa garantias, premissas, limitações e testes reais.
 //!
@@ -194,5 +251,9 @@
 
 pub mod api;
 pub mod application;
+pub mod crypto_wire;
 pub mod domain;
 pub mod infrastructure;
+
+#[cfg(test)]
+mod test_support;

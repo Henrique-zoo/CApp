@@ -24,8 +24,8 @@
       "name": "Elegibilidade",
       "mechanisms": [
         "Firebase Auth",
-        "vínculo institucional vigente no momento do novo voto",
-        "voterId opaco vinculado à conta pelo backend"
+        "curso da evidência institucional vigente igual ao curso vinculado ao CA da eleição no momento do novo voto",
+        "UUID da conta CApp autenticada conferido com o voterId assinado"
       ],
       "premises": [
         "Backend confiável; curso obtido exclusivamente do Graph."
@@ -48,7 +48,7 @@
         "idempotência do mesmo envio"
       ],
       "premises": [
-        "Backend resolve corretamente userId e voterId."
+        "Backend resolve o userId pela autenticação e exige o mesmo UUID no voterId da cédula."
       ],
       "limits": [
         "Trocar chave ou dispositivo não muda a identidade da conta."
@@ -185,7 +185,7 @@
     {
       "name": "Publicidade e coerção",
       "mechanisms": [
-        "identificador eleitoral opaco",
+        "UUID da conta CApp publicado com a cédula cifrada",
         "dados de escolha publicados apenas cifrados"
       ],
       "premises": [
@@ -206,7 +206,7 @@
   },
   "academicDeviations": [
     "Confiança no backend.",
-    "Cadastro e chave do eleitor durante a primeira votação.",
+    "Par de assinatura gerado ao preparar a primeira cédula de cada eleição, com a chave pública guardada na participação.",
     "App Check/cliente assumidos para validade individual, com guardrail agregado.",
     "Chapa única permitida.",
     "Votação e auditoria no CApp. O eleitor usa Firebase Auth e App Check, e a verificação das evidências é executada no dispositivo."
