@@ -1,8 +1,7 @@
-//! Camada de domínio prevista para o módulo de perguntas frequentes.
+//! Camada de domínio do módulo de perguntas frequentes (FAQ).
 //!
-//! [`entities`], [`rules`] e [`events`] reservarão os modelos, suas invariantes
-//! e os fatos relevantes do negócio. Ainda não há regras implementadas;
-//! essa camada deve permanecer independente de HTTP e banco de dados.
+//! Contém as entidades, invariantes e regras de negócio puras,
+//! independentes de detalhes de persistência e transporte HTTP.
 
 pub mod entities;
 pub mod events;

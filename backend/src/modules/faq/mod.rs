@@ -1,10 +1,7 @@
-//! Estrutura do módulo de perguntas frequentes.
+//! Módulo de perguntas frequentes (FAQ) e base de conhecimento.
 //!
-//! O escopo previsto abrange cadastro e consulta da base de conhecimento para atender dúvidas
-//! dos estudantes.
-//!
-//! As camadas [`api`], [`application`], [`domain`] e [`infrastructure`] ainda
-//! são espaços reservados; este módulo não implementa esses comportamentos.
+//! Organiza domínio, regras, casos de uso, persistência e contratos HTTP
+//! para gestão e consulta de dúvidas frequentes dos Centros Acadêmicos.
 
 pub mod api;
 pub mod application;
