@@ -264,6 +264,7 @@ dependencies = [
  "argon2",
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "config",
  "crypto-bigint",
@@ -273,13 +274,18 @@ dependencies = [
  "getrandom 0.4.3",
  "jsonwebtoken",
  "mockall",
+ "rand 0.8.8",
  "reqwest",
+ "rsa",
  "serde",
+ "serde_jcs",
  "serde_json",
+ "sha2",
  "sqlx",
  "testcontainers",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-stream",
  "tokio-test",
  "tower",
  "tower-http",
@@ -3087,6 +3093,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "ryu-js"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f232fd0249f55adbe7f15bee58bbbd3d40708000b84e6482066d2ba599e08a9"
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3180,6 +3192,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-transcode"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "655b0cffa180a1a71ed523dc0a9aa9a2711f5d172c2f066393e76f386e9bba3c"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_core"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3197,6 +3218,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.5",
+]
+
+[[package]]
+name = "serde_jcs"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4966857b5b2e83ae3cee6ce41480b800b3bf7a74597cf4a1ee47c5d4d63ed002"
+dependencies = [
+ "ryu-js",
+ "serde",
+ "serde-transcode",
+ "serde_json",
 ]
 
 [[package]]

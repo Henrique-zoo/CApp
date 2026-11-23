@@ -9,9 +9,9 @@ library;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:capp/src/modules/identity/application/errors/identity_exception.dart';
-import 'package:capp/src/modules/identity/application/errors/microsoft_interaction_required_exception.dart';
-import 'package:capp/src/modules/identity/application/errors/session_identity_changed_exception.dart';
+import 'package:capp/src/modules/identity/application/error/identity_exception.dart';
+import 'package:capp/src/modules/identity/application/error/microsoft_interaction_required_exception.dart';
+import 'package:capp/src/modules/identity/application/error/session_identity_changed_exception.dart';
 import 'package:capp/src/modules/identity/application/ports/microsoft_token_provider.dart';
 import 'package:capp/src/modules/identity/infrastructure/firebase/firebase_microsoft_auth.dart';
 

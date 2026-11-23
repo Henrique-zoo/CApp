@@ -81,6 +81,10 @@ async fn attestation_is_required_before_user_authentication_on_all_business_rout
         ("POST", "/auth/institutional/verify"),
         ("GET", "/auth/session"),
         ("PUT", "/users/me/profile"),
+        (
+            "GET",
+            "/elections/00000000-0000-4000-8000-000000000001/receipts/me",
+        ),
     ] {
         let response = app
             .clone()

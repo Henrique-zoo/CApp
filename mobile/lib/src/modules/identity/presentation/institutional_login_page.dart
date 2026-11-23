@@ -37,9 +37,9 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/svg.dart';
 
-import '../application/errors/identity_exception.dart';
-import '../application/errors/session_cache_write_exception.dart';
-import '../application/errors/session_identity_changed_exception.dart';
+import '../application/error/identity_exception.dart';
+import '../application/error/session_cache_write_exception.dart';
+import '../application/error/session_identity_changed_exception.dart';
 import '../application/session_controller.dart';
 import '../application/session_state.dart';
 import 'session_failure_message.dart';

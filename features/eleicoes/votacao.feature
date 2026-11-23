@@ -2,7 +2,7 @@
 # Os cenários descrevem regras de negócio e resultados observáveis.
 # Detalhes técnicos de persistência, concorrência e privacidade devem ser
 # verificados nos componentes correspondentes.
-# Contrato #377: chave no primeiro voto; elegibilidade no aceite; Nulo como opção.
+# Contrato #377. Chave de assinatura por eleição, elegibilidade no aceite e opção Nulo.
 # App Check/cliente são premissas; a soma do agregado é um guardrail.
 # Os passos de produto continuam pendentes até existir implementação real.
 
@@ -22,18 +22,19 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
 
   Regra: O primeiro voto não exige cadastro eleitoral prévio
 
+    @happy
     Cenário: Votar pela primeira vez após a abertura
       Dado que a eleição está no período de votação
       E o estudante "Ana" possui vínculo acadêmico válido com o Centro Acadêmico "CA Engenharia"
       E "Ana" não possui inscrição ou chave prévia nessa eleição
       Quando registra seu primeiro voto na chapa "Aurora"
       Então o voto é confirmado
-      E a chave pública enviada na cédula é vinculada à conta autenticada de "Ana"
+      E a chave pública da cédula é gravada no registro de participação de "Ana" nessa eleição
       E a chave privada permanece no dispositivo de "Ana"
 
-  Regra: Somente estudantes com vínculo acadêmico válido podem votar
+  Regra: Somente estudantes com vínculo verificado com o curso do CA podem votar
 
-    @backend @mobile
+    @sad @backend @mobile
     Cenário: Recusar voto de estudante sem vínculo acadêmico válido
       Dado que a eleição está no período de votação
       E o estudante "Bruno" não possui vínculo acadêmico válido com o Centro Acadêmico "CA Engenharia"
@@ -41,7 +42,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       Então a tentativa de voto é recusada por falta de elegibilidade
       E nenhum voto é registrado para o estudante "Bruno"
 
-    @backend @mobile
+    @sad @backend @mobile
     Cenário: Reavaliar o curso no momento do voto
       Dado que a eleição está no período de votação
       E uma nova verificação institucional de "Bruno" informa outro curso
@@ -51,7 +52,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
 
   Regra: As opções de voto devem respeitar a situação das chapas
 
-    @backend @mobile
+    @happy @backend @mobile
     Cenário: Apresentar somente as chapas ativas como opções de voto
       Dado que a eleição está no período de votação
       E o estudante "Ana" possui vínculo acadêmico válido com o Centro Acadêmico "CA Engenharia"
@@ -59,7 +60,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       Então são apresentadas as chapas ativas "Aurora" e "Horizonte"
       E a chapa inativa "Legado" não é apresentada como opção
 
-    @backend @mobile
+    @sad @backend @mobile
     Cenário: Recusar voto em chapa inativa
       Dado que a eleição está no período de votação
       E o estudante "Ana" possui vínculo acadêmico válido com o Centro Acadêmico "CA Engenharia"
@@ -69,7 +70,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
 
   Regra: O voto só pode ser registrado durante o período de votação
 
-    @backend @mobile
+    @sad @backend @mobile
     Cenário: Recusar voto antes do início da votação
       Dado que o estudante "Ana" possui vínculo acadêmico válido com o Centro Acadêmico "CA Engenharia"
       E o período de votação ainda não começou
@@ -77,7 +78,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       Então a tentativa de voto é recusada porque a votação ainda não começou
       E nenhum voto é registrado para o estudante "Ana"
 
-    @backend @mobile
+    @sad @backend @mobile
     Cenário: Recusar voto após o encerramento da votação
       Dado que o estudante "Ana" possui vínculo acadêmico válido com o Centro Acadêmico "CA Engenharia"
       E o período de votação foi encerrado
@@ -87,7 +88,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
 
   Regra: Uma cédula só é aceita com assinatura digital válida
 
-    @backend @mobile
+    @sad @backend @mobile
     Cenário: Recusar cédula sem assinatura digital válida
       Dado que a eleição está no período de votação
       E o estudante "Ana" está autenticado e atende aos critérios de elegibilidade
@@ -95,12 +96,12 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       Então a cédula é recusada
       E nenhum voto é registrado para o estudante "Ana"
 
-    @backend @mobile
+    @sad @backend @mobile
     Cenário: Recusar cédula atribuída a outra conta
       Dado que a eleição está no período de votação
       E "Ana" está autenticada e atende aos critérios de elegibilidade
-      Quando "Ana" envia uma cédula com o identificador eleitoral de "Bruno"
-      Então a cédula é recusada porque seu eleitor diverge da conta autenticada
+      Quando "Ana" envia uma cédula com o identificador da conta CApp de "Bruno"
+      Então a cédula é recusada porque o identificador da cédula diverge da conta autenticada
       E nenhum voto é registrado para "Ana"
 
   Regra: Na votação identificada, o registro associa o eleitor à sua escolha
@@ -117,7 +118,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       E o registro identifica "Ana" como eleitora e "Aurora" como sua escolha
       E a participação de "Ana" é marcada como realizada nessa eleição
 
-    @backend @mobile
+    @sad @backend @mobile
     Cenário: Recusar segundo voto na modalidade identificada
       Dado que a eleição está configurada para votação identificada
       E a eleição está no período de votação
@@ -127,7 +128,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       Então a tentativa de voto é recusada
       E o voto original na chapa "Aurora" permanece como o único voto de "Ana" nessa eleição
 
-    @backend @mobile
+    @sad @backend @mobile
     Cenário: Impedir dois votos identificados em tentativas simultâneas
       Dado que a eleição está configurada para votação identificada
       E a eleição está no período de votação
@@ -140,7 +141,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
 
   Regra: A cédula secreta deve ser verificável sem revelar a escolha
 
-    @backend @mobile
+    @happy @backend @mobile
     Cenário: Verificar a inclusão da cédula secreta por meio de recibo assinado
       Dado que a eleição está configurada para votação secreta
       E a eleição está no período de votação
@@ -150,10 +151,10 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       Então o voto é confirmado
       E o servidor fornece um recibo assinado da cédula recebida
       E "Ana" consegue verificar que sua cédula cifrada consta no quadro público
-      E o registro público contém a identificação do eleitor, a cédula cifrada e a assinatura do eleitor
+      E o registro público contém o identificador da conta CApp do eleitor, a cédula cifrada e a assinatura do eleitor
       E a cédula cifrada não revela a escolha em texto claro nos dados públicos
 
-    @backend @mobile
+    @happy @backend @mobile
     Cenário: Preservar o sigilo diante da ordem e do momento das votações
       Dado que a eleição está configurada para votação secreta
       E diferentes eleitores já registraram suas cédulas
@@ -173,7 +174,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       E a participação de "Ana" é marcada como realizada nessa eleição
       E a confirmação não revela a chapa escolhida
 
-    @backend @mobile
+    @happy @backend @mobile
     Cenário: Não revelar a escolha individual nos dados públicos da votação secreta
       Dado que a eleição está configurada para votação secreta
       E "Ana" já registrou sua participação nessa eleição por votação secreta
@@ -181,7 +182,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       Quando uma pessoa consulta os dados públicos da eleição
       Então os dados não publicam a escolha em claro de "Ana"
 
-    @backend @mobile
+    @sad @backend @mobile
     Cenário: Recusar segundo voto na modalidade secreta
       Dado que a eleição está configurada para votação secreta
       E a eleição está no período de votação
@@ -191,7 +192,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       Então a tentativa de voto é recusada
       E a participação de "Ana" continua limitada a um único voto nessa eleição
 
-    @backend @mobile
+    @sad @backend @mobile
     Cenário: Impedir dois votos secretos em tentativas simultâneas
       Dado que a eleição está configurada para votação secreta
       E a eleição está no período de votação
@@ -204,6 +205,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
 
   Regra: A conta continua tendo um único voto ao trocar de dispositivo
 
+    @sad
     Cenário: Usar outra chave não permite votar novamente
       Dado que a eleição está no período de votação
       E "Ana" já participou dessa eleição
@@ -211,15 +213,19 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       Então a tentativa de voto é recusada
       E a participação de "Ana" continua limitada a um único voto nessa eleição
 
+    @happy
     Cenário: Recuperar recibo em outro dispositivo sem a chave privada
-      Dado que "Ana" já participou dessa eleição
+      Dado que a eleição está configurada para votação secreta
+      E que "Ana" já participou dessa eleição
       E "Ana" está autenticada em outro dispositivo sem a chave privada anterior
       Quando solicita seu recibo de participação
       Então recebe o recibo do voto já aceito
       E nenhum novo voto é registrado
 
+    @happy
     Cenário: Repetir o envio depois de perder a confirmação
-      Dado que o voto de "Ana" foi aceito mas a confirmação não chegou ao dispositivo
+      Dado que a eleição está configurada para votação secreta
+      E que o voto de "Ana" foi aceito mas a confirmação não chegou ao dispositivo
       E o período de votação foi encerrado
       Quando "Ana" retransmite o mesmo pacote assinado com o mesmo identificador de envio
       Então recebe o recibo do voto já aceito
@@ -227,6 +233,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
 
   Regra: Nulo é uma opção própria e participa da contagem
 
+    @happy
     Cenário: Registrar voto nulo
       Dado que a eleição está no período de votação
       E "Ana" está autenticada e atende aos critérios de elegibilidade
@@ -237,12 +244,14 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
 
   Regra: A apuração exige todas as autoridades e igualdade dos totais
 
+    @happy
     Cenário: Incluir Nulo na igualdade da apuração
       Dado que a votação foi encerrada com dois participantes
       E todas as autoridades forneceram contribuições válidas
       Quando a apuração produz um voto para "Aurora" e um voto nulo
       Então a contagem é consistente com os dois participantes
 
+    @sad
     Cenário: Anular por excesso de votos no agregado
       Dado que a votação foi encerrada com dois participantes
       E todas as autoridades forneceram contribuições válidas
@@ -251,6 +260,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       E nenhum vencedor ou posse é produzido
       E os registros permanecem disponíveis para auditoria
 
+    @sad
     Cenário: Anular por déficit de votos no agregado
       Dado que a votação foi encerrada com dois participantes
       E todas as autoridades forneceram contribuições válidas
@@ -259,6 +269,7 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
       E nenhum vencedor ou posse é produzido
       E os registros permanecem disponíveis para auditoria
 
+    @sad
     Cenário: Manter apuração incompleta quando uma autoridade não colabora
       Dado que o período de votação foi encerrado
       E falta uma contribuição válida de autoridade

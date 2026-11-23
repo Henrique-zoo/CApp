@@ -1,7 +1,7 @@
 //! Fiscalização do App Check na fronteira HTTP, antes de autenticação e I/O do domínio.
 //!
-//! Somente GET/HEAD /health e /ready dispensam o atestado. As demais rotas do
-//! router global exigem um único X-Firebase-AppCheck e um App ID permitido.
+//! GET/HEAD /health e /ready dispensam o atestado. A exportação eleitoral pública
+//! é montada separadamente. As rotas protegidas exigem um único X-Firebase-AppCheck.
 //! Esta proteção comprova a origem do app; não substitui Authorization nem
 //! altera a identidade ou as permissões de uma pessoa.
 

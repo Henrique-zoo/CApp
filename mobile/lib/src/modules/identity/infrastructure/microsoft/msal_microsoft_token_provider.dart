@@ -30,8 +30,8 @@ library;
 
 import 'package:msal_auth/msal_auth.dart';
 
-import '../../application/errors/identity_exception.dart';
-import '../../application/errors/microsoft_interaction_required_exception.dart';
+import '../../application/error/identity_exception.dart';
+import '../../application/error/microsoft_interaction_required_exception.dart';
 import '../../application/ports/microsoft_token_provider.dart';
 
 /// Obtém credenciais Graph usando uma instância MSAL compartilhada.

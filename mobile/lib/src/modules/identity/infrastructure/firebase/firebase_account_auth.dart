@@ -23,9 +23,9 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../application/errors/identity_exception.dart';
-import '../../application/errors/account_password_required_exception.dart';
-import '../../application/errors/session_identity_changed_exception.dart';
+import '../../application/error/identity_exception.dart';
+import '../../application/error/account_password_required_exception.dart';
+import '../../application/error/session_identity_changed_exception.dart';
 import '../../application/models/saved_account.dart';
 import '../../application/ports/account_authentication.dart';
 import '../../application/ports/auth_session.dart';

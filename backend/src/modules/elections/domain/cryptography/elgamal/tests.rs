@@ -130,9 +130,10 @@ fn tally_matches_shared_protocol_vectors() {
                 scenario.expected_totals,
                 "{name}",
             ),
-            Some("aggregate_sum_mismatch") => assert!(
-                matches!(totals, Err(CryptographyError::TotalMismatch)),
-                "{name}: {totals:?}",
+            Some("aggregate_sum_mismatch") => assert_eq!(
+                totals.unwrap(),
+                scenario.expected_totals,
+                "{name}: a auditoria precisa das contagens que divergiram",
             ),
             Some("tally_out_of_range") => assert!(
                 matches!(totals, Err(CryptographyError::TotalOutOfRange)),
@@ -217,7 +218,7 @@ fn accumulator_and_tally_reject_choice_counts_outside_the_profile() {
         b: U2048::ONE,
     };
 
-    for count in [1, MAX_CHOICES + 1] {
+    for count in [1, MAX_OPTIONS + 1] {
         assert!(matches!(
             empty_accumulator(count),
             Err(CryptographyError::InvalidCiphertexts)
@@ -228,7 +229,7 @@ fn accumulator_and_tally_reject_choice_counts_outside_the_profile() {
         ));
     }
 
-    assert_eq!(empty_accumulator(MAX_CHOICES).unwrap().len(), MAX_CHOICES);
+    assert_eq!(empty_accumulator(MAX_OPTIONS).unwrap().len(), MAX_OPTIONS);
 }
 
 /// Cédulas com cifras faltantes ou excedentes não produzem um acumulador novo.
@@ -368,11 +369,11 @@ fn tally_recovers_the_maximum_supported_total() {
     let contribution = [U2048::ONE; 2];
 
     // Nonces somados que dão zero módulo Q deixam A = 1 no agregado.
-    accumulator[0].b = G.pow(&U2048::from_u32(MAX_VOTERS)).retrieve();
+    accumulator[0].b = G.pow(&U2048::from_u32(MAX_VOTER_COUNT)).retrieve();
 
     assert_eq!(
-        recover_totals(&accumulator, MAX_VOTERS, &[contribution.as_slice(); 3]).unwrap(),
-        [MAX_VOTERS, 0],
+        recover_totals(&accumulator, MAX_VOTER_COUNT, &[contribution.as_slice(); 3]).unwrap(),
+        [MAX_VOTER_COUNT, 0],
     );
 }
 
@@ -382,7 +383,7 @@ fn tally_rejects_voter_count_above_profile_limit() {
     let accumulator = empty_accumulator(2).unwrap();
 
     assert!(matches!(
-        recover_totals(&accumulator, MAX_VOTERS + 1, &[]),
+        recover_totals(&accumulator, MAX_VOTER_COUNT + 1, &[]),
         Err(CryptographyError::TooManyVoters)
     ));
 }

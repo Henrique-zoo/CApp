@@ -1,4 +1,4 @@
--- Migration: 20261122130000_create_faq_entries_table.sql
+-- Migration: 20261122140000_create_faq_entries_table.sql
 -- Tabela de domínio para armazenamento de perguntas e respostas frequentes (FAQ) dos Centros Acadêmicos
 
 CREATE TABLE IF NOT EXISTS faq_entry (
