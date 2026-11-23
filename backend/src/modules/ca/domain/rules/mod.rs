@@ -4,5 +4,7 @@
 //! aplicáveis às entidades e operações deste domínio.
 
 mod academic_center;
+mod poll;
 
 pub use academic_center::*;
+pub use poll::*;

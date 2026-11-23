@@ -4,7 +4,15 @@
 //! opcionalidade da sigla (NULL), ausência de unicidade global e check constraints.
 
 use crate::support::TestDatabase;
-use backend::modules::ca::domain::entities::{AcademicCenter, AcademicCenterStatus};
+use backend::{
+    infrastructure::database::PgDatabase,
+    modules::ca::{
+        application::ports::PollRepository,
+        domain::entities::{
+            AcademicCenter, AcademicCenterStatus, PollStatus, PollVote, StudentPoll,
+        },
+    },
+};
 use chrono::Utc;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -351,6 +359,171 @@ async fn should_enforce_database_check_constraints() {
         ts_res.is_err(),
         "deve rejeitar updated_at anterior a created_at via check constraint"
     );
+
+    db.close().await;
+}
+
+/// Helper para inserir usuário de teste na tabela app_user com perfil ativo válido.
+async fn create_test_user(pool: &PgPool, uid: &str, matricula: &str) -> Uuid {
+    let id = Uuid::new_v4();
+    let email = format!("{matricula}@aluno.unb.br");
+    sqlx::query(
+        "INSERT INTO app_user (\
+            id, firebase_uid, status, nickname, email, \
+            current_semester, institution_entry_semester, profile_completed_at, \
+            created_at, updated_at\
+         ) VALUES ($1, $2, 'active', 'User Test', $3, 1, '2024.1', NOW(), NOW(), NOW())",
+    )
+    .bind(id)
+    .bind(uid)
+    .bind(email)
+    .execute(pool)
+    .await
+    .expect("should insert test user");
+    id
+}
+
+#[tokio::test]
+async fn should_persist_and_retrieve_student_poll_in_database() {
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "Universidade de Brasília").await;
+    let manager_id = create_test_user(&db.pool, "firebase-manager-test", "241098765").await;
+
+    let ca_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, created_by_id, name, acronym, description, status) \
+         VALUES ($1, $2, $3, 'Centro Acadêmico de Computação', 'CACC', 'Descrição', 'active')",
+    )
+    .bind(ca_id)
+    .bind(institution_id)
+    .bind(manager_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let repo = PgDatabase::new(db.pool.clone());
+    let now = Utc::now();
+
+    let poll = StudentPoll::new(
+        ca_id,
+        manager_id,
+        "Consulta sobre Horários".to_string(),
+        Some("Descrição da proposta".to_string()),
+        vec!["Opção 1".to_string(), "Opção 2".to_string()],
+        now,
+        Some(now + chrono::Duration::days(5)),
+        Some("all_students".to_string()),
+        Some("identified".to_string()),
+    )
+    .expect("poll should be valid");
+
+    repo.save(&poll).await.expect("should persist poll");
+
+    let retrieved = repo
+        .find_by_id(poll.id())
+        .await
+        .expect("query should succeed")
+        .expect("poll should be found");
+
+    assert_eq!(retrieved.id(), poll.id());
+    assert_eq!(retrieved.academic_center_id(), ca_id);
+    assert_eq!(retrieved.created_by_id(), manager_id);
+    assert_eq!(retrieved.title(), "Consulta sobre Horários");
+    assert_eq!(retrieved.description(), Some("Descrição da proposta"));
+    assert_eq!(retrieved.status(), PollStatus::Open);
+    assert_eq!(retrieved.options().len(), 2);
+    assert_eq!(retrieved.options()[0].title(), "Opção 1");
+    assert_eq!(retrieved.options()[1].title(), "Opção 2");
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_record_votes_and_enforce_unique_poll_user_in_database() {
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "Universidade de Brasília").await;
+    let manager_id = create_test_user(&db.pool, "firebase-manager-vote", "241098765").await;
+    let student_1 = create_test_user(&db.pool, "firebase-student-1", "241098766").await;
+    let student_2 = create_test_user(&db.pool, "firebase-student-2", "241098767").await;
+
+    let ca_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, created_by_id, name, acronym, description, status) \
+         VALUES ($1, $2, $3, 'Centro Acadêmico de Redes', 'CAER', 'Descrição', 'active')",
+    )
+    .bind(ca_id)
+    .bind(institution_id)
+    .bind(manager_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let repo = PgDatabase::new(db.pool.clone());
+    let now = Utc::now();
+
+    let poll = StudentPoll::new(
+        ca_id,
+        manager_id,
+        "Consulta de Votação".to_string(),
+        None,
+        vec!["Sim".to_string(), "Não".to_string()],
+        now,
+        None,
+        None,
+        None,
+    )
+    .expect("poll should be valid");
+
+    repo.save(&poll).await.expect("should persist poll");
+
+    let opt_1 = poll.options()[0].id();
+    let opt_2 = poll.options()[1].id();
+
+    // Voto do estudante 1
+    let vote_1 = PollVote::new(poll.id(), opt_1, student_1, now);
+    repo.save_vote(&vote_1)
+        .await
+        .expect("vote 1 should be saved");
+
+    // Voto do estudante 2
+    let vote_2 = PollVote::new(poll.id(), opt_2, student_2, now);
+    repo.save_vote(&vote_2)
+        .await
+        .expect("vote 2 should be saved");
+
+    // Tentativa de voto duplicado pelo estudante 1
+    let vote_dup = PollVote::new(poll.id(), opt_2, student_1, now);
+    let err_dup = repo
+        .save_vote(&vote_dup)
+        .await
+        .expect_err("should reject duplicate");
+    assert!(matches!(
+        err_dup,
+        backend::modules::ca::application::ports::PollRepositoryError::Conflict(_)
+    ));
+
+    // Checagem de has_user_voted
+    assert!(repo.has_user_voted(poll.id(), student_1).await.unwrap());
+    assert!(repo.has_user_voted(poll.id(), student_2).await.unwrap());
+    assert!(
+        !repo
+            .has_user_voted(poll.id(), Uuid::new_v4())
+            .await
+            .unwrap()
+    );
+
+    // Apuração de contagem
+    let counts = repo.count_votes_by_option(poll.id()).await.unwrap();
+    assert_eq!(counts.get(&opt_1).copied().unwrap_or(0), 1);
+    assert_eq!(counts.get(&opt_2).copied().unwrap_or(0), 1);
+
+    // Encerramento da consulta
+    let close_time = Utc::now();
+    let closed = repo
+        .close_poll(poll.id(), manager_id, close_time)
+        .await
+        .expect("should close poll");
+    assert_eq!(closed.status(), PollStatus::Closed);
 
     db.close().await;
 }

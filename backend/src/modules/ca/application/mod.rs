@@ -1,8 +1,17 @@
-//! Camada de casos de uso prevista para o módulo de Centros Acadêmicos.
+//! Camada de casos de uso do módulo de Centros Acadêmicos.
 //!
-//! [`commands`] agrupará alterações de estado, [`queries`] consultas e
-//! [`services`] a coordenação dessas operações. Ainda não há implementações.
+//! [`commands`] organiza as operações de alteração de estado;
+//! [`queries`] organiza as operações de leitura e apuração;
+//! [`ports`] e [`error`] definem os contratos e falhas de negócio da aplicação.
 
 pub mod commands;
+pub mod error;
+pub mod ports;
 pub mod queries;
 pub mod services;
+
+#[cfg(test)]
+mod tests;
+
+pub use error::*;
+pub use ports::*;
