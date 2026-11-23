@@ -45,6 +45,19 @@ pub struct UpdateFaqEntryRequest {
     pub category: Option<String>,
 }
 
+/// Parâmetros de consulta via query string para navegação e busca no FAQ.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FaqQueryParams {
+    /// Filtro opcional por categoria temática.
+    #[serde(default)]
+    pub category: Option<String>,
+
+    /// Termo de busca textual opcional. Aceita alias `search` ou `q`.
+    #[serde(default, alias = "search")]
+    pub q: Option<String>,
+}
+
 /// Representação serializada pública de uma pergunta e resposta de FAQ.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

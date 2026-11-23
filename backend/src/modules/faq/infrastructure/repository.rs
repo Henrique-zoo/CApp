@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::modules::faq::{
     application::{
         error::FaqRepositoryError,
-        ports::{CaManagementAccess, FaqRepository},
+        ports::{CaManagementAccess, FaqFilter, FaqRepository},
     },
     domain::entities::faq_entry::{FaqEntry, FaqError},
 };
@@ -147,6 +147,93 @@ impl FaqRepository for PostgresFaqRepository {
         }
 
         Ok(entries)
+    }
+
+    async fn find_by_academic_center_id_with_filter(
+        &self,
+        academic_center_id: Uuid,
+        filter: &FaqFilter,
+    ) -> Result<Vec<FaqEntry>, FaqRepositoryError> {
+        let rows: Vec<FaqEntryRow> = match (&filter.category, &filter.search) {
+            (None, None) => {
+                sqlx::query_as(
+                    "SELECT id, academic_center_id, question, answer, category, created_by, updated_by, created_at, updated_at \
+                     FROM faq_entry WHERE academic_center_id = $1 ORDER BY created_at DESC"
+                )
+                .bind(academic_center_id)
+                .fetch_all(&self.pool)
+                .await
+            }
+            (Some(cat), None) => {
+                sqlx::query_as(
+                    "SELECT id, academic_center_id, question, answer, category, created_by, updated_by, created_at, updated_at \
+                     FROM faq_entry WHERE academic_center_id = $1 AND LOWER(category) = LOWER($2) ORDER BY created_at DESC"
+                )
+                .bind(academic_center_id)
+                .bind(cat)
+                .fetch_all(&self.pool)
+                .await
+            }
+            (None, Some(term)) => {
+                let pattern = format!("%{term}%");
+                sqlx::query_as(
+                    "SELECT id, academic_center_id, question, answer, category, created_by, updated_by, created_at, updated_at \
+                     FROM faq_entry WHERE academic_center_id = $1 AND (question ILIKE $2 OR answer ILIKE $2) ORDER BY created_at DESC"
+                )
+                .bind(academic_center_id)
+                .bind(pattern)
+                .fetch_all(&self.pool)
+                .await
+            }
+            (Some(cat), Some(term)) => {
+                let pattern = format!("%{term}%");
+                sqlx::query_as(
+                    "SELECT id, academic_center_id, question, answer, category, created_by, updated_by, created_at, updated_at \
+                     FROM faq_entry WHERE academic_center_id = $1 AND LOWER(category) = LOWER($2) AND (question ILIKE $3 OR answer ILIKE $3) ORDER BY created_at DESC"
+                )
+                .bind(academic_center_id)
+                .bind(cat)
+                .bind(pattern)
+                .fetch_all(&self.pool)
+                .await
+            }
+        }
+        .map_err(|e| {
+            tracing::error!(%e, "Falha ao consultar entradas de FAQ com filtro no PostgreSQL");
+            FaqRepositoryError::Database(e.to_string())
+        })?;
+
+        let mut entries = Vec::with_capacity(rows.len());
+        for row in rows {
+            let domain = row.try_into_domain().map_err(|e| {
+                tracing::error!(%e, "Invariante corrompida ao carregar FAQ do banco");
+                FaqRepositoryError::Database(e.to_string())
+            })?;
+            entries.push(domain);
+        }
+
+        Ok(entries)
+    }
+
+    async fn list_categories_by_academic_center_id(
+        &self,
+        academic_center_id: Uuid,
+    ) -> Result<Vec<String>, FaqRepositoryError> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT DISTINCT category \
+             FROM faq_entry \
+             WHERE academic_center_id = $1 AND category IS NOT NULL AND trim(category) != '' \
+             ORDER BY category ASC",
+        )
+        .bind(academic_center_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            tracing::error!(%e, "Falha ao listar categorias de FAQ no PostgreSQL");
+            FaqRepositoryError::Database(e.to_string())
+        })?;
+
+        Ok(rows.into_iter().map(|(cat,)| cat).collect())
     }
 
     async fn check_ca_management_access(
@@ -293,6 +380,66 @@ impl FaqRepository for InMemoryFaqRepository {
             .collect();
         list.sort_by_key(|a| std::cmp::Reverse(a.created_at()));
         Ok(list)
+    }
+
+    async fn find_by_academic_center_id_with_filter(
+        &self,
+        academic_center_id: Uuid,
+        filter: &FaqFilter,
+    ) -> Result<Vec<FaqEntry>, FaqRepositoryError> {
+        let map = self
+            .entries
+            .read()
+            .map_err(|e| FaqRepositoryError::Database(e.to_string()))?;
+
+        let mut list: Vec<FaqEntry> = map
+            .values()
+            .filter(|e| e.academic_center_id() == academic_center_id)
+            .filter(|e| {
+                if let Some(cat) = &filter.category {
+                    match e.category() {
+                        Some(c) => c.trim().to_lowercase() == cat.trim().to_lowercase(),
+                        None => false,
+                    }
+                } else {
+                    true
+                }
+            })
+            .filter(|e| {
+                if let Some(term) = &filter.search {
+                    let term_lower = term.to_lowercase();
+                    e.question().to_lowercase().contains(&term_lower)
+                        || e.answer().to_lowercase().contains(&term_lower)
+                } else {
+                    true
+                }
+            })
+            .cloned()
+            .collect();
+
+        list.sort_by_key(|a| std::cmp::Reverse(a.created_at()));
+        Ok(list)
+    }
+
+    async fn list_categories_by_academic_center_id(
+        &self,
+        academic_center_id: Uuid,
+    ) -> Result<Vec<String>, FaqRepositoryError> {
+        let map = self
+            .entries
+            .read()
+            .map_err(|e| FaqRepositoryError::Database(e.to_string()))?;
+
+        let mut categories: Vec<String> = map
+            .values()
+            .filter(|e| e.academic_center_id() == academic_center_id)
+            .filter_map(|e| e.category().map(|c| c.trim().to_string()))
+            .filter(|c| !c.is_empty())
+            .collect();
+
+        categories.sort();
+        categories.dedup();
+        Ok(categories)
     }
 
     async fn check_ca_management_access(

@@ -465,6 +465,135 @@ paths:
           $ref: "#/components/responses/AccountServiceUnavailable"
 
   /api/v1/academic-centers/{academic_center_id}/faq:
+    get:
+      operationId: listFaqEntries
+      tags: [FAQ]
+      summary: Consultar e pesquisar perguntas frequentes do Centro Acadêmico
+      description: |
+        Retorna a listagem de perguntas e respostas cadastradas no FAQ do Centro Acadêmico.
+        Suporta filtragem opcional por categoria temática e busca textual case-insensitive
+        por palavra-chave na pergunta e na resposta. Retorna lista vazia caso nenhum registro
+        corresponda aos critérios informados.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: academic_center_id
+          in: path
+          required: true
+          description: Identificador único (UUID) do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000001"
+        - name: category
+          in: query
+          required: false
+          description: Filtro opcional por categoria temática.
+          schema:
+            type: string
+          example: Carteirinhas
+        - name: q
+          in: query
+          required: false
+          description: Termo de busca textual opcional em perguntas e respostas.
+          schema:
+            type: string
+          example: carteirinha
+        - name: search
+          in: query
+          required: false
+          description: Alias para o parâmetro de busca textual `q`.
+          schema:
+            type: string
+          example: carteirinha
+      responses:
+        "200":
+          description: Lista de perguntas e respostas de FAQ do Centro Acadêmico.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FaqEntryResponse"
+              examples:
+                faqListWithEntries:
+                  summary: Lista de perguntas frequentes
+                  value:
+                    - id: "00000000-0000-0000-0000-000000000010"
+                      academicCenterId: "00000000-0000-0000-0000-000000000001"
+                      question: Como solicito a carteirinha de estudante do CA?
+                      answer: A carteirinha de estudante pode ser solicitada diretamente no balcão de atendimento do CA ou pelo formulário online disponível no início de cada semestre letivo.
+                      category: Carteirinhas
+                      createdBy: "00000000-0000-0000-0000-000000000020"
+                      updatedBy: "00000000-0000-0000-0000-000000000020"
+                      createdAt: "2026-11-22T13:00:00Z"
+                      updatedAt: "2026-11-22T13:00:00Z"
+                faqListEmpty:
+                  summary: Nenhuma pergunta frequente encontrada
+                  value: []
+        "400":
+          description: |
+            bad_request — Parâmetros de consulta inválidos.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: bad_request
+                  message: Requisição inválida
+                  details: null
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: |
+            app_check_required ou app_check_invalid — Comprovação do aplicativo ausente ou recusada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: forbidden
+                  message: Acesso não autorizado
+                  details: null
+        "404":
+          description: |
+            academic_center_not_found — Centro Acadêmico não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                academicCenterNotFound:
+                  summary: Centro Acadêmico não encontrado
+                  value:
+                    error:
+                      code: academic_center_not_found
+                      message: Centro Acadêmico '00000000-0000-0000-0000-000000000001' não encontrado
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "422":
+          description: |
+            academic_center_inactive — Centro Acadêmico inativo ou arquivado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                academicCenterInactive:
+                  summary: Centro Acadêmico inativo
+                  value:
+                    error:
+                      code: academic_center_inactive
+                      message: Centro Acadêmico '00000000-0000-0000-0000-000000000001' não está ativo
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
     post:
       operationId: createFaqEntry
       tags: [FAQ]
@@ -612,7 +741,202 @@ paths:
         "503":
           $ref: "#/components/responses/AccountServiceUnavailable"
 
+  /api/v1/academic-centers/{academic_center_id}/faq/categories:
+    get:
+      operationId: listFaqCategories
+      tags: [FAQ]
+      summary: Listar categorias temáticas disponíveis no FAQ do Centro Acadêmico
+      description: |
+        Retorna a listagem alfabética de todas as categorias cadastradas na base de FAQ
+        do Centro Acadêmico ativo. Retorna lista vazia caso nenhuma categoria esteja cadastrada.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: academic_center_id
+          in: path
+          required: true
+          description: Identificador único (UUID) do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000001"
+      responses:
+        "200":
+          description: Lista de nomes de categorias temáticas disponíveis.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              examples:
+                categoriesList:
+                  summary: Categorias cadastradas
+                  value:
+                    - Apoio Acadêmico
+                    - Carteirinhas
+                    - Geral
+                emptyCategoriesList:
+                  summary: Nenhuma categoria cadastrada
+                  value: []
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: |
+            app_check_required ou app_check_invalid — Comprovação do aplicativo ausente ou recusada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: forbidden
+                  message: Acesso não autorizado
+                  details: null
+        "404":
+          description: |
+            academic_center_not_found — Centro Acadêmico não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                academicCenterNotFound:
+                  summary: Centro Acadêmico não encontrado
+                  value:
+                    error:
+                      code: academic_center_not_found
+                      message: Centro Acadêmico '00000000-0000-0000-0000-000000000001' não encontrado
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "422":
+          description: |
+            academic_center_inactive — Centro Acadêmico inativo ou arquivado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                academicCenterInactive:
+                  summary: Centro Acadêmico inativo
+                  value:
+                    error:
+                      code: academic_center_inactive
+                      message: Centro Acadêmico '00000000-0000-0000-0000-000000000001' não está ativo
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
   /api/v1/academic-centers/{academic_center_id}/faq/{faq_entry_id}:
+    get:
+      operationId: getFaqEntry
+      tags: [FAQ]
+      summary: Consultar detalhes de uma pergunta frequente do Centro Acadêmico
+      description: |
+        Retorna os detalhes de uma pergunta e resposta específica da base de FAQ do Centro Acadêmico.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: academic_center_id
+          in: path
+          required: true
+          description: Identificador único (UUID) do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000001"
+        - name: faq_entry_id
+          in: path
+          required: true
+          description: Identificador único (UUID) da pergunta frequente.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000010"
+      responses:
+        "200":
+          description: Detalhes da pergunta e resposta de FAQ.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FaqEntryResponse"
+              examples:
+                faqEntry:
+                  summary: Detalhes da pergunta frequente
+                  value:
+                    id: "00000000-0000-0000-0000-000000000010"
+                    academicCenterId: "00000000-0000-0000-0000-000000000001"
+                    question: Como solicito a carteirinha de estudante do CA?
+                    answer: A carteirinha de estudante pode ser solicitada diretamente no balcão de atendimento do CA ou pelo formulário online disponível no início de cada semestre letivo.
+                    category: Carteirinhas
+                    createdBy: "00000000-0000-0000-0000-000000000020"
+                    updatedBy: "00000000-0000-0000-0000-000000000020"
+                    createdAt: "2026-11-22T13:00:00Z"
+                    updatedAt: "2026-11-22T13:00:00Z"
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: |
+            app_check_required ou app_check_invalid — Comprovação do aplicativo ausente ou recusada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: forbidden
+                  message: Acesso não autorizado
+                  details: null
+        "404":
+          description: |
+            academic_center_not_found — Centro Acadêmico não encontrado;
+            faq_entry_not_found — Pergunta frequente não encontrada ou não pertencente a este Centro Acadêmico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                faqEntryNotFound:
+                  summary: Pergunta frequente não encontrada
+                  value:
+                    error:
+                      code: faq_entry_not_found
+                      message: Pergunta frequente '00000000-0000-0000-0000-000000000010' não encontrada
+                      details:
+                        faq_entry_id: "00000000-0000-0000-0000-000000000010"
+                academicCenterNotFound:
+                  summary: Centro Acadêmico não encontrado
+                  value:
+                    error:
+                      code: academic_center_not_found
+                      message: Centro Acadêmico '00000000-0000-0000-0000-000000000001' não encontrado
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "422":
+          description: |
+            academic_center_inactive — Centro Acadêmico inativo ou arquivado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                academicCenterInactive:
+                  summary: Centro Acadêmico inativo
+                  value:
+                    error:
+                      code: academic_center_inactive
+                      message: Centro Acadêmico '00000000-0000-0000-0000-000000000001' não está ativo
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
     patch:
       operationId: updateFaqEntry
       tags: [FAQ]

@@ -30,6 +30,39 @@ impl CaManagementAccess {
     }
 }
 
+/// Parâmetros de filtro e busca textual para consulta de perguntas e respostas de FAQ.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FaqFilter {
+    /// Filtro por categoria temática (opcional).
+    pub category: Option<String>,
+
+    /// Termo de busca textual para casamento parcial em pergunta ou resposta (opcional).
+    pub search: Option<String>,
+}
+
+impl FaqFilter {
+    /// Cria um novo conjunto de filtros de FAQ com valores higienizados (aparados).
+    pub fn new(category: Option<String>, search: Option<String>) -> Self {
+        let category = category.and_then(|c| {
+            let trimmed = c.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        let search = search.and_then(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        Self { category, search }
+    }
+}
+
 /// Contrato de persistência para recuperação e cadastro de perguntas e respostas de FAQ.
 #[async_trait::async_trait]
 pub trait FaqRepository: Send + Sync {
@@ -44,6 +77,19 @@ pub trait FaqRepository: Send + Sync {
         &self,
         academic_center_id: Uuid,
     ) -> Result<Vec<FaqEntry>, FaqRepositoryError>;
+
+    /// Consulta entradas de FAQ aplicando filtros opcionais de categoria e busca textual case-insensitive.
+    async fn find_by_academic_center_id_with_filter(
+        &self,
+        academic_center_id: Uuid,
+        filter: &FaqFilter,
+    ) -> Result<Vec<FaqEntry>, FaqRepositoryError>;
+
+    /// Lista as categorias temáticas distintas cadastradas no FAQ do Centro Acadêmico especificado.
+    async fn list_categories_by_academic_center_id(
+        &self,
+        academic_center_id: Uuid,
+    ) -> Result<Vec<String>, FaqRepositoryError>;
 
     /// Consulta a existência, situação ativa e permissão de gestão do usuário no CA especificado.
     async fn check_ca_management_access(
@@ -76,6 +122,25 @@ impl<T: FaqRepository + ?Sized> FaqRepository for &T {
     ) -> Result<Vec<FaqEntry>, FaqRepositoryError> {
         (**self)
             .find_by_academic_center_id(academic_center_id)
+            .await
+    }
+
+    async fn find_by_academic_center_id_with_filter(
+        &self,
+        academic_center_id: Uuid,
+        filter: &FaqFilter,
+    ) -> Result<Vec<FaqEntry>, FaqRepositoryError> {
+        (**self)
+            .find_by_academic_center_id_with_filter(academic_center_id, filter)
+            .await
+    }
+
+    async fn list_categories_by_academic_center_id(
+        &self,
+        academic_center_id: Uuid,
+    ) -> Result<Vec<String>, FaqRepositoryError> {
+        (**self)
+            .list_categories_by_academic_center_id(academic_center_id)
             .await
     }
 

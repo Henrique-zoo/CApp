@@ -1,9 +1,6 @@
 //! Camada HTTP do módulo de perguntas frequentes (FAQ).
 
-use axum::{
-    Router,
-    routing::{patch, post},
-};
+use axum::{Router, routing::get};
 
 use crate::api::state::AppState;
 
@@ -18,18 +15,30 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route(
             "/api/v1/academic-centers/{academic_center_id}/faq",
-            post(handlers::create_faq_entry),
+            get(handlers::list_faq_entries).post(handlers::create_faq_entry),
         )
         .route(
             "/academic-centers/{academic_center_id}/faq",
-            post(handlers::create_faq_entry),
+            get(handlers::list_faq_entries).post(handlers::create_faq_entry),
+        )
+        .route(
+            "/api/v1/academic-centers/{academic_center_id}/faq/categories",
+            get(handlers::list_faq_categories),
+        )
+        .route(
+            "/academic-centers/{academic_center_id}/faq/categories",
+            get(handlers::list_faq_categories),
         )
         .route(
             "/api/v1/academic-centers/{academic_center_id}/faq/{faq_entry_id}",
-            patch(handlers::update_faq_entry).delete(handlers::delete_faq_entry),
+            get(handlers::get_faq_entry)
+                .patch(handlers::update_faq_entry)
+                .delete(handlers::delete_faq_entry),
         )
         .route(
             "/academic-centers/{academic_center_id}/faq/{faq_entry_id}",
-            patch(handlers::update_faq_entry).delete(handlers::delete_faq_entry),
+            get(handlers::get_faq_entry)
+                .patch(handlers::update_faq_entry)
+                .delete(handlers::delete_faq_entry),
         )
 }

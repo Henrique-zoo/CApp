@@ -2,7 +2,8 @@
 
 use crate::support::TestDatabase;
 use backend::modules::faq::{
-    application::ports::FaqRepository, domain::entities::faq_entry::FaqEntry,
+    application::ports::{FaqFilter, FaqRepository},
+    domain::entities::faq_entry::FaqEntry,
     infrastructure::repository::PostgresFaqRepository,
 };
 use chrono::Utc;
@@ -338,4 +339,243 @@ async fn should_update_and_delete_faq_entry_with_postgres_repository() {
         !deleted_again,
         "deve retornar false pois registro não existe mais"
     );
+}
+
+#[tokio::test]
+async fn should_query_faq_entries_with_filter_and_text_search_in_postgres() {
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "UnB - Query Test").await;
+    let user_id = create_test_user(&db.pool, "firebase-user-query").await;
+
+    let ca_comp = create_test_academic_center(
+        &db.pool,
+        institution_id,
+        Some(user_id),
+        "CA de Computação",
+        "active",
+    )
+    .await;
+
+    let ca_mat = create_test_academic_center(
+        &db.pool,
+        institution_id,
+        Some(user_id),
+        "CA de Matemática",
+        "active",
+    )
+    .await;
+
+    let repo = PostgresFaqRepository::new(db.pool.clone());
+    let base_time = chrono::DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).unwrap();
+
+    let e1 = FaqEntry::new(
+        Uuid::new_v4(),
+        ca_comp,
+        "Como solicitar apoio acadêmico?".to_string(),
+        "Entre em contato com a gestão pelo e-mail oficial.".to_string(),
+        Some("Apoio Acadêmico".to_string()),
+        user_id,
+        base_time - chrono::Duration::hours(2),
+    )
+    .unwrap();
+
+    let e2 = FaqEntry::new(
+        Uuid::new_v4(),
+        ca_comp,
+        "Dúvidas sobre matrícula em disciplinas?".to_string(),
+        "Acesse o SIGAA e confira os prazos oficiais.".to_string(),
+        Some("Matrícula".to_string()),
+        user_id,
+        base_time - chrono::Duration::hours(1),
+    )
+    .unwrap();
+
+    let e3 = FaqEntry::new(
+        Uuid::new_v4(),
+        ca_comp,
+        "Onde retiro minha carteirinha de estudante?".to_string(),
+        "No balcão de atendimento do CA.".to_string(),
+        None,
+        user_id,
+        base_time,
+    )
+    .unwrap();
+
+    // Entrada no CA de Matemática com matrícula
+    let e4 = FaqEntry::new(
+        Uuid::new_v4(),
+        ca_mat,
+        "Como solicitar matrícula especial em Matemática?".to_string(),
+        "Procure a coordenação do departamento de matemática.".to_string(),
+        Some("Matrícula".to_string()),
+        user_id,
+        base_time,
+    )
+    .unwrap();
+
+    repo.save(&e1).await.unwrap();
+    repo.save(&e2).await.unwrap();
+    repo.save(&e3).await.unwrap();
+    repo.save(&e4).await.unwrap();
+
+    // 1. Consulta geral sem filtros no CA Computação: deve retornar 3 entradas ordenadas DESC por data
+    let all = repo
+        .find_by_academic_center_id_with_filter(ca_comp, &FaqFilter::default())
+        .await
+        .expect("deve listar todas");
+    assert_eq!(all.len(), 3);
+    assert_eq!(all[0].id(), e3.id());
+    assert_eq!(all[1].id(), e2.id());
+    assert_eq!(all[2].id(), e1.id());
+
+    // 2. Filtro por categoria "Matrícula"
+    let by_cat = repo
+        .find_by_academic_center_id_with_filter(
+            ca_comp,
+            &FaqFilter::new(Some("Matrícula".to_string()), None),
+        )
+        .await
+        .expect("deve filtrar por categoria");
+    assert_eq!(by_cat.len(), 1);
+    assert_eq!(by_cat[0].id(), e2.id());
+
+    // 3. Busca por palavra-chave na pergunta ("apoio")
+    let by_search_question = repo
+        .find_by_academic_center_id_with_filter(
+            ca_comp,
+            &FaqFilter::new(None, Some("apoio".to_string())),
+        )
+        .await
+        .expect("deve buscar na pergunta");
+    assert_eq!(by_search_question.len(), 1);
+    assert_eq!(by_search_question[0].id(), e1.id());
+
+    // 4. Busca por palavra-chave na resposta ("SIGAA")
+    let by_search_answer = repo
+        .find_by_academic_center_id_with_filter(
+            ca_comp,
+            &FaqFilter::new(None, Some("sigaa".to_string())),
+        )
+        .await
+        .expect("deve buscar na resposta case-insensitive");
+    assert_eq!(by_search_answer.len(), 1);
+    assert_eq!(by_search_answer[0].id(), e2.id());
+
+    // 5. Isolamento estrito entre CAs: busca "matrícula" no CA Computação não pode retornar e4
+    let isolation_search = repo
+        .find_by_academic_center_id_with_filter(
+            ca_comp,
+            &FaqFilter::new(None, Some("matrícula".to_string())),
+        )
+        .await
+        .expect("deve buscar matrícula");
+    assert_eq!(isolation_search.len(), 1);
+    assert_eq!(isolation_search[0].id(), e2.id());
+    assert_ne!(isolation_search[0].academic_center_id(), ca_mat);
+
+    // 6. Busca sem resultados retorna lista vazia
+    let empty_search = repo
+        .find_by_academic_center_id_with_filter(
+            ca_comp,
+            &FaqFilter::new(None, Some("termo sem correspondência".to_string())),
+        )
+        .await
+        .expect("busca vazia sem erro");
+    assert!(empty_search.is_empty());
+}
+
+#[tokio::test]
+async fn should_list_distinct_categories_in_postgres() {
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "UnB - Categories Test").await;
+    let user_id = create_test_user(&db.pool, "firebase-user-cats").await;
+
+    let ca_comp = create_test_academic_center(
+        &db.pool,
+        institution_id,
+        Some(user_id),
+        "CA de Computação",
+        "active",
+    )
+    .await;
+
+    let ca_mat = create_test_academic_center(
+        &db.pool,
+        institution_id,
+        Some(user_id),
+        "CA de Matemática",
+        "active",
+    )
+    .await;
+
+    let repo = PostgresFaqRepository::new(db.pool.clone());
+    let now = chrono::DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).unwrap();
+
+    let e1 = FaqEntry::new(
+        Uuid::new_v4(),
+        ca_comp,
+        "Pergunta 1?".to_string(),
+        "Resposta 1.".to_string(),
+        Some("Matrícula".to_string()),
+        user_id,
+        now,
+    )
+    .unwrap();
+
+    let e2 = FaqEntry::new(
+        Uuid::new_v4(),
+        ca_comp,
+        "Pergunta 2?".to_string(),
+        "Resposta 2.".to_string(),
+        Some("Apoio Acadêmico".to_string()),
+        user_id,
+        now,
+    )
+    .unwrap();
+
+    let e3 = FaqEntry::new(
+        Uuid::new_v4(),
+        ca_comp,
+        "Pergunta 3?".to_string(),
+        "Resposta 3.".to_string(),
+        Some("Matrícula".to_string()), // Duplicada
+        user_id,
+        now,
+    )
+    .unwrap();
+
+    let e4 = FaqEntry::new(
+        Uuid::new_v4(),
+        ca_comp,
+        "Pergunta sem categoria?".to_string(),
+        "Resposta 4.".to_string(),
+        None, // Nula
+        user_id,
+        now,
+    )
+    .unwrap();
+
+    let e5 = FaqEntry::new(
+        Uuid::new_v4(),
+        ca_mat,
+        "Pergunta de Matemática?".to_string(),
+        "Resposta 5.".to_string(),
+        Some("Geometria".to_string()), // Outro CA
+        user_id,
+        now,
+    )
+    .unwrap();
+
+    repo.save(&e1).await.unwrap();
+    repo.save(&e2).await.unwrap();
+    repo.save(&e3).await.unwrap();
+    repo.save(&e4).await.unwrap();
+    repo.save(&e5).await.unwrap();
+
+    let categories = repo
+        .list_categories_by_academic_center_id(ca_comp)
+        .await
+        .expect("deve listar categorias");
+
+    assert_eq!(categories, vec!["Apoio Acadêmico", "Matrícula"]);
 }
