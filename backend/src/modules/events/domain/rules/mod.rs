@@ -6,7 +6,7 @@
 
 use chrono::{DateTime, Utc};
 
-use super::entities::{Event, EventDomainError, EventPeriod, EventRegistrationInfo};
+use super::entities::{Event, EventDomainError, EventPeriod, EventRegistrationPolicy};
 
 /// Permissão administrativa exigida para criar eventos já publicados, publicar rascunhos
 /// diretamente e editar eventos do Centro Acadêmico.
@@ -37,14 +37,15 @@ pub fn validate_event_period(
     EventPeriod::new(starts_at, ends_at)
 }
 
-/// Valida as regras de inscrição de um evento frente à data/hora de término.
+/// Valida a política mínima de inscrição (`enabled` / `opens_at` / `closes_at`) frente
+/// à data/hora de término do evento.
 ///
 /// # Erros
 ///
-/// Retorna [`EventDomainError`] se o limite máximo for zero, se houver mais inscritos
-/// confirmados que o limite ou se o prazo de inscrição ultrapassar o término do evento.
+/// Retorna [`EventDomainError`] se a janela for inválida ou se `opens_at`/`closes_at`
+/// ultrapassarem o término do evento.
 pub fn validate_event_registration(
-    registration: &EventRegistrationInfo,
+    registration: &EventRegistrationPolicy,
     ends_at: DateTime<Utc>,
 ) -> Result<(), EventDomainError> {
     registration.validate(ends_at)

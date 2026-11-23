@@ -5,15 +5,19 @@
 # A criação, a edição e a publicação direta de eventos ocorrem sempre no contexto
 # de um único Centro Acadêmico; permissões de um CA não produzem efeito em outro.
 # Somente integrantes da gestão cujo cargo possui a permissão
-# "Publicar e gerenciar eventos diretamente" podem criar eventos já publicados,
-# publicar rascunhos sem homologação e editar eventos do próprio CA.
+# "Publicar e gerenciar eventos diretamente" podem criar eventos já publicados fora do ambiente físico do próprio CA,
+# publicar esses rascunhos sem homologação e editar eventos vinculados ao CA.
+# O local especial "o ambiente físico do próprio CA" sempre exige homologação.
+# Editar um evento publicado o retira da agenda até nova homologação.
+# Título, descrição, início, término e local são obrigatórios; o término deve ser
+# estritamente posterior ao início.
 # Os e-mails abaixo são exemplos fictícios de contas institucionais da UnB.
 # @backend e @mobile indicam onde o cenário deve ser verificado.
-@isolated_database @pending_mobile
+@pending_backend @pending_mobile
 Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acadêmico
   Como integrante autorizado da gestão de um Centro Acadêmico
   Quero criar, editar e publicar diretamente eventos acadêmicos, sociais e institucionais do CA
-  Para divulgar atividades oficiais à comunidade estudantil sem depender de fila de homologação
+  Para divulgar atividades oficiais respeitando as permissões e a homologação exigida
 
   Contexto:
     Dado que o Centro Acadêmico "Centro Acadêmico de Engenharia de Redes (CAER)" está cadastrado na UnB
@@ -24,9 +28,9 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
     E o estudante "222033333@aluno.unb.br" exerce o cargo de "Diretor de Comunicação" em "CAER"
     E o estudante "241098765@aluno.unb.br" possui perfil no CApp e não integra a gestão de "CAER"
 
-  Regra: Integrante autorizado da gestão pode criar e publicar eventos diretamente no CA
+  Regra: Integrante autorizado pode publicar diretamente eventos cujo local não seja o ambiente físico do próprio CA
 
-    @isolated_database @happy @backend @mobile
+    @happy @backend @mobile
     Cenário: Gestor autorizado cria e publica diretamente um evento no CA
       Quando o gestor "231012345@aluno.unb.br" cria e publica diretamente em "CAER" um evento com os seguintes dados:
         | título      | Semana Acadêmica de Engenharia de Redes                   |
@@ -38,7 +42,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       E o evento registra "231012345@aluno.unb.br" como autor responsável em "CAER"
       E o evento fica visível na agenda de eventos publicados de "CAER" sem exigir homologação
 
-    @isolated_database @happy @backend @mobile
+    @happy @backend @mobile
     Cenário: Gestor autorizado salva um evento como rascunho antes de publicar
       Quando o gestor "231012345@aluno.unb.br" cria como rascunho em "CAER" um evento com os seguintes dados:
         | título      | Oficina de Redes Definidas por Software                   |
@@ -49,15 +53,15 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       Então o evento "Oficina de Redes Definidas por Software" fica registrado como rascunho em "CAER"
       E o evento não aparece na agenda de eventos publicados de "CAER"
 
-    @isolated_database @happy @backend @mobile
+    @happy @backend @mobile
     Cenário: Gestor autorizado publica diretamente um evento salvo em rascunho
       Dado que existe em "CAER" o evento em rascunho "Oficina de Redes Definidas por Software" criado por "231012345@aluno.unb.br"
+      E o local desse evento não é o ambiente físico do próprio CA
       Quando o gestor "231012345@aluno.unb.br" publica diretamente o evento "Oficina de Redes Definidas por Software" em "CAER"
       Então o evento "Oficina de Redes Definidas por Software" passa a estar publicado em "CAER"
       E o evento passa a figurar na agenda de eventos publicados de "CAER"
-      E a data de publicação do evento fica registrada
 
-    @isolated_database @happy @backend
+    @happy @backend
     Cenário: Publicar evento em um CA não altera a agenda de outro CA
       Dado que o Centro Acadêmico "Centro Acadêmico de Ciência da Computação (CACC)" está cadastrado na UnB
       Quando o gestor "231012345@aluno.unb.br" cria e publica diretamente em "CAER" um evento com os seguintes dados:
@@ -71,7 +75,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
 
   Regra: Todo evento criado exige informações obrigatórias válidas e período consistente
 
-    @isolated_database @sad @backend @mobile
+    @sad @backend @mobile
     Esquema do Cenário: Criação de evento sem informação obrigatória é recusada
       Quando o gestor "231012345@aluno.unb.br" tenta criar em "CAER" um evento com os seguintes dados:
         | título      | <titulo>    |
@@ -87,9 +91,10 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
         |                           | Palestra sobre segurança em redes      | 2026-11-20 14:00 | 2026-11-20 16:00 | Auditório FT     | título            |
         | Palestra de Cibersegurança|                                        | 2026-11-20 14:00 | 2026-11-20 16:00 | Auditório FT     | descrição         |
         | Palestra de Cibersegurança| Palestra sobre segurança em redes      |                  | 2026-11-20 16:00 | Auditório FT     | início            |
+        | Palestra de Cibersegurança| Palestra sobre segurança em redes      | 2026-11-20 14:00 |                  | Auditório FT     | término           |
         | Palestra de Cibersegurança| Palestra sobre segurança em redes      | 2026-11-20 14:00 | 2026-11-20 16:00 |                  | local             |
 
-    @isolated_database @sad @backend @mobile
+    @sad @backend @mobile
     Cenário: Criação de evento com término anterior ao início é recusada
       Quando o gestor "231012345@aluno.unb.br" tenta criar em "CAER" um evento com os seguintes dados:
         | título      | Minicurso de Roteamento                                   |
@@ -100,9 +105,9 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       Então a operação é recusada informando que o horário de término deve ser posterior ao início
       E nenhum novo evento é registrado em "CAER"
 
-  Regra: Integrante autorizado da gestão pode editar eventos do próprio CA preservando sua validade
+  Regra: Integrante autorizado da gestão pode editar eventos vinculados ao CA preservando sua validade
 
-    @isolated_database @happy @backend @mobile
+    @happy @backend @mobile
     Cenário: Gestor autorizado edita informações de um evento já publicado
       Dado que existe em "CAER" o evento publicado "Semana Acadêmica de Engenharia de Redes" com os seguintes dados:
         | descrição   | Ciclo de palestras técnicas                               |
@@ -121,9 +126,10 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
         | início      | 2026-11-10 14:30                                          |
         | término     | 2026-11-10 18:30                                          |
         | local       | Auditório do Departamento de Engenharia Elétrica          |
-      E o evento permanece publicado na agenda de "CAER"
+      E o evento passa a ficar pendente de nova homologação em "CAER"
+      E o evento é retirado da agenda pública enquanto aguarda a homologação
 
-    @isolated_database @happy @backend @mobile
+    @happy @backend @mobile
     Cenário: Gestor autorizado edita informações de um evento em rascunho sem publicá-lo
       Dado que existe em "CAER" o evento em rascunho "Oficina de Redes" com os seguintes dados:
         | descrição   | Ementa preliminar da oficina                              |
@@ -139,7 +145,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       Então o evento "Oficina Prática de Redes" mantém a situação de rascunho em "CAER"
       E permanece fora da agenda de eventos publicados de "CAER"
 
-    @isolated_database @sad @backend @mobile
+    @sad @backend @mobile
     Esquema do Cenário: Edição que remove informação obrigatória do evento é recusada
       Dado que existe em "CAER" o evento publicado "Palestra de Cibersegurança" com os seguintes dados:
         | descrição   | Palestra sobre segurança em redes                         |
@@ -160,9 +166,10 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
         |                           | Palestra sobre segurança em redes | 2026-11-20 14:00 | 2026-11-20 16:00 | Auditório FT | título            |
         | Palestra de Cibersegurança|                                   | 2026-11-20 14:00 | 2026-11-20 16:00 | Auditório FT | descrição         |
         | Palestra de Cibersegurança| Palestra sobre segurança em redes |                  | 2026-11-20 16:00 | Auditório FT | início            |
+        | Palestra de Cibersegurança| Palestra sobre segurança em redes | 2026-11-20 14:00 |                  | Auditório FT | término           |
         | Palestra de Cibersegurança| Palestra sobre segurança em redes | 2026-11-20 14:00 | 2026-11-20 16:00 |              | local             |
 
-    @isolated_database @sad @backend @mobile
+    @sad @backend @mobile
     Cenário: Edição de evento com término anterior ao início é recusada
       Dado que existe em "CAER" o evento publicado "Palestra de Cibersegurança" com os seguintes dados:
         | descrição   | Palestra sobre segurança em redes                         |
@@ -180,7 +187,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
 
   Regra: Usuários sem permissão no CA não podem publicar diretamente nem editar eventos da gestão
 
-    @sad @backend @mobile @isolated_database
+    @sad @backend @mobile
     Cenário: Integrante da gestão sem permissão de eventos não pode publicar evento diretamente
       Quando "222033333@aluno.unb.br" tenta criar e publicar diretamente em "CAER" um evento com os seguintes dados:
         | título      | Roda de Conversa sobre Estágios                           |
@@ -191,7 +198,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       Então a operação é recusada por falta de permissão
       E o evento "Roda de Conversa sobre Estágios" não é publicado na agenda de "CAER"
 
-    @sad @backend @mobile @isolated_database
+    @sad @backend @mobile
     Cenário: Estudante sem cargo na gestão não pode criar ou publicar evento diretamente
       Quando o estudante "241098765@aluno.unb.br" tenta criar e publicar diretamente em "CAER" um evento com os seguintes dados:
         | título      | Encontro de Estudos de Redes                              |
@@ -202,7 +209,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       Então a operação é recusada por falta de permissão
       E o evento "Encontro de Estudos de Redes" não é publicado na agenda de "CAER"
 
-    @sad @backend @mobile @isolated_database
+    @sad @backend @mobile
     Cenário: Integrante da gestão sem permissão de eventos não pode publicar rascunho diretamente
       Dado que existe em "CAER" o evento em rascunho "Oficina de Redes Definidas por Software" criado por "231012345@aluno.unb.br"
       Quando "222033333@aluno.unb.br" tenta publicar diretamente o evento "Oficina de Redes Definidas por Software" em "CAER"
@@ -210,7 +217,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       E o evento "Oficina de Redes Definidas por Software" permanece como rascunho em "CAER"
       E não aparece na agenda de eventos publicados de "CAER"
 
-    @sad @backend @mobile @isolated_database
+    @sad @backend @mobile
     Cenário: Usuário sem permissão de gerenciar eventos não pode editar evento existente
       Dado que existe em "CAER" o evento publicado "Semana Acadêmica de Engenharia de Redes" com os seguintes dados:
         | descrição   | Ciclo de palestras técnicas                               |
@@ -226,7 +233,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       Então a operação é recusada por falta de permissão
       E o evento "Semana Acadêmica de Engenharia de Redes" permanece inalterado em "CAER"
 
-    @sad @backend @mobile @isolated_database
+    @sad @backend @mobile
     Cenário: Gestor autorizado de um CA não pode publicar ou editar eventos na gestão de outro CA
       Dado que o Centro Acadêmico "Centro Acadêmico de Ciência da Computação (CACC)" está cadastrado na UnB
       E o estudante "231012345@aluno.unb.br" não possui cargo de gestão em "CACC"
@@ -234,3 +241,87 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       Quando o gestor "231012345@aluno.unb.br" tenta editar o evento "Maratona de Programação da UnB" em "CACC"
       Então a operação é recusada por falta de permissão
       E o evento "Maratona de Programação da UnB" permanece inalterado em "CACC"
+
+  Regra: O término é obrigatório e o período informado deve ser válido
+
+    @sad @backend @mobile
+    Cenário: Criação de evento sem horário de término é recusada
+      Quando o gestor "231012345@aluno.unb.br" tenta criar em "CAER" um evento com título, descrição, início e local válidos sem informar o término
+      Então a operação é recusada informando que "término" do evento é obrigatório
+      E nenhum novo evento é registrado em "CAER"
+
+    @sad @backend @mobile
+    Cenário: Término igual ao início não constitui um período válido
+      Quando o gestor "231012345@aluno.unb.br" tenta criar em "CAER" um evento com início e término em "2026-11-10 14:00"
+      Então a operação é recusada informando que o término deve ser posterior ao início
+      E nenhum novo evento é registrado em "CAER"
+
+  Regra: A permissão de homologação também permite publicação direta quando o local não é o ambiente físico do próprio CA
+
+    @happy @backend @mobile
+    Cenário: Homologador cria evento em outro local sem concessão separada de publicação direta
+      Dado que o integrante possui a permissão "Homologar eventos" em "CAER"
+      E não recebeu uma concessão separada de "Publicar e gerenciar eventos diretamente"
+      Quando cria e publica diretamente um evento válido em um local diferente do ambiente físico do próprio CA
+      Então o evento é publicado na agenda de "CAER"
+
+  Regra: Usar o ambiente físico do próprio CA como local exige homologação em qualquer tentativa de publicação
+
+    @happy @backend @mobile
+    Cenário: Selecionar o ambiente físico do próprio CA como opção especial de local
+      Quando o gestor "231012345@aluno.unb.br" seleciona "o ambiente físico do próprio CA" como local de um evento válido
+      Então o local do evento fica associado ao espaço do CA "CAER"
+      E o aplicativo identifica que a publicação exige homologação
+
+    @happy @backend @mobile
+    Cenário: Publicação direta de evento no ambiente físico do próprio CA segue para homologação
+      Dado que o gestor "231012345@aluno.unb.br" possui publicação direta de eventos em "CAER"
+      Quando cria um evento válido com o local "o ambiente físico do próprio CA" e solicita a publicação
+      Então o evento fica pendente de homologação em "CAER"
+      E o evento não aparece na agenda pública antes da aprovação
+
+    @sad @backend @mobile
+    Cenário: Permissão de homologação não elimina a etapa obrigatória no ambiente físico do próprio CA
+      Dado que o integrante possui a permissão "Homologar eventos" em "CAER"
+      Quando cria um evento válido com o local "o ambiente físico do próprio CA" e solicita a publicação direta
+      Então o evento aguarda uma ação explícita de homologação
+      E a criação não publica automaticamente o evento
+
+    @happy @backend @mobile
+    Cenário: Publicar rascunho no ambiente físico do próprio CA exige homologação
+      Dado que existe um evento em rascunho no local "o ambiente físico do próprio CA"
+      Quando o gestor com publicação direta solicita a publicação desse rascunho em "CAER"
+      Então o evento passa a ficar pendente de homologação
+      E permanece fora da agenda pública
+
+    @happy @backend @mobile
+    Cenário: Aprovar o evento no ambiente físico do próprio CA libera sua publicação
+      Dado que existe em "CAER" um evento no local "o ambiente físico do próprio CA" aguardando homologação
+      E o integrante possui a permissão "Homologar eventos" nesse CA
+      Quando aprova a publicação do evento
+      Então o evento aparece na agenda pública de "CAER"
+      E a opção "o ambiente físico do próprio CA" permanece identificada como seu local
+
+    @sad @backend @mobile
+    Cenário: Rejeição da homologação mantém o evento no ambiente físico do próprio CA fora da agenda
+      Dado que existe em "CAER" um evento no local "o ambiente físico do próprio CA" aguardando homologação
+      E o integrante possui a permissão "Homologar eventos" nesse CA
+      Quando rejeita a publicação do evento
+      Então o evento não é publicado na agenda de "CAER"
+      E o proponente pode identificar que a publicação foi rejeitada
+
+    @happy @backend @mobile
+    Cenário: Mudar o local de evento publicado para o ambiente físico do próprio CA exige nova homologação
+      Dado que existe em "CAER" um evento publicado em outro local
+      Quando o gestor "231012345@aluno.unb.br" altera o local para "o ambiente físico do próprio CA"
+      Então o evento fica pendente de nova homologação
+      E sai da agenda pública até que a alteração seja aprovada
+
+  Regra: Alterações de eventos publicados só retornam à agenda após homologação
+
+    @happy @backend @mobile
+    Cenário: Homologação de alteração devolve o evento à agenda
+      Dado que a edição de um evento publicado em "CAER" o retirou da agenda pública
+      E o integrante possui a permissão "Homologar eventos" nesse CA
+      Quando aprova a alteração do evento
+      Então o evento retorna à agenda pública com os dados homologados

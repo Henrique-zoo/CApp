@@ -19,7 +19,7 @@ use crate::{
             CreateEventCommand, EventApplicationError, EventService, GetEventByIdQuery,
             ListCaEventsQuery, PublishEventCommand, UpdateEventCommand,
         },
-        domain::{EventDomainError, EventRegistrationInfo},
+        domain::EventDomainError,
         infrastructure::PostgresEventRepository,
     },
 };
@@ -50,14 +50,25 @@ fn map_application_error(error: EventApplicationError) -> Response {
     (status, body).into_response()
 }
 
+fn repository(state: &AppState) -> PostgresEventRepository {
+    PostgresEventRepository::new(state.pg_database.pool.clone())
+}
+
 /// Handler `POST /api/v1/events` para criar um novo evento (rascunho ou publicado diretamente).
 pub async fn create_event_handler(
     State(state): State<AppState>,
     Json(payload): Json<CreateEventRequest>,
 ) -> Response {
-    let service = EventService::new(PostgresEventRepository::new(state.pool));
-    let registration = payload.into_registration_info();
+    let capacity = match payload.capacity() {
+        Ok(capacity) => capacity,
+        Err(error) => return map_application_error(EventApplicationError::Domain(error)),
+    };
+    let registration = match payload.registration_policy() {
+        Ok(policy) => policy,
+        Err(error) => return map_application_error(EventApplicationError::Domain(error)),
+    };
 
+    let service = EventService::new(repository(&state));
     let command = CreateEventCommand {
         academic_center_id: payload.academic_center_id,
         author_id: payload.author_id,
@@ -67,6 +78,7 @@ pub async fn create_event_handler(
         starts_at: payload.starts_at,
         ends_at: payload.ends_at,
         publish_directly: payload.publish_directly,
+        capacity,
         registration,
     };
 
@@ -82,7 +94,7 @@ pub async fn get_event_handler(
     Path(id): Path<Uuid>,
     Query(params): Query<ListEventsQueryParams>,
 ) -> Response {
-    let service = EventService::new(PostgresEventRepository::new(state.pool));
+    let service = EventService::new(repository(&state));
     let query = GetEventByIdQuery {
         event_id: id,
         only_published: params.only_published,
@@ -99,19 +111,39 @@ pub async fn update_event_handler(
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateEventRequest>,
 ) -> Response {
-    let service = EventService::new(PostgresEventRepository::new(state.pool));
-    let registration = if payload.requires_registration.is_some()
-        || payload.max_capacity.is_some()
-        || payload.registration_deadline.is_some()
-    {
-        Some(EventRegistrationInfo {
-            requires_registration: payload.requires_registration.unwrap_or(true),
-            max_capacity: payload.max_capacity,
-            confirmed_registrations: 0,
-            registration_deadline: payload.registration_deadline,
-        })
+    let service = EventService::new(repository(&state));
+
+    let (capacity, registration) = if payload.touches_registration() {
+        let existing = match service
+            .get_event_by_id(GetEventByIdQuery {
+                event_id: id,
+                only_published: false,
+            })
+            .await
+        {
+            Ok(event) => event,
+            Err(error) => return map_application_error(error),
+        };
+
+        let capacity = if payload.max_capacity.is_some() {
+            match payload.capacity() {
+                Ok(capacity) => Some(capacity),
+                Err(error) => {
+                    return map_application_error(EventApplicationError::Domain(error));
+                }
+            }
+        } else {
+            None
+        };
+
+        let registration = match payload.registration_policy(existing.registration()) {
+            Ok(policy) => Some(policy),
+            Err(error) => return map_application_error(EventApplicationError::Domain(error)),
+        };
+
+        (capacity, registration)
     } else {
-        None
+        (None, None)
     };
 
     let command = UpdateEventCommand {
@@ -123,6 +155,7 @@ pub async fn update_event_handler(
         location: payload.location,
         starts_at: payload.starts_at,
         ends_at: payload.ends_at,
+        capacity,
         registration,
     };
 
@@ -138,7 +171,7 @@ pub async fn publish_event_handler(
     Path(id): Path<Uuid>,
     payload: Option<Json<PublishEventRequest>>,
 ) -> Response {
-    let service = EventService::new(PostgresEventRepository::new(state.pool));
+    let service = EventService::new(repository(&state));
     let body = payload.map(|json| json.0).unwrap_or_default();
 
     let command = PublishEventCommand {
@@ -159,7 +192,7 @@ pub async fn list_ca_events_handler(
     Path(ca_id): Path<Uuid>,
     Query(params): Query<ListEventsQueryParams>,
 ) -> Response {
-    let service = EventService::new(PostgresEventRepository::new(state.pool));
+    let service = EventService::new(repository(&state));
     let query = ListCaEventsQuery {
         academic_center_id: ca_id,
         only_published: params.only_published,

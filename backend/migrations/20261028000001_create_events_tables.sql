@@ -1,80 +1,100 @@
 -- Migration: 20261028000001_create_events_tables.sql
--- Tabelas de domínio para Eventos de Centros Acadêmicos e Inscrições (§ 4.1 do relatório de features)
+-- Tabelas e tipos enumerados de domínio para Eventos, Homologação e Inscrições
+-- conforme a seção 5 do Modelo Entidade-Relacionamento do CApp.
 
-CREATE TABLE IF NOT EXISTS events (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    academic_center_id UUID NOT NULL,
-    author_id UUID NOT NULL,
-    title TEXT NOT NULL,
-    description TEXT NOT NULL,
-    location TEXT NOT NULL,
-    starts_at TIMESTAMPTZ NOT NULL,
-    ends_at TIMESTAMPTZ NOT NULL,
-    status TEXT NOT NULL DEFAULT 'draft',
-    requires_registration BOOLEAN NOT NULL DEFAULT TRUE,
-    max_capacity INTEGER NULL,
-    confirmed_registrations INTEGER NOT NULL DEFAULT 0,
-    registration_deadline TIMESTAMPTZ NULL,
-    published_at TIMESTAMPTZ NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT chk_events_title_not_empty CHECK (length(trim(title)) > 0),
-    CONSTRAINT chk_events_description_not_empty CHECK (length(trim(description)) > 0),
-    CONSTRAINT chk_events_location_not_empty CHECK (length(trim(location)) > 0),
-    CONSTRAINT chk_events_period CHECK (ends_at > starts_at),
-    CONSTRAINT chk_events_status CHECK (
-        status IN (
-            'draft',
-            'pending_approval',
-            'approved',
-            'rejected',
-            'published',
-            'cancelled',
-            'rascunho',
-            'pendente',
-            'aprovado',
-            'rejeitado',
-            'publicado',
-            'cancelado'
-        )
-    ),
-    CONSTRAINT chk_events_max_capacity CHECK (max_capacity IS NULL OR max_capacity > 0),
-    CONSTRAINT chk_events_confirmed_registrations CHECK (
-        confirmed_registrations >= 0
-        AND (max_capacity IS NULL OR confirmed_registrations <= max_capacity)
-    ),
-    CONSTRAINT chk_events_registration_deadline CHECK (
-        registration_deadline IS NULL OR registration_deadline <= ends_at
-    ),
-    CONSTRAINT chk_events_timestamps CHECK (updated_at >= created_at)
+CREATE TYPE event_status AS ENUM (
+    'draft',
+    'pending_review',
+    'published',
+    'rejected',
+    'cancelled'
 );
 
-CREATE INDEX IF NOT EXISTS idx_events_academic_center_status ON events (academic_center_id, status);
-CREATE INDEX IF NOT EXISTS idx_events_starts_at ON events (starts_at);
+CREATE TYPE publication_review_decision AS ENUM (
+    'approved',
+    'rejected'
+);
 
-CREATE TABLE IF NOT EXISTS event_registrations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-    participant_id UUID NOT NULL,
-    status TEXT NOT NULL DEFAULT 'confirmed',
-    registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    cancelled_at TIMESTAMPTZ NULL,
-    CONSTRAINT uk_event_registrations_event_participant UNIQUE (event_id, participant_id),
-    CONSTRAINT chk_event_registrations_status CHECK (
-        status IN (
-            'confirmed',
-            'cancelled',
-            'waitlisted',
-            'confirmada',
-            'cancelada',
-            'fila_espera'
-        )
+CREATE TYPE event_registration_status AS ENUM (
+    'registered',
+    'waitlisted',
+    'invited',
+    'cancelled'
+);
+
+CREATE TABLE event (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    ca_id uuid NOT NULL REFERENCES academic_center(id) ON DELETE RESTRICT,
+    author_id uuid NOT NULL,
+    title text NOT NULL,
+    description text NOT NULL,
+    location text NOT NULL,
+    starts_at timestamptz NOT NULL,
+    ends_at timestamptz NOT NULL,
+    capacity integer NULL,
+    status event_status NOT NULL DEFAULT 'draft',
+    revision integer NOT NULL DEFAULT 1,
+    registration_policy jsonb NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT chk_event_title_not_empty CHECK (
+        btrim(title) <> '' AND char_length(btrim(title)) <= 200
     ),
-    CONSTRAINT chk_event_registrations_cancelled_at CHECK (
-        (status IN ('cancelled', 'cancelada') AND cancelled_at IS NOT NULL)
-        OR (status NOT IN ('cancelled', 'cancelada') AND cancelled_at IS NULL)
+    CONSTRAINT chk_event_description_not_empty CHECK (
+        btrim(description) <> '' AND char_length(btrim(description)) <= 5000
+    ),
+    CONSTRAINT chk_event_location_not_empty CHECK (
+        btrim(location) <> '' AND char_length(btrim(location)) <= 300
+    ),
+    CONSTRAINT chk_event_period CHECK (ends_at > starts_at),
+    CONSTRAINT chk_event_capacity_positive CHECK (capacity IS NULL OR capacity > 0),
+    CONSTRAINT chk_event_revision_positive CHECK (revision >= 1),
+    CONSTRAINT chk_event_registration_policy_object CHECK (
+        jsonb_typeof(registration_policy) = 'object'
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_event_registrations_event_id ON event_registrations (event_id);
-CREATE INDEX IF NOT EXISTS idx_event_registrations_participant_id ON event_registrations (participant_id);
+CREATE INDEX idx_event_ca_id_status ON event (ca_id, status);
+CREATE INDEX idx_event_author_id ON event (author_id);
+CREATE INDEX idx_event_starts_at ON event (starts_at);
+
+CREATE TABLE event_review (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id uuid NOT NULL REFERENCES event(id) ON DELETE CASCADE,
+    reviewer_id uuid NOT NULL,
+    reviewed_revision integer NOT NULL,
+    decision publication_review_decision NOT NULL,
+    reason text NULL,
+    decided_at timestamptz NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_event_review_revision_positive CHECK (reviewed_revision >= 1),
+    CONSTRAINT chk_event_review_reason_not_empty CHECK (
+        reason IS NULL OR btrim(reason) <> ''
+    )
+);
+
+CREATE INDEX idx_event_review_event_id ON event_review (event_id);
+CREATE INDEX idx_event_review_reviewer_id ON event_review (reviewer_id);
+
+CREATE TABLE event_registration (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id uuid NOT NULL REFERENCES event(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL,
+    status event_registration_status NOT NULL DEFAULT 'registered',
+    queue_sequence bigint NULL,
+    registered_at timestamptz NOT NULL DEFAULT NOW(),
+    invitation_expires_at timestamptz NULL,
+    cancelled_at timestamptz NULL,
+    CONSTRAINT uk_event_registration_event_user UNIQUE (event_id, user_id),
+    CONSTRAINT uk_event_registration_event_queue_sequence UNIQUE (event_id, queue_sequence),
+    CONSTRAINT chk_event_registration_queue_sequence_positive CHECK (
+        queue_sequence IS NULL OR queue_sequence >= 1
+    ),
+    CONSTRAINT chk_event_registration_invitation_expires_at CHECK (
+        invitation_expires_at IS NULL OR invitation_expires_at > registered_at
+    ),
+    CONSTRAINT chk_event_registration_cancelled_at CHECK (
+        (status = 'cancelled' AND cancelled_at IS NOT NULL AND cancelled_at >= registered_at)
+        OR (status <> 'cancelled' AND cancelled_at IS NULL)
+    )
+);
+
+CREATE INDEX idx_event_registration_event_id ON event_registration (event_id);
+CREATE INDEX idx_event_registration_user_id ON event_registration (user_id);

@@ -7,7 +7,8 @@ pub mod eventos;
 
 pub use eventos::{
     DIRECT_EVENT_MANAGEMENT_PERMISSION, Event, EventDomainError, EventPeriod,
-    EventPublicationStatus, EventRegistration, EventRegistrationInfo, MAX_EVENT_DESCRIPTION_LENGTH,
-    MAX_EVENT_LOCATION_LENGTH, MAX_EVENT_TITLE_LENGTH, RegistrationStatus,
-    validate_event_basic_fields, validate_event_period, validate_event_registration,
+    EventPublicationStatus, EventRegistration, EventRegistrationInfo, EventRegistrationPolicy,
+    MAX_EVENT_DESCRIPTION_LENGTH, MAX_EVENT_LOCATION_LENGTH, MAX_EVENT_TITLE_LENGTH,
+    RegistrationPolicy, RegistrationStatus, validate_event_basic_fields, validate_event_period,
+    validate_event_registration,
 };

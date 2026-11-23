@@ -1,24 +1,27 @@
-//! Rotas globais de saúde e prontidão do backend.
+//! Composição das rotas de saúde, prontidão e verificação institucional.
 //!
-//! A composição é independente do transporte: o chamador pode servir o router
-//! com Axum ou enviar requisições em memória. Nenhuma conexão é aberta ao
-//! construir o router; o acesso ao PostgreSQL ocorre no handler de prontidão.
+//! O chamador pode servir o router com Axum ou enviar requisições em memória.
+//! Construir o router não abre conexões. `/ready` consulta PostgreSQL; a rota de
+//! verificação consulta também os adaptadores externos e persiste a evidência.
 
 use std::time::Duration;
 
-use axum::{Router, extract::State, routing::get};
+use axum::{Router, extract::State, middleware, routing::get};
 use reqwest::StatusCode;
 use tokio::time::timeout;
 
 use crate::{api::state::AppState, modules::events};
 
-/// Monta as rotas globais, ainda dependentes de [`AppState`].
+/// Monta as rotas globais e de identidade, ainda dependentes de [`AppState`].
 ///
 /// # Rotas
 ///
 /// | Método e caminho | Comportamento |
 /// | --- | --- |
+/// | `POST /auth/institutional/verify` | Valida as credenciais, persiste a confirmação e retorna perfil e validade. |
 /// | `GET /health` | Retorna HTTP 200 e `O servidor está saudável.` sem consultar dependências. |
+/// | `GET /elections/{id}/board` | Exporta uma fotografia consistente do quadro público. |
+/// | `GET /elections/{id}/board/checkpoint` | Distribui a âncora assinada da posição atual do quadro. |
 /// | `GET /ready` | Executa `SELECT 1 AS ok` no pool; retorna HTTP 200 no sucesso e HTTP 503 em erro ou timeout. |
 ///
 /// A prontidão limita a espera pela aquisição da conexão e execução da consulta
@@ -29,9 +32,10 @@ use crate::{api::state::AppState, modules::events};
 ///
 /// # Retorno
 ///
-/// Um [`Router<AppState>`] que deve receber o estado por [`Router::with_state`]
-/// antes de atender requisições. Não inicia servidor, não aplica migrations e
-/// não instala autenticação ou outros middlewares.
+/// Router já associado a [AppState], com fiscalização App Check nas rotas de
+/// negócio. Saúde, prontidão e evidências do quadro são públicas. Construir não inicia servidor,
+/// aplica migrations ou consulta chaves remotas. Após a comprovação do aplicativo,
+/// cada rota continua verificando a identidade Firebase e suas regras de acesso.
 ///
 /// # Exemplos
 ///
@@ -39,15 +43,31 @@ use crate::{api::state::AppState, modules::events};
 ///
 /// ```
 /// use axum::{body::Body, http::{Request, StatusCode}};
-/// use backend::api::{router::create_router, state::AppState};
+/// use backend::{
+///     api::{router::create_router, state::{AppState, Clients}},
+///     infrastructure::database::PgDatabase,
+///     modules::identity::infrastructure::{
+///         firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
+///     },
+/// };
 /// use sqlx::postgres::PgPoolOptions;
 /// use tower::ServiceExt;
 ///
 /// # #[tokio::main]
-/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # async fn main() -> anyhow::Result<()> {
 /// let pool = PgPoolOptions::new()
 ///     .connect_lazy("postgres://capp:capp@localhost:5432/capp")?;
-/// let app = create_router().with_state(AppState::new(pool.clone()));
+/// let http = reqwest::Client::builder()
+///     .redirect(reqwest::redirect::Policy::none())
+///     .build()?;
+/// let firebase = FirebaseTokenVerifier::new("capp-example".into(), http.clone())?;
+/// let microsoft = MicrosoftGraphClient::new(http);
+/// let app_check = backend::modules::identity::infrastructure::firebase::AppCheckVerifier::new(
+///     "1234567890".into(), vec!["1:1234567890:android:capp".into()], reqwest::Client::new())?;
+/// let state = AppState::new(
+///     PgDatabase::new(pool.clone()), Clients::new(firebase, microsoft, app_check),
+/// );
+/// let app = create_router(state);
 /// let response = app
 ///     .oneshot(Request::builder().uri("/health").body(Body::empty())?)
 ///     .await?;
@@ -56,15 +76,18 @@ use crate::{api::state::AppState, modules::events};
 /// # Ok(())
 /// # }
 /// ```
-pub fn create_router() -> Router<AppState> {
+pub fn create_router(state: AppState) -> Router {
     Router::new()
+        .merge(crate::modules::identity::api::router())
+        .merge(crate::modules::elections::api::protected_receipt_routes())
+        .merge(events::api::router())
         .route("/health", get(|| async { "O servidor está saudável." }))
         .route(
             "/ready",
             get(|State(state): State<AppState>| async move {
                 let result = timeout(
                     Duration::from_secs(2),
-                    sqlx::query("SELECT 1 AS ok").fetch_one(&state.pool),
+                    sqlx::query("SELECT 1 AS ok").fetch_one(&state.pg_database.pool),
                 )
                 .await;
 
@@ -81,5 +104,10 @@ pub fn create_router() -> Router<AppState> {
                 }
             }),
         )
-        .merge(events::api::router())
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            super::app_check::require_app_check,
+        ))
+        .merge(crate::modules::elections::api::public_board_routes())
+        .with_state(state)
 }

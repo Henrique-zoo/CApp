@@ -1,0 +1,124 @@
+{
+  "protocol": "capp-elections",
+  "version": 1,
+  "canonicalization": "RFC8785",
+  "encoding": "UTF-8",
+  "signedPrefixHex": "434150502d454c454354494f4e532f310a",
+  "digest": "SHA-256",
+  "digestEncoding": "lowercase-hex",
+  "signature": {
+    "algorithm": "RSA-PSS",
+    "hash": "SHA-256",
+    "mgf": "MGF1-SHA-256",
+    "modulusBits": [
+      2048,
+      3072,
+      4096
+    ],
+    "publicExponent": 65537,
+    "publicKeyEncoding": "DER-SubjectPublicKeyInfo-rsaEncryption",
+    "binaryEncoding": "base64url-no-padding",
+    "saltLengthBytes": 32
+  },
+  "group": {
+    "id": "rfc3526-modp14",
+    "primeHex": "ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a163bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed529077096966d670c354e4abc9804f1746c08ca18217c32905e462e36ce3be39e772c180e86039b2783a2ec07a28fb5c55df06f4c52c9de2bcbf6955817183995497cea956ae515d2261898fa051015728e5a8aacaa68ffffffffffffffff",
+    "order": "(p-1)/2",
+    "generator": "2",
+    "integerEncoding": "unsigned-decimal-string-no-leading-zero"
+  },
+  "limits": {
+    "minSlates": 1,
+    "maxSlates": 50,
+    "maxVoters": 100000,
+    "maxAuthorities": 52,
+    "maxSignedMessageBytes": 262144
+  },
+  "nullOptionId": "00000000-0000-0000-0000-000000000000",
+  "nullOptionPosition": "last",
+  "timestamps": "UTC RFC3339 YYYY-MM-DDTHH:mm:ssZ without fractional seconds",
+  "votingInterval": "[startsAt, endsAt)",
+  "premises": {
+    "backendTrusted": true,
+    "clientBallotValidityAssumed": true,
+    "firebaseAuthRequired": true,
+    "firebaseAppCheckRequired": true,
+    "httpsRequiredInThisDelivery": true,
+    "individualBallotValidityProofs": false,
+    "allAuthoritiesRequired": true
+  },
+  "signatureInput": "prefix || UTF8(JCS(payload))",
+  "objectDigest": "SHA256(signatureInput), excluding the outer signature",
+  "signers": {
+    "ballot": "payload.publicKey from the signing pair generated for this election, stored with the accepted ballot for (electionId, userId)",
+    "decryption-share": "signingKey of authorityId in the manifest",
+    "otherKinds": "server signing key; manifest contains its public copy"
+  },
+  "rules": {
+    "options": "IDs distintos; ID da opção de chapa igual ao ID da chapa; exatamente um Nulo, na última posição.",
+    "authorities": "Uma autoridade do servidor, uma da comissão e uma por chapa. IDs e chaves distintos. Rejeitar publicValue=1. Se o produto der combinedPublicKey=1, descartar somente o par ElGamal do servidor, sortear outro, gerar nova prova de conhecimento e recalcular a chave conjunta. Repetir se o produto continuar igual a 1. As outras autoridades mantêm seus pares e provas.",
+    "groupElements": "1 <= v < p e v^q mod p = 1. O a de cada cifra individual deve ser diferente de 1. Ao cifrar, o app descarta nonces que produzam b=1 ou b=g, pois esses valores revelam o bit cifrado. Um componente agregado pode ser 1, inclusive quando não há cédulas. Respostas de provas em [0,q).",
+    "manifestPublication": "Cada electionId tem no máximo um manifesto oficial. As chaves públicas ElGamal individuais e a chave conjunta só são divulgadas no manifesto assinado, após validar a configuração, as chaves e as provas de conhecimento. Os valores provisórios ficam no backend. A publicação torna o manifesto imutável, inclusive antes do primeiro voto. Alterar a configuração publicada exige cancelar a eleição e criar outra com novo electionId.",
+    "calendar": "Em preparação, a comissão pode adiar a abertura e definir o novo fim; todo novo encerramento deve ser estritamente posterior ao anterior. Aberta, prorrogar o fim antes do prazo vigente, preservando o início. Sem encerramento antecipado ou reabertura. Preservar a duração é somente sugestão da interface.",
+    "cancellation": "Comissão pode cancelar eleição não terminal, identificando ator e motivo, preservando registros e sem apuração antecipada.",
+    "scheduleChain": "CalendarOrigin é assinado pelo servidor antes de preparar as chaves. Seu digest é o scheduleHash inicial; Manifest.calendarOriginHash referencia esse objeto. Cada revisão referencia o hash da revisão anterior. ScheduleChange.manifestHash pode ser nulo antes da publicação do manifesto. Revisões do calendário não modificam o manifesto publicado.",
+    "boardChain": "Índices começam em 1. Primeiro previousHash = manifestHash. Depois, objectDigest do payload board-entry anterior. Quadro vazio: headHash = manifestHash.",
+    "receipt": "ballotHash = objectDigest do payload ballot; entryHash = objectDigest do payload board-entry. Persistir e devolver o mesmo recibo aceito nas repetições.",
+    "counting": "Atualizar o acumulador da eleição na mesma transação que aceita uma nova cédula. Repetições não atualizam o acumulador. Usar o mesmo encerramento para headHash, voterCount e agregado. Recuperar totais em [0,voterCount] e exigir soma(counts)=voterCount, incluindo Nulo.",
+    "outcomes": "Autoridade ausente ou contribuição inválida: incomplete. Total fora do intervalo ou soma divergente: annulled. Cancelamento manual: cancelled. Demais casos: apuração valid, sem definir vencedor.",
+    "privacy": "Não publicar tokens, Firebase UID, e-mail, escolha em claro, chave privada ou aleatoriedade da cifragem.",
+    "transport": "HTTPS obrigatório entre app e backend, com validação de confiança, validade e nome do servidor no cliente. Terminação TLS no Caddy; HTTP somente na rede privada do Compose, no mesmo host, sem exposição externa da porta do backend. Iniciar chamadas com credenciais diretamente em HTTPS. Um envelope assinado por mensagem JSON; exportação pública pode usar JSON Lines. Rejeitar chaves duplicadas, campos desconhecidos e strings escalares não canônicas.",
+    "binary": "Decodificar Base64url e exigir que a recodificação sem padding seja igual à entrada. Chaves RSA usam DER SPKI canônico com OID rsaEncryption.",
+    "serverKey": "A configuração confiável do backend fornece a chave do servidor. A autoassinatura do manifesto, isoladamente, não comprova sua origem.",
+    "eligibility": "Firebase autentica o usuário. O backend resolve o UUID da conta CApp e confere sua correspondência com voterId na cédula. No novo aceite, o curso da evidência institucional vigente deve corresponder ao curso vinculado ao CA da eleição.",
+    "retries": "Autenticar primeiro. Mesma eleição, eleitor e submissionId com o mesmo ballotHash recuperam registro/recibo, inclusive após o encerramento. Outra cédula ou outra operação depois do aceite não cria voto novo.",
+    "ordering": "A ordem de options e authorities publicada no manifesto é a referência imutável. IDs devem ser distintos; Nulo ocupa a última posição. Canonicalização não reordena arrays. Cifras, totais e contribuições seguem options.",
+    "terminalStates": "Cancelamento manual somente antes de resultado final. Repetir o mesmo cancelamento é idempotente. Tallied, cancelled e annulled não reabrem. Incomplete ainda permite receber contribuições válidas.",
+    "authorityCustody": "Segredos de autoridade e nonces de prova permanecem no respectivo responsável. Gerar segredos e nonces em [1,q) por CSPRNG; não reutilizar nonce de prova.",
+    "keyProof": "Validar provas de conhecimento antes de congelar autoridades. commitment e commitmentG devem ser diferentes de 1; commitmentA pode ser 1 quando o agregado a for 1.",
+    "numericLiterals": "Campos numéricos JSON usam literais inteiros; recusar ponto decimal, expoente, NaN, infinitos e zero negativo. Valores criptográficos continuam sendo strings decimais canônicas."
+  },
+  "proofChallenges": {
+    "hash": "c = integer_big_endian(SHA256(prefix || UTF8(JCS(challengePayload)))) mod q",
+    "authorityKey": {
+      "kind": "authority-key-proof",
+      "fields": [
+        "version",
+        "kind",
+        "electionId",
+        "groupId",
+        "authorityId",
+        "role",
+        "slateId",
+        "signingKey",
+        "publicValue",
+        "commitment"
+      ],
+      "verification": "g^response = commitment * publicValue^c mod p"
+    },
+    "decryption": {
+      "kind": "decryption-proof",
+      "fields": [
+        "version",
+        "kind",
+        "electionId",
+        "groupId",
+        "manifestHash",
+        "closureHash",
+        "aggregateHash",
+        "authorityId",
+        "optionId",
+        "publicValue",
+        "a",
+        "b",
+        "value",
+        "commitmentG",
+        "commitmentA"
+      ],
+      "verification": [
+        "g^response = commitmentG * publicValue^c mod p",
+        "a^response = commitmentA * value^c mod p"
+      ]
+    }
+  }
+}

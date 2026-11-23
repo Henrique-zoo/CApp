@@ -1,0 +1,311 @@
+//! Contratos de integração e persistência usados pela aplicação.
+//!
+//! Os serviços conhecem estas traits, sem depender de SQLx, Reqwest ou estado HTTP.
+//! Os perfis são dados externos opcionais; identidades verificadas não comprovam
+//! por si só a elegibilidade institucional. A evidência persistida é consultada
+//! separadamente e associada ao UID e ao objeto Microsoft autenticados.
+
+use uuid::Uuid;
+
+use crate::modules::identity::{
+    application::error::{
+        AuthenticationError, InstitutionRepositoryError, InstitutionalVerificationRepositoryError,
+        UserRepositoryError,
+    },
+    domain::entities::{
+        institution::Institution, institutional_verification::InstitutionalVerification, user::User,
+    },
+};
+
+/// Perfil externo obtido pelo contrato do diretório institucional.
+///
+/// Não é o perfil interno de um usuário provisionado. `id` deve ser confrontado
+/// com a identidade Microsoft vinculada ao Firebase; os outros campos podem estar
+/// ausentes. O curso é texto livre informado pelo provedor, sem associação local.
+#[derive(Debug, Clone)]
+pub struct InstitutionalProfile {
+    /// Identificador do usuário no diretório Microsoft.
+    pub id: String,
+
+    /// Nome informado pela instituição.
+    pub name: Option<String>,
+
+    /// Endereço do diretório usado apenas como sugestão transitória no cadastro.
+    /// Não é persistido nem comprova identidade ou vínculo estudantil.
+    pub mail: Option<String>,
+
+    /// Vínculo estudantil e, quando aplicável, curso informado pelo diretório.
+    pub affiliation: InstitutionalAffiliation,
+}
+
+/// Vínculo identificado durante a verificação institucional.
+#[derive(Debug, Clone)]
+pub enum InstitutionalAffiliation {
+    /// Participação no grupo estudantil e curso não vazio confirmados pelo diretório.
+    Student {
+        /// Curso informado pelo diretório, ainda sem associação ao catálogo do CApp.
+        course_name: String,
+    },
+
+    /// Grupo estudantil ou curso não confirmado; permite somente acesso limitado.
+    NonStudent,
+}
+
+impl InstitutionalAffiliation {
+    /// Interpreta a evidência externa sem permitir que um curso ausente conceda direitos.
+    ///
+    /// Nome, e-mail e outros atributos opcionais não participam desta decisão.
+    /// Um cargo só é interpretado como curso quando o grupo estudantil foi confirmado.
+    /// O texto externo válido é preservado; valores ausentes, vazios ou compostos
+    /// apenas por espaços produzem o mesmo acesso limitado de um não estudante.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `is_student_member`: resultado conclusivo da consulta ao grupo estudantil
+    ///   ou confirmação persistida dessa consulta; não é declaração do cliente.
+    /// - `course_name`: texto obtido no diretório ou reconstituído da evidência.
+    ///   `None` representa ausência; o teste de conteúdo usa `trim`, mas um curso
+    ///   aceito conserva seu texto original, inclusive espaços nas extremidades.
+    ///
+    /// # Retorno e limites
+    ///
+    /// Retorna [`Self::Student`] somente quando as duas informações confirmam o
+    /// contexto estudantil; nos demais casos, [`Self::NonStudent`]. Isso permite
+    /// autenticação limitada, sem atestar pertencimento a um CA ou papel de gestão.
+    /// Não consulta provedores, valida prazo ou associa texto ao catálogo de cursos.
+    /// Falhas técnicas do diretório devem ser propagadas pela porta antes desta
+    /// conversão, em vez de representadas como uma consulta negativa.
+    ///
+    /// # Exemplos
+    ///
+    /// ```
+    /// use backend::modules::identity::application::ports::InstitutionalAffiliation;
+    ///
+    /// let recognized = InstitutionalAffiliation::from_directory(true, Some("Curso".into()));
+    /// assert!(matches!(recognized, InstitutionalAffiliation::Student { .. }));
+    /// let incomplete = InstitutionalAffiliation::from_directory(true, Some(" \t".into()));
+    /// assert!(matches!(incomplete, InstitutionalAffiliation::NonStudent));
+    /// ```
+    pub fn from_directory(is_student_member: bool, course_name: Option<String>) -> Self {
+        match course_name {
+            Some(course_name) if is_student_member && !course_name.trim().is_empty() => {
+                Self::Student { course_name }
+            }
+            _ => Self::NonStudent,
+        }
+    }
+}
+
+/// Consultas necessárias à verificação institucional.
+#[async_trait::async_trait]
+pub trait InstitutionalDirectory: Send + Sync {
+    /// Identifica o tenant consultado com a credencial Microsoft fornecida.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `access_token`: credencial delegada do mesmo usuário consultado por `get_profile`.
+    ///
+    /// # Retorno
+    ///
+    /// UUID organizacional usado para localizar a instituição. Não aceita um tenant
+    /// informado pelo cliente como evidência de origem.
+    ///
+    /// # Erros
+    ///
+    /// Credencial recusada, resposta incompatível ou indisponibilidade do diretório.
+    /// A implementação Graph espera exatamente uma organização no envelope `value`.
+    async fn get_tenant_id(&self, access_token: &str) -> Result<Uuid, AuthenticationError>;
+
+    /// Obtém o perfil do usuário representado pelo access token Microsoft.
+    ///
+    /// # Retorno
+    ///
+    /// Identificador externo e atributos disponíveis. Ausência de nome, e-mail ou curso
+    /// não constitui falha de autenticação. Sem curso, o vínculo é `NonStudent`,
+    /// mesmo com grupo confirmado. A correspondência com o Firebase cabe ao
+    /// serviço chamador, não ao diretório.
+    ///
+    /// # Erros
+    ///
+    /// Retorna erro se a credencial for recusada, a resposta não corresponder ao contrato
+    /// ou a consulta falhar. Nunca deve devolver dados sem confirmar a resposta do provedor.
+    async fn get_profile(
+        &self,
+        access_token: &str,
+        is_student: bool,
+    ) -> Result<InstitutionalProfile, AuthenticationError>;
+
+    /// Confirma participação no grupo institucional selecionado pelo serviço.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `access_token`: credencial do usuário cujo perfil será confrontado pelo serviço.
+    /// - `student_group_id`: grupo configurado para o tenant da instituição.
+    ///
+    /// # Retorno
+    ///
+    /// `true` quando a participação foi confirmada; `false` quando uma consulta
+    /// conclusiva não a confirmou. O adaptador Graph usa `checkMemberGroups`, incluindo
+    /// participação transitiva. O nome do grupo não é usado como chave.
+    ///
+    /// # Erros
+    ///
+    /// Falhas de rede, resposta ou autorização da consulta devem retornar erro, nunca
+    /// `false`. O chamador só deve persistir uma resposta conclusiva.
+    async fn is_student_member(
+        &self,
+        access_token: &str,
+        student_group_id: Uuid,
+    ) -> Result<bool, AuthenticationError>;
+}
+
+/// Identidade obtida de um Firebase ID token com assinatura e claims válidas.
+///
+/// Não comprova elegibilidade institucional nem ausência de revogação da sessão.
+#[derive(Debug, Clone)]
+pub struct VerifiedIdentity {
+    /// UID do usuário no projeto Firebase configurado.
+    pub firebase_uid: String,
+
+    /// Identificador da conta Microsoft vinculada, quando presente no token.
+    ///
+    /// É diferente do UID Firebase e deve ser confrontado com a identidade
+    /// retornada pelo Microsoft Graph.
+    pub microsoft_object_id: Option<String>,
+
+    /// E-mail e método de entrada extraídos do JWT verificado, nunca do JSON cliente.
+    pub email: Option<String>,
+
+    /// Provedor que autenticou a sessão que originou o JWT.
+    pub sign_in_provider: Option<String>,
+}
+
+/// Validação técnica de uma credencial de identidade.
+#[async_trait::async_trait]
+pub trait IdentityTokenVerifier: Send + Sync {
+    /// Verifica a credencial Firebase e devolve a identidade autenticada.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `token`: Firebase ID token, sem o prefixo HTTP `Bearer`.
+    ///
+    /// # Retorno
+    ///
+    /// UID e eventual identificador Microsoft vinculado. A ausência do vínculo pode
+    /// ser representada por `None`; a exigência de um UUID Microsoft pertence ao caso
+    /// de uso institucional. Não cria sessão ou usuário interno.
+    ///
+    /// # Erros
+    ///
+    /// Credencial inválida ou expirada, indisponibilidade das chaves ou falha interna.
+    /// O adaptador atual valida assinatura e claims, sem consultar revogação da sessão
+    /// ou situação atual da conta Firebase.
+    async fn verify(&self, token: &str) -> Result<VerifiedIdentity, AuthenticationError>;
+}
+
+/// Consulta do cadastro confiável de instituições.
+///
+/// A configuração vem da persistência e não do corpo de login. A consulta não
+/// executa chamadas ao Graph nem transforma status de catálogo em autorização.
+#[async_trait::async_trait]
+pub trait InstitutionRepository {
+    /// Localiza uma instituição pelo UUID do tenant confirmado pelo diretório.
+    ///
+    /// # Retorno
+    ///
+    /// `Some` com o cadastro completo ou `None` quando o tenant não está cadastrado.
+    /// O contrato pressupõe unicidade do tenant. Não filtra `CatalogStatus`.
+    ///
+    /// # Erros
+    ///
+    /// Retorna falha técnica para erro de consulta ou de mapeamento do registro.
+    async fn find_by_microsoft_tenant_id(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Option<Institution>, InstitutionRepositoryError>;
+}
+
+/// Persistência da conta interna, com provisionamento idempotente por UID.
+#[async_trait::async_trait]
+pub trait UserRepository: Send + Sync {
+    /// Provisiona idempotentemente; chamadas concorrentes retornam o mesmo ID.
+    ///
+    /// `firebase_uid` deve vir da identidade autenticada, após o confronto entre
+    /// Microsoft e Firebase. A implementação precisa garantir unicidade também
+    /// em chamadas concorrentes, sem sobrescrever perfil ou reativar conta inativa.
+    /// Retorna a conta criada como incompleta ou a conta existente com seu estado.
+    /// Falhas de consulta/escrita são [`UserRepositoryError`], não conta ausente.
+    async fn provision(&self, firebase_uid: &str) -> Result<User, UserRepositoryError>;
+
+    /// Persiste apenas o perfil validado; recusa conta desativada concorrentemente.
+    ///
+    /// `user` deve ter passado pelas verificações de origem da aplicação e pelas
+    /// invariantes de [`User::complete_profile`]. Retorna `true` quando a escrita
+    /// é aceita e `false` quando a atualização condicional não encontra uma conta
+    /// elegível. A primeira data de conclusão e a identidade devem ser preservadas.
+    /// Falhas de infraestrutura retornam [`UserRepositoryError`]; não podem ser
+    /// confundidas com uma recusa de estado nem com atualização bem-sucedida.
+    async fn update_profile(&self, user: &User) -> Result<bool, UserRepositoryError>;
+
+    /// Recupera a conta pelo UID confiável, sem provisionar ou autenticar.
+    ///
+    /// Retorna `Ok(None)` antes do primeiro provisionamento. Uma conta inativa
+    /// pode ser retornada: cabe à aplicação decidir seu acesso. Não consulta o
+    /// Graph nem interpreta validade institucional. Falhas de consulta ou de
+    /// reconstituição retornam [`UserRepositoryError`], preservando a distinção
+    /// entre ausência esperada e dependência indisponível.
+    async fn get_by_firebase_uid(
+        &self,
+        firebase_uid: &str,
+    ) -> Result<Option<User>, UserRepositoryError>;
+}
+
+/// Persistência das evidências de elegibilidade institucional.
+#[async_trait::async_trait]
+pub trait InstitutionalVerificationRepository: Send + Sync {
+    /// Busca a evidência reutilizável para um UID Firebase, estudante ou não.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `firebase_uid`: identificador obtido de um token já validado no projeto usado
+    ///   pelo backend; não deve ser aceito diretamente do corpo da requisição.
+    ///
+    /// # Retorno
+    ///
+    /// `Some` se o prazo é posterior ao instante da consulta e tenant/grupo ainda
+    /// correspondem à configuração institucional. Participação estudantil negativa
+    /// não impede a autenticação. Retorna `None` para ausência, expiração ou configuração
+    /// alterada. Não renova o prazo e não consulta o Graph. O serviço ainda deve
+    /// comparar o objeto Microsoft do registro com o token atual.
+    ///
+    /// # Erros
+    ///
+    /// Falhas de consulta ou desserialização; não devem ser confundidas com `None`.
+    async fn find_valid_by_firebase_uid(
+        &self,
+        firebase_uid: &str,
+    ) -> Result<Option<InstitutionalVerification>, InstitutionalVerificationRepositoryError>;
+
+    /// Registra uma resposta conclusiva, positiva ou negativa, por UID Firebase.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `verification`: evidência construída após confronto das identidades e consulta
+    ///   ao grupo; deve ter `expires_at > checked_at` e instituição existente.
+    ///
+    /// # Retorno
+    ///
+    /// `true` quando houve inserção ou substituição; `false` quando existe registro com
+    /// `checked_at` igual ou posterior. O registro é substituído por inteiro; não é um
+    /// histórico de verificações. A ordenação usa o início da consulta e pressupõe
+    /// relógios sincronizados entre instâncias. Erros de provedor não geram registros.
+    ///
+    /// # Erros
+    ///
+    /// Falha de persistência, instituição inexistente ou violação de restrição.
+    /// O contrato não inclui limpeza de registros expirados nem criação de usuário.
+    async fn save(
+        &self,
+        verification: &InstitutionalVerification,
+    ) -> Result<bool, InstitutionalVerificationRepositoryError>;
+}

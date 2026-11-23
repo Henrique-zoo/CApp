@@ -87,6 +87,7 @@ where
                 command.location,
                 command.starts_at,
                 command.ends_at,
+                command.capacity,
                 command.registration,
             )?
         } else {
@@ -98,6 +99,7 @@ where
                 command.location,
                 command.starts_at,
                 command.ends_at,
+                command.capacity,
                 command.registration,
             )?
         };
@@ -123,7 +125,7 @@ where
             .ok_or(EventApplicationError::NotFound(command.event_id))?;
 
         if let Some(ca_id) = command.academic_center_id
-            && event.academic_center_id != ca_id
+            && event.academic_center_id() != ca_id
         {
             return Err(EventApplicationError::PermissionDenied);
         }
@@ -136,8 +138,12 @@ where
             command.ends_at,
         )?;
 
-        if let Some(registration) = command.registration {
-            event.configure_registration(registration)?;
+        if command.capacity.is_some() || command.registration.is_some() {
+            let capacity = command.capacity.unwrap_or_else(|| event.capacity());
+            let registration = command
+                .registration
+                .unwrap_or_else(|| event.registration().clone());
+            event.configure_registration(capacity, registration)?;
         }
 
         self.repository.update(&event).await
@@ -161,7 +167,7 @@ where
             .ok_or(EventApplicationError::NotFound(command.event_id))?;
 
         if let Some(ca_id) = command.academic_center_id
-            && event.academic_center_id != ca_id
+            && event.academic_center_id() != ca_id
         {
             return Err(EventApplicationError::PermissionDenied);
         }

@@ -1,0 +1,242 @@
+{
+  "version": 1,
+  "purpose": "Contratos entre frentes de implementação; não declara endpoints ou DTOs Rust/Dart já implementados.",
+  "fronts": [
+    {
+      "id": "A",
+      "issues": [
+        378,
+        379,
+        139
+      ],
+      "responsibility": "Primitivas, geração local de segredos, provas das autoridades, agregação e decifração. Consome bytes e exemplos; não precisa de servidor pronto."
+    },
+    {
+      "id": "B",
+      "issues": [
+        130,
+        131,
+        132,
+        137,
+        282
+      ],
+      "responsibility": "Invariantes, calendário, autorização/eligibilidade por portas e coordenação. Recebe identidades autenticadas, não JWT no domínio."
+    },
+    {
+      "id": "C",
+      "issues": [
+        380,
+        381,
+        382
+      ],
+      "responsibility": "Codecs, assinatura, registro transacional, recibos e votação no aplicativo CApp com Firebase Auth e App Check. A cifragem da cédula acontece no dispositivo do eleitor."
+    },
+    {
+      "id": "D",
+      "issues": [
+        284,
+        383,
+        143,
+        144
+      ],
+      "responsibility": "Verificação independente no aplicativo CApp e testes adversariais. O app recalcula o veredito no dispositivo a partir das evidências e âncoras públicas."
+    }
+  ],
+  "ports": [
+    {
+      "name": "CryptographicCodec",
+      "owner": "C",
+      "implementedBy": "Adaptadores puro Rust/Dart e implementação independente do auditor",
+      "input": [
+        "payload tipado e validado",
+        "profile v1"
+      ],
+      "output": [
+        "bytes JCS prefixados",
+        "digest SHA-256",
+        "assinatura/verificação RSA-PSS"
+      ],
+      "contract": [
+        "Rejeitar duplicatas antes de formar mapas.",
+        "Inteiros criptográficos são strings decimais canônicas.",
+        "Não assinar o JSON incidental do serializador.",
+        "Chaves privadas pertencem somente ao processo responsável."
+      ]
+    },
+    {
+      "name": "ElectionCryptography",
+      "owner": "A",
+      "implementedBy": "Eleitor, autoridade e apurador nos seus respectivos contextos",
+      "input": [
+        "grupo fixado",
+        "vetor ordenado de opções",
+        "material público ou identificador de segredo local"
+      ],
+      "output": [
+        "cifras",
+        "prova de conhecimento",
+        "agregado",
+        "contribuições e provas de correção",
+        "totais no intervalo conhecido"
+      ],
+      "contract": [
+        "Servidor não recebe x das demais autoridades nem r ou RSA privada do eleitor.",
+        "Cada nonce é novo e vem de CSPRNG.",
+        "Todas as autoridades contribuem para o mesmo agregado final.",
+        "Prova de autoridade não comprova validade 0/1 do conteúdo de voto."
+      ]
+    },
+    {
+      "name": "ElectionStore",
+      "owner": "B/C",
+      "implementedBy": "Repositório transacional #381",
+      "operations": [
+        {
+          "name": "recordBallot",
+          "input": [
+            "par (electionId,userId) da eleição solicitada e da conta CApp autenticada",
+            "SignedBallot",
+            "manifesto/calendário esperados",
+            "acumulador atualizado e revisão da eleição esperada para votação secreta"
+          ],
+          "output": [
+            "Receipt assinado na votação secreta, inclusive na repetição do mesmo envio",
+            "confirmação sem conteúdo na votação identificada",
+            "recusa ou conflito para repetir com nova leitura"
+          ],
+          "invariants": [
+            "UNIQUE(electionId,userId).",
+            "A conta vem da autenticação. O voterId assinado deve corresponder ao userId dessa conta.",
+            "Um novo voto exige que o curso da evidência institucional vigente corresponda ao curso vinculado ao CA da eleição.",
+            "A participação guarda a cédula aceita com a chave pública de assinatura gerada para essa eleição.",
+            "Mesmo submissionId com payload diferente é recusado.",
+            "Mesmo voto/operação recupera recibo existente inclusive depois do encerramento, sem alterar o acumulador.",
+            "A consulta de recibo aceito exige a conta autenticada e dispensa nova chave ou permanência no curso.",
+            "Outro submissionId depois de um voto aceito não registra voto novo.",
+            "Índice, encadeamento, voto, participação, recibo e acumulador são confirmados juntos.",
+            "Sem recibo para gravação abortada.",
+            "Novo voto revalida estado, prazo vigente e revisão do acumulador na operação atômica."
+          ]
+        },
+        {
+          "name": "changeSchedule",
+          "input": [
+            "comissão autorizada",
+            "novas datas",
+            "motivo",
+            "revisão esperada"
+          ],
+          "output": [
+            "ScheduleChange assinado e nova revisão",
+            "recusa ou conflito"
+          ],
+          "invariants": [
+            "Novo fim é estritamente posterior ao anterior.",
+            "Abertura já ocorrida não muda.",
+            "Prorrogação precisa ser aceita antes do prazo vigente.",
+            "Com voto concorrente, ambos usam uma ordem transacional consistente."
+          ]
+        },
+        {
+          "name": "closeElection",
+          "input": [
+            "electionId",
+            "relógio confiável",
+            "revisão vigente"
+          ],
+          "output": [
+            "Closure com cabeça e número final de participantes, com o acumulador final congelado para apuração"
+          ],
+          "invariants": [
+            "Não fechar antes do fim vigente.",
+            "Fechamento, último voto, prorrogação e cancelamento são serializados.",
+            "O quadro, a contagem e o acumulador correspondem aos mesmos votos aceitos até o encerramento.",
+            "Não admitir novos votos após o encerramento.",
+            "Repetição recupera o mesmo encerramento."
+          ]
+        },
+        {
+          "name": "cancelElection",
+          "input": [
+            "comissão autorizada",
+            "electionId",
+            "motivo"
+          ],
+          "output": [
+            "Cancellation assinado e resultado cancelled"
+          ],
+          "invariants": [
+            "Somente eleição não terminal.",
+            "Preservar registros e atribuir ator/instante no servidor.",
+            "Sem apuração antecipada e sem vencedor.",
+            "Repetição idempotente não cria efeitos adicionais."
+          ]
+        },
+        {
+          "name": "publishTally",
+          "input": [
+            "encerramento",
+            "agregado",
+            "contribuições verificadas de todas as autoridades"
+          ],
+          "output": [
+            "Result valid, annulled ou incomplete"
+          ],
+          "invariants": [
+            "Ausência/erro de autoridade mantém incomplete.",
+            "Total irrecuperável em [0,N] anula.",
+            "Soma diferente de N anula.",
+            "Não concluir posse ou desempate dentro deste contrato."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ClockAndRandomness",
+      "owner": "A/B",
+      "implementedBy": "Infraestrutura de cada participante",
+      "input": [
+        "pedido de instante ou bytes aleatórios"
+      ],
+      "output": [
+        "UTC do backend para prazos",
+        "bytes CSPRNG locais para segredos/nonces"
+      ],
+      "contract": [
+        "Não confiar em relógio do cliente para aceitar voto ou prorrogação.",
+        "Fixtures usam material sintético público; nunca o reutilizar em produção."
+      ]
+    },
+    {
+      "name": "PublicElectionReader",
+      "owner": "C/D",
+      "implementedBy": "Exportação pública do backend e leitor das evidências para auditoria no CApp",
+      "input": [
+        "identificador da eleição ou arquivo exportado"
+      ],
+      "output": [
+        "envelopes dos mesmos schemas publicados"
+      ],
+      "contract": [
+        "Exportação pode ser JSON Lines, com um envelope por linha.",
+        "Leitura pela rede usa HTTPS com certificado validado; leitura de arquivo exportado permanece offline e confere assinaturas.",
+        "Não exportar tokens, Firebase UID, e-mail, segredos ou aleatoriedades.",
+        "Auditor recebe chave pública confiável do servidor, não uma chave privada.",
+        "Elegibilidade pública depende da associação feita pelo backend no modelo aprovado."
+      ]
+    }
+  ],
+  "messageSchemas": {
+    "Manifest": "schemas.json#/$defs/Manifest",
+    "Ballot": "schemas.json#/$defs/Ballot",
+    "BoardEntry": "schemas.json#/$defs/BoardEntry",
+    "Receipt": "schemas.json#/$defs/Receipt",
+    "ScheduleChange": "schemas.json#/$defs/ScheduleChange",
+    "Cancellation": "schemas.json#/$defs/Cancellation",
+    "Closure": "schemas.json#/$defs/Closure",
+    "Aggregate": "schemas.json#/$defs/Aggregate",
+    "DecryptionShare": "schemas.json#/$defs/DecryptionShare",
+    "Result": "schemas.json#/$defs/Result",
+    "CalendarOrigin": "schemas.json#/$defs/CalendarOrigin"
+  }
+}

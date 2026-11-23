@@ -1,8 +1,6 @@
 import 'dart:convert';
 
-import 'package:capp/app/app.dart';
-import 'package:capp/bootstrap.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:capp/main.dart' as app;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
@@ -14,10 +12,6 @@ import 'support/step_registry.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-
-  setUpAll(() async {
-    await initializeServices();
-  });
 
   final scenarios = (jsonDecode(gherkinCasesJson) as List)
       .cast<Map<String, dynamic>>();
@@ -34,7 +28,8 @@ void main() {
     final steps = scenario['steps'] as List;
 
     testWidgets('$uri: $name [${index + 1}]', (tester) async {
-      await tester.pumpWidget(const ProviderScope(child: CApp()));
+      await app.main();
+      await tester.pumpAndSettle();
 
       await beforeScenario(tester, tags);
 

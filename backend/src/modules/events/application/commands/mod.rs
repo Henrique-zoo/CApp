@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::modules::events::domain::EventRegistrationInfo;
+use crate::modules::events::domain::EventRegistrationPolicy;
 
 /// Comando para criar um novo evento (em rascunho ou publicado diretamente) em um Centro Acadêmico.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,8 +24,10 @@ pub struct CreateEventCommand {
     pub ends_at: DateTime<Utc>,
     /// Quando `true`, publica o evento diretamente sem exigir homologação; quando `false`, salva como rascunho.
     pub publish_directly: bool,
-    /// Configuração de inscrição e limite opcional de vagas.
-    pub registration: EventRegistrationInfo,
+    /// Capacidade máxima opcional de participantes.
+    pub capacity: Option<i32>,
+    /// Política mínima de inscrição (`enabled` / `opens_at` / `closes_at`).
+    pub registration: EventRegistrationPolicy,
 }
 
 /// Comando para editar as informações de um evento existente no Centro Acadêmico.
@@ -47,8 +49,10 @@ pub struct UpdateEventCommand {
     pub starts_at: DateTime<Utc>,
     /// Nova data e horário de término do evento.
     pub ends_at: DateTime<Utc>,
-    /// Nova configuração opcional de inscrição.
-    pub registration: Option<EventRegistrationInfo>,
+    /// Nova capacidade máxima opcional (`Some(None)` limpa o limite; `None` preserva).
+    pub capacity: Option<Option<i32>>,
+    /// Nova política opcional de inscrição.
+    pub registration: Option<EventRegistrationPolicy>,
 }
 
 /// Comando para publicar diretamente um evento salvo em rascunho.
