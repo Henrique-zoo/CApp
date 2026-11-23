@@ -10,7 +10,7 @@ use axum::{Router, extract::State, middleware, routing::get};
 use reqwest::StatusCode;
 use tokio::time::timeout;
 
-use crate::api::state::AppState;
+use crate::{api::state::AppState, modules::events};
 
 /// Monta as rotas globais e de identidade, ainda dependentes de [`AppState`].
 ///
@@ -80,6 +80,7 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         .merge(crate::modules::identity::api::router())
         .merge(crate::modules::elections::api::protected_receipt_routes())
+        .merge(events::api::router())
         .route("/health", get(|| async { "O servidor está saudável." }))
         .route(
             "/ready",

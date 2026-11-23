@@ -1,6 +1,8 @@
-//! Camada de persistência prevista para o módulo de eventos.
+//! Camada de persistência do módulo de eventos.
 //!
-//! [`repository`] reserva os adaptadores de acesso aos dados desse domínio.
-//! Ainda não existem consultas ou implementações de repositório.
+//! [`repository`] disponibiliza o adaptador PostgreSQL ([`PostgresEventRepository`])
+//! que implementa [`EventRepository`](crate::modules::events::application::EventRepository).
 
 pub mod repository;
+
+pub use repository::PostgresEventRepository;

@@ -1,9 +1,7 @@
-//! Estrutura do módulo de eventos.
+//! Módulo de eventos dos Centros Acadêmicos.
 //!
-//! O escopo previsto abrange publicação e homologação de eventos, inscrições e controle de vagas.
-//!
-//! As camadas [`api`], [`application`], [`domain`] e [`infrastructure`] ainda
-//! são espaços reservados; este módulo não implementa esses comportamentos.
+//! Organiza as camadas [`domain`], [`application`], [`infrastructure`] e [`api`]
+//! responsáveis pela criação, edição, publicação, visualização e inscrição em eventos.
 
 pub mod api;
 pub mod application;
