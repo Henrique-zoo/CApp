@@ -139,6 +139,13 @@ pub enum EventDomainError {
         to: EventPublicationStatus,
     },
 
+    /// O conteúdo ou a configuração do evento não pode ser editado no estado atual.
+    #[error("o evento não pode ser editado no estado '{status}'")]
+    EventNotEditable {
+        /// Estado atual do evento que impede a edição.
+        status: EventPublicationStatus,
+    },
+
     /// O estado de inscrição textual informado não é reconhecido pelo domínio.
     #[error("estado de inscrição em evento inválido: '{0}'")]
     InvalidRegistrationStatus(String),
@@ -226,6 +233,10 @@ pub enum EventDomainError {
     /// O estado de cancelamento da inscrição é inconsistente com a data `cancelled_at`.
     #[error("inconsistência entre o status da inscrição e o instante de cancelamento")]
     InconsistentCancellationTimestamp,
+
+    /// A reinscrição só é permitida quando a inscrição estiver cancelada.
+    #[error("só é possível reinscrever uma inscrição que esteja cancelada")]
+    RegistrationNotCancelled,
 }
 
 /// Estado de publicação de um evento no ciclo de vida do Centro Acadêmico.
@@ -903,6 +914,57 @@ impl EventRegistration {
         }
     }
 
+    /// Reabre uma inscrição cancelada como confirmada (`registered`).
+    ///
+    /// Atualiza sempre `registered_at` com o instante informado, limpa
+    /// `cancelled_at` e `invitation_expires_at`, e remove `queue_sequence`.
+    ///
+    /// # Erros
+    ///
+    /// - [`EventDomainError::RegistrationNotCancelled`] se a inscrição não estiver cancelada.
+    /// - Demais erros de [`Self::validate`] após a transição.
+    pub fn reactivate_registered(
+        &mut self,
+        registered_at: DateTime<Utc>,
+    ) -> Result<(), EventDomainError> {
+        if self.status != RegistrationStatus::Cancelled {
+            return Err(EventDomainError::RegistrationNotCancelled);
+        }
+
+        self.status = RegistrationStatus::Registered;
+        self.registered_at = registered_at;
+        self.cancelled_at = None;
+        self.invitation_expires_at = None;
+        self.queue_sequence = None;
+        self.validate()
+    }
+
+    /// Reabre uma inscrição cancelada na fila de espera (`waitlisted`).
+    ///
+    /// Atualiza sempre `registered_at` com o instante informado, limpa
+    /// `cancelled_at` e `invitation_expires_at`, e define a nova posição na fila.
+    ///
+    /// # Erros
+    ///
+    /// - [`EventDomainError::RegistrationNotCancelled`] se a inscrição não estiver cancelada.
+    /// - Demais erros de [`Self::validate`] após a transição (ex.: sequência inválida).
+    pub fn reactivate_waitlisted(
+        &mut self,
+        registered_at: DateTime<Utc>,
+        queue_sequence: i64,
+    ) -> Result<(), EventDomainError> {
+        if self.status != RegistrationStatus::Cancelled {
+            return Err(EventDomainError::RegistrationNotCancelled);
+        }
+
+        self.status = RegistrationStatus::Waitlisted;
+        self.registered_at = registered_at;
+        self.queue_sequence = Some(queue_sequence);
+        self.cancelled_at = None;
+        self.invitation_expires_at = None;
+        self.validate()
+    }
+
     /// Retorna o identificador único da inscrição.
     pub const fn id(&self) -> Uuid {
         self.id
@@ -1257,11 +1319,48 @@ impl Event {
         self.status.is_visible_in_schedule()
     }
 
+    /// Indica se o conteúdo e a configuração do evento podem ser editados no status atual.
+    ///
+    /// Permitido em `Draft`, `PendingReview`, `Rejected` e `Published`.
+    /// Bloqueado em `Cancelled`.
+    pub const fn can_edit_content(&self) -> bool {
+        matches!(
+            self.status,
+            EventPublicationStatus::Draft
+                | EventPublicationStatus::PendingReview
+                | EventPublicationStatus::Rejected
+                | EventPublicationStatus::Published
+        )
+    }
+
+    /// Garante que o evento está em um status editável.
+    ///
+    /// # Erros
+    ///
+    /// Retorna [`EventDomainError::EventNotEditable`] se o status for `Cancelled`.
+    fn ensure_content_editable(&self) -> Result<(), EventDomainError> {
+        if self.can_edit_content() {
+            Ok(())
+        } else {
+            Err(EventDomainError::EventNotEditable {
+                status: self.status,
+            })
+        }
+    }
+
     /// Atualiza de forma atômica as informações básicas e o período do evento,
     /// incrementando o contador de revisão (`revision`).
     ///
+    /// Se o evento estiver [`EventPublicationStatus::Published`], a edição o retira
+    /// da agenda pública transitando para [`EventPublicationStatus::PendingReview`].
+    /// Demais status editáveis preservam o status atual.
+    ///
     /// Caso qualquer validação falhe (como campo obrigatório vazio ou término não posterior ao início),
     /// o evento original permanece inalterado.
+    ///
+    /// # Erros
+    ///
+    /// Retorna [`EventDomainError::EventNotEditable`] se o evento estiver cancelado.
     pub fn update_details(
         &mut self,
         title: impl Into<String>,
@@ -1270,6 +1369,8 @@ impl Event {
         starts_at: DateTime<Utc>,
         ends_at: DateTime<Utc>,
     ) -> Result<(), EventDomainError> {
+        self.ensure_content_editable()?;
+
         let new_title = title.into().trim().to_string();
         let new_description = description.into().trim().to_string();
         let new_location = location.into().trim().to_string();
@@ -1284,6 +1385,7 @@ impl Event {
         self.starts_at = starts_at;
         self.ends_at = ends_at;
         self.revision += 1;
+        self.unpublish_if_published();
         Ok(())
     }
 
@@ -1352,18 +1454,33 @@ impl Event {
     }
 
     /// Cancela o evento, impedindo novas inscrições e convocações.
+    ///
+    /// Idempotente: se o evento já estiver cancelado, retorna `Ok(())` sem alterar o estado.
     pub fn cancel(&mut self) -> Result<(), EventDomainError> {
+        if self.status == EventPublicationStatus::Cancelled {
+            return Ok(());
+        }
         self.status = EventPublicationStatus::Cancelled;
         Ok(())
     }
 
     /// Atualiza a capacidade e a política de inscrição do evento preservando a
     /// consistência com o período.
+    ///
+    /// Se o evento estiver [`EventPublicationStatus::Published`], a reconfiguração
+    /// o retira da agenda pública transitando para [`EventPublicationStatus::PendingReview`].
+    /// Demais status editáveis preservam o status atual.
+    ///
+    /// # Erros
+    ///
+    /// Retorna [`EventDomainError::EventNotEditable`] se o evento estiver cancelado.
     pub fn configure_registration(
         &mut self,
         capacity: Option<i32>,
         registration: EventRegistrationPolicy,
     ) -> Result<(), EventDomainError> {
+        self.ensure_content_editable()?;
+
         if let Some(cap) = capacity
             && cap <= 0
         {
@@ -1375,7 +1492,16 @@ impl Event {
         self.capacity = capacity;
         self.registration_policy = Json(registration);
         self.revision += 1;
+        self.unpublish_if_published();
         Ok(())
+    }
+
+    /// Se o status atual for `Published`, transiciona para `PendingReview`
+    /// (edição/reconfiguração retira o evento da agenda até nova homologação).
+    fn unpublish_if_published(&mut self) {
+        if self.status == EventPublicationStatus::Published {
+            self.status = EventPublicationStatus::PendingReview;
+        }
     }
 
     /// Valida se uma nova inscrição confirmada pode ser aceita no instante `now`.
@@ -1831,5 +1957,254 @@ mod tests {
         reg.cancel();
         assert_eq!(reg.status(), RegistrationStatus::Cancelled);
         assert!(reg.cancelled_at().is_some());
+    }
+
+    #[test]
+    fn should_reactivate_cancelled_registration_as_registered() {
+        let mut reg =
+            EventRegistration::new_confirmed(Uuid::new_v4(), Uuid::new_v4()).expect("válida");
+        reg.cancel();
+        assert_eq!(reg.status(), RegistrationStatus::Cancelled);
+        assert!(reg.cancelled_at().is_some());
+
+        let reactivated_at = Utc.with_ymd_and_hms(2026, 12, 1, 10, 0, 0).unwrap();
+        reg.reactivate_registered(reactivated_at)
+            .expect("reativação permitida");
+
+        assert_eq!(reg.status(), RegistrationStatus::Registered);
+        assert!(reg.cancelled_at().is_none());
+        assert!(reg.invitation_expires_at().is_none());
+        assert!(reg.queue_sequence().is_none());
+        assert_eq!(reg.registered_at(), reactivated_at);
+    }
+
+    #[test]
+    fn should_reactivate_cancelled_registration_as_waitlisted() {
+        let mut reg = EventRegistration::new_waitlisted(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            3,
+            Utc.with_ymd_and_hms(2026, 11, 1, 9, 0, 0).unwrap(),
+        )
+        .expect("válida");
+        reg.cancel();
+
+        let reactivated_at = Utc.with_ymd_and_hms(2026, 12, 2, 11, 0, 0).unwrap();
+        reg.reactivate_waitlisted(reactivated_at, 1)
+            .expect("reativação na fila permitida");
+
+        assert_eq!(reg.status(), RegistrationStatus::Waitlisted);
+        assert_eq!(reg.queue_sequence(), Some(1));
+        assert!(reg.cancelled_at().is_none());
+        assert_eq!(reg.registered_at(), reactivated_at);
+    }
+
+    #[test]
+    fn should_reject_reactivate_when_registration_is_not_cancelled() {
+        let mut reg =
+            EventRegistration::new_confirmed(Uuid::new_v4(), Uuid::new_v4()).expect("válida");
+
+        let result = reg.reactivate_registered(Utc::now());
+        assert_eq!(result, Err(EventDomainError::RegistrationNotCancelled));
+
+        let result = reg.reactivate_waitlisted(Utc::now(), 1);
+        assert_eq!(result, Err(EventDomainError::RegistrationNotCancelled));
+        assert_eq!(reg.status(), RegistrationStatus::Registered);
+        assert!(reg.cancelled_at().is_none());
+    }
+
+    #[test]
+    fn should_transition_published_to_pending_review_on_update_details() {
+        let (starts_at, ends_at) = sample_dates();
+        let mut event = Event::create_published(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "Evento publicado editável",
+            "Descrição original publicada",
+            "Local original",
+            starts_at,
+            ends_at,
+            None,
+            EventRegistrationPolicy::unrestricted(),
+        )
+        .expect("deve criar evento publicado");
+
+        assert_eq!(event.status(), EventPublicationStatus::Published);
+        assert_eq!(event.revision(), 1);
+        assert!(event.is_published());
+
+        event
+            .update_details(
+                "Título revisado",
+                "Descrição revisada após publicação",
+                "Novo local",
+                starts_at,
+                ends_at,
+            )
+            .expect("edição de publicado deve ser permitida");
+
+        assert_eq!(event.status(), EventPublicationStatus::PendingReview);
+        assert_eq!(event.revision(), 2);
+        assert!(!event.is_published());
+        assert_eq!(event.title(), "Título revisado");
+    }
+
+    #[test]
+    fn should_keep_draft_status_when_updating_details() {
+        let (starts_at, ends_at) = sample_dates();
+        let mut event = Event::create_draft(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "Rascunho editável",
+            "Descrição do rascunho",
+            "Local do rascunho",
+            starts_at,
+            ends_at,
+            None,
+            EventRegistrationPolicy::unrestricted(),
+        )
+        .expect("deve criar rascunho");
+
+        event
+            .update_details(
+                "Rascunho atualizado",
+                "Nova descrição do rascunho",
+                "Novo local do rascunho",
+                starts_at,
+                ends_at,
+            )
+            .expect("edição de rascunho deve ser permitida");
+
+        assert_eq!(event.status(), EventPublicationStatus::Draft);
+        assert_eq!(event.revision(), 2);
+        assert!(!event.is_published());
+        assert_eq!(event.title(), "Rascunho atualizado");
+    }
+
+    #[test]
+    fn should_transition_published_to_pending_review_on_configure_registration() {
+        let (starts_at, ends_at) = sample_dates();
+        let mut event = Event::create_published(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "Evento com inscrição configurável",
+            "Descrição do evento publicado",
+            "Auditório principal",
+            starts_at,
+            ends_at,
+            Some(50),
+            EventRegistrationPolicy::unrestricted(),
+        )
+        .expect("deve criar evento publicado");
+
+        assert_eq!(event.status(), EventPublicationStatus::Published);
+        assert_eq!(event.revision(), 1);
+        assert!(event.is_published());
+
+        event
+            .configure_registration(Some(30), EventRegistrationPolicy::disabled())
+            .expect("reconfigurar inscrição de publicado deve ser permitido");
+
+        assert_eq!(event.status(), EventPublicationStatus::PendingReview);
+        assert_eq!(event.revision(), 2);
+        assert!(!event.is_published());
+        assert_eq!(event.capacity(), Some(30));
+        assert!(!event.registration_policy().enabled());
+    }
+
+    #[test]
+    fn should_reject_update_details_when_event_is_cancelled() {
+        let (starts_at, ends_at) = sample_dates();
+        let mut event = Event::create_published(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "Evento a cancelar",
+            "Descrição original",
+            "Local original",
+            starts_at,
+            ends_at,
+            None,
+            EventRegistrationPolicy::unrestricted(),
+        )
+        .expect("deve criar evento publicado");
+
+        event.cancel().expect("deve cancelar o evento publicado");
+        assert_eq!(event.status(), EventPublicationStatus::Cancelled);
+        assert!(!event.can_edit_content());
+
+        let result = event.update_details(
+            "Novo título",
+            "Nova descrição",
+            "Novo local",
+            starts_at,
+            ends_at,
+        );
+        assert_eq!(
+            result,
+            Err(EventDomainError::EventNotEditable {
+                status: EventPublicationStatus::Cancelled,
+            })
+        );
+        assert_eq!(event.title(), "Evento a cancelar");
+        assert_eq!(event.revision(), 1);
+    }
+
+    #[test]
+    fn should_reject_configure_registration_when_event_is_cancelled() {
+        let (starts_at, ends_at) = sample_dates();
+        let mut event = Event::create_draft(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "Rascunho cancelável",
+            "Descrição do rascunho",
+            "Local do rascunho",
+            starts_at,
+            ends_at,
+            Some(20),
+            EventRegistrationPolicy::unrestricted(),
+        )
+        .expect("deve criar rascunho");
+
+        event.cancel().expect("deve cancelar o rascunho");
+
+        let result = event.configure_registration(Some(10), EventRegistrationPolicy::disabled());
+        assert_eq!(
+            result,
+            Err(EventDomainError::EventNotEditable {
+                status: EventPublicationStatus::Cancelled,
+            })
+        );
+        assert_eq!(event.capacity(), Some(20));
+        assert!(event.registration_policy().enabled());
+        assert_eq!(event.revision(), 1);
+    }
+
+    #[test]
+    fn should_cancel_published_event_and_treat_second_cancel_as_noop() {
+        let (starts_at, ends_at) = sample_dates();
+        let mut event = Event::create_published(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "Evento publicado cancelável",
+            "Descrição do evento publicado",
+            "Auditório principal",
+            starts_at,
+            ends_at,
+            None,
+            EventRegistrationPolicy::unrestricted(),
+        )
+        .expect("deve criar evento publicado");
+
+        event
+            .cancel()
+            .expect("deve cancelar evento publicado");
+        assert_eq!(event.status(), EventPublicationStatus::Cancelled);
+
+        let snapshot = event.clone();
+        event
+            .cancel()
+            .expect("segundo cancel deve ser no-op seguro");
+        assert_eq!(event, snapshot);
+        assert_eq!(event.status(), EventPublicationStatus::Cancelled);
     }
 }
