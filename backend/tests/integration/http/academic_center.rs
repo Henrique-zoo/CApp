@@ -142,26 +142,26 @@ async fn test_academic_center_student_polls_complete_lifecycle() {
     // -----------------------------------------------------------------------
     // 1. Provedores mockados de identidade (Firebase e Microsoft Graph)
     // -----------------------------------------------------------------------
-    let firebase = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/jwks.json"))
+    let jwks = MockServer::start().await;
+    Mock::given(path("/keys"))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_raw(JWKS, "application/json")
-                .insert_header("cache-control", "public, max-age=3600"),
+                .insert_header("cache-control", "max-age=300")
+                .set_body_raw(JWKS, "application/json"),
         )
-        .mount(&firebase)
+        .mount(&jwks)
         .await;
 
     let graph = MockServer::start().await;
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
     let clients = local_identity_clients(
         PROJECT.into(),
-        reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap(),
-        format!("{}/jwks.json", firebase.uri()),
-        graph.uri(),
+        http,
+        format!("{}/keys", jwks.uri()),
+        format!("{}/v1.0", graph.uri()),
     )
     .unwrap();
 

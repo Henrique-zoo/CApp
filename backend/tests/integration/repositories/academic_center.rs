@@ -363,15 +363,20 @@ async fn should_enforce_database_check_constraints() {
     db.close().await;
 }
 
-/// Helper para inserir usuário de teste na tabela app_user.
-async fn create_test_user(pool: &PgPool, uid: &str) -> Uuid {
+/// Helper para inserir usuário de teste na tabela app_user com perfil ativo válido.
+async fn create_test_user(pool: &PgPool, uid: &str, matricula: &str) -> Uuid {
     let id = Uuid::new_v4();
+    let email = format!("{matricula}@aluno.unb.br");
     sqlx::query(
-        "INSERT INTO app_user (id, firebase_uid, status, nickname, created_at, updated_at) \
-         VALUES ($1, $2, 'active', 'User Test', NOW(), NOW())",
+        "INSERT INTO app_user (\
+            id, firebase_uid, status, nickname, email, \
+            current_semester, institution_entry_semester, profile_completed_at, \
+            created_at, updated_at\
+         ) VALUES ($1, $2, 'active', 'User Test', $3, 1, '2024.1', NOW(), NOW(), NOW())",
     )
     .bind(id)
     .bind(uid)
+    .bind(email)
     .execute(pool)
     .await
     .expect("should insert test user");
@@ -382,7 +387,7 @@ async fn create_test_user(pool: &PgPool, uid: &str) -> Uuid {
 async fn should_persist_and_retrieve_student_poll_in_database() {
     let db = TestDatabase::new().await;
     let institution_id = create_test_institution(&db.pool, "Universidade de Brasília").await;
-    let manager_id = create_test_user(&db.pool, "firebase-manager-test").await;
+    let manager_id = create_test_user(&db.pool, "firebase-manager-test", "241098765").await;
 
     let ca_id = Uuid::new_v4();
     sqlx::query(
@@ -437,9 +442,9 @@ async fn should_persist_and_retrieve_student_poll_in_database() {
 async fn should_record_votes_and_enforce_unique_poll_user_in_database() {
     let db = TestDatabase::new().await;
     let institution_id = create_test_institution(&db.pool, "Universidade de Brasília").await;
-    let manager_id = create_test_user(&db.pool, "firebase-manager-vote").await;
-    let student_1 = create_test_user(&db.pool, "firebase-student-1").await;
-    let student_2 = create_test_user(&db.pool, "firebase-student-2").await;
+    let manager_id = create_test_user(&db.pool, "firebase-manager-vote", "241098765").await;
+    let student_1 = create_test_user(&db.pool, "firebase-student-1", "241098766").await;
+    let student_2 = create_test_user(&db.pool, "firebase-student-2", "241098767").await;
 
     let ca_id = Uuid::new_v4();
     sqlx::query(
@@ -513,8 +518,9 @@ async fn should_record_votes_and_enforce_unique_poll_user_in_database() {
     assert_eq!(counts.get(&opt_2).copied().unwrap_or(0), 1);
 
     // Encerramento da consulta
+    let close_time = Utc::now();
     let closed = repo
-        .close_poll(poll.id(), manager_id, now)
+        .close_poll(poll.id(), manager_id, close_time)
         .await
         .expect("should close poll");
     assert_eq!(closed.status(), PollStatus::Closed);

@@ -453,7 +453,7 @@ impl PollRepository for PgDatabase {
         closed_at: DateTime<Utc>,
     ) -> Result<StudentPoll, PollRepositoryError> {
         sqlx::query(
-            "UPDATE student_poll SET status = 'closed', closed_at = $2, closed_by_id = $3, updated_at = $2 \
+            "UPDATE student_poll SET status = 'closed', closed_at = GREATEST(created_at, $2), closed_by_id = $3, updated_at = GREATEST(created_at, $2) \
              WHERE id = $1",
         )
         .bind(poll_id)
