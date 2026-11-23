@@ -21,7 +21,7 @@ final class DeviceVoterKeys implements VoterKeyStore {
     required bool create,
   }) async {
     final der = await _invoke('publicKey', {
-      'alias': _alias(accountId, electionId),
+      'alias': aliasFor(accountId, electionId),
       'create': create,
     });
     return der == null ? null : _base64Url(der);
@@ -35,18 +35,53 @@ final class DeviceVoterKeys implements VoterKeyStore {
   ) async {
     final payload = voterRegistrationPayload(accountId, electionId, publicKey);
     final message = utf8.encode('CAPP-ELECTIONS/1\n${jsonEncode(payload)}');
-    final signature = await _invoke('sign', {
-      'alias': _alias(accountId, electionId),
-      'message': message,
-    });
-    if (signature == null) throw VoterRegistrationFailure.keyUnavailable;
+    final signature = await sign(accountId, electionId, message);
 
     return VoterRegistrationProof(
       electionId: electionId,
       accountId: accountId,
       publicKey: publicKey,
-      signature: _base64Url(signature),
+      signature: signature,
     );
+  }
+
+  /// Assina usando o par deste dispositivo para a conta e a eleição.
+  Future<String> sign(
+    UuidValue accountId,
+    UuidValue electionId,
+    Uint8List message,
+  ) async {
+    final signature = await _invoke('sign', {
+      'alias': aliasFor(accountId, electionId),
+      'message': message,
+    });
+    if (signature == null) throw VoterRegistrationFailure.keyUnavailable;
+    return _base64Url(signature);
+  }
+
+  /// Verifica uma assinatura eleitoral usando somente a chave pública.
+  Future<bool> verify(
+    String publicKey,
+    Uint8List message,
+    String signature,
+  ) async {
+    Uint8List decode(String value) {
+      if (value.length > 1024 || !RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(value)) {
+        throw const FormatException('Base64url eleitoral inválido');
+      }
+      final bytes = base64Url.decode(base64Url.normalize(value));
+      if (_base64Url(bytes) != value) {
+        throw const FormatException('Base64url não canônico');
+      }
+      return bytes;
+    }
+
+    return await channel.invokeMethod<bool>('verify', {
+          'publicKey': decode(publicKey),
+          'message': message,
+          'signature': decode(signature),
+        }) ==
+        true;
   }
 
   Future<Uint8List?> _invoke(String method, Map<String, Object> args) async {
@@ -59,7 +94,7 @@ final class DeviceVoterKeys implements VoterKeyStore {
     }
   }
 
-  static String _alias(UuidValue accountId, UuidValue electionId) =>
+  static String aliasFor(UuidValue accountId, UuidValue electionId) =>
       'capp.elections.v1.${accountId.uuid.toLowerCase()}.'
       '${electionId.uuid.toLowerCase()}';
 

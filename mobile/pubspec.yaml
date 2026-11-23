@@ -36,6 +36,7 @@ dependencies:
 
   # HTTP
   dio: ^5.11.1
+  crypto: ^3.0.8
 
   # Navegação
   go_router: ^18.0.1

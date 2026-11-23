@@ -527,6 +527,26 @@ requisições diretamente em HTTPS. Em um Android físico, use em
 `BACKEND_BASE_URL` um nome ou IP alcançável pelo aparelho e presente no
 certificado do servidor.
 
+### Eleição no Início
+
+Para apresentar a eleição no Android, execute o app com o backend eleitoral
+em HTTPS, os parâmetros MSAL do login existente e estes dois parâmetros:
+
+~~~text
+--dart-define=ELECTION_ID=<uuid-da-eleicao>
+--dart-define=ELECTION_MANIFEST_SHA256=<hash-do-manifesto-em-64-digitos-hexadecimais-minusculos>
+~~~
+
+Use o hash do manifesto divulgado pela comissão por um canal independente do
+backend. Ele permite ao app conferir as chapas e o calendário antes de mostrá-los.
+Sem uma eleição configurada, o Início exibe **Nenhuma eleição disponível**.
+
+Entre com a conta institucional. Se a eleição exigir cadastro prévio, use
+**Habilitar para votar** antes da abertura e vote no mesmo aparelho. Nas demais
+eleições, o Android cria a chave quando você confirma o primeiro voto. Durante a
+votação, escolha uma chapa ou **Voto nulo**, toque em **Votar** e confirme. O
+recibo permite conferir a inclusão da cédula no quadro público.
+
 ## Documentação e validação
 
 O README concentra arquitetura, configuração, execução e um resumo dos fluxos.

@@ -1,9 +1,15 @@
 //! Aceite através da porta da aplicação, com commits reais em PostgreSQL.
 
+#[cfg(feature = "test-support")]
+mod ballots;
 mod fixtures;
 #[cfg(feature = "test-support")]
 mod private_routes;
 mod registration;
+#[cfg(feature = "test-support")]
+mod session;
+#[cfg(feature = "test-support")]
+mod three_voters;
 
 use crate::support::TestDatabase;
 use axum::{

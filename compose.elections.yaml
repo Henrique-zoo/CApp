@@ -1,0 +1,10 @@
+services:
+  backend:
+    environment:
+      ELECTION_SIGNING_KEY_FILE: /run/secrets/election_signing_key
+    secrets:
+      - election_signing_key
+
+secrets:
+  election_signing_key:
+    file: ${ELECTION_SIGNING_KEY_FILE:?Informe o arquivo de chave privada da eleição}

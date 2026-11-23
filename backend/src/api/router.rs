@@ -24,6 +24,7 @@ use crate::api::state::AppState;
 /// | `GET /elections/{id}/board/checkpoint` | Distribui a âncora assinada da posição atual do quadro. |
 /// | `GET /elections/{id}/registration/me` | Consulta chave e participação da conta autenticada. |
 /// | `PUT /elections/{id}/registration/me` | Cadastra a chave com uma prova assinada antes da votação. |
+/// | `POST /elections/{id}/ballots` | Confirma uma cédula cifrada e assinada ou recupera seu recibo. |
 /// | `GET /ready` | Executa `SELECT 1 AS ok` no pool; retorna HTTP 200 no sucesso e HTTP 503 em erro ou timeout. |
 ///
 /// A prontidão limita a espera pela aquisição da conexão e execução da consulta
@@ -83,6 +84,7 @@ pub fn create_router(state: AppState) -> Router {
         .merge(crate::modules::identity::api::router())
         .merge(crate::modules::elections::api::protected_receipt_routes())
         .merge(crate::modules::elections::api::protected_registration_routes())
+        .merge(crate::modules::elections::api::protected_ballot_routes())
         .route("/health", get(|| async { "O servidor está saudável." }))
         .route(
             "/ready",

@@ -8,8 +8,9 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::super::{
-    board::BoardError,
+    board::{BoardError, ElectionBoard, RecordedBallot},
     ports::{BoardSnapshotStream, ElectionBoardReader},
+    registration::VoterIdentity,
 };
 
 /// Exporta as evidências públicas em ordem de aceite.
@@ -62,4 +63,24 @@ pub async fn read_own_receipt(
     reader
         .find_receipt(election_id, authenticated_account_id)
         .await
+}
+
+/// Confirma a cédula assinada da conta autenticada.
+///
+/// # Parâmetros
+/// - `board`: persiste a participação, o registro, o recibo e o agregado.
+/// - `election_id`: identifica a eleição solicitada.
+/// - `voter`: conta e vínculo obtidos da autenticação.
+/// - `signed_ballot`: bytes originais do envelope assinado.
+///
+/// # Retorno
+/// Devolve o registro confirmado e o recibo original. Uma nova tentativa da
+/// mesma submissão recupera ambos sem acrescentar outro voto ao acumulador.
+pub async fn record_ballot(
+    board: &impl ElectionBoard,
+    election_id: Uuid,
+    voter: VoterIdentity,
+    signed_ballot: &[u8],
+) -> Result<RecordedBallot, BoardError> {
+    board.record(election_id, voter, signed_ballot).await
 }

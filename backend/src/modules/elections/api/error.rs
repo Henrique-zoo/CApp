@@ -93,3 +93,66 @@ impl From<RegistrationError> for ApiError {
         Self::new(status, code, message, None)
     }
 }
+
+pub(super) fn ballot_error(error: BoardError) -> ApiError {
+    let (status, code, message) = match error {
+        BoardError::InvalidEvidence(_) | BoardError::VoterMismatch => (
+            StatusCode::BAD_REQUEST,
+            "invalid_ballot",
+            "Cédula inválida para a conta e a eleição.",
+        ),
+        BoardError::NotEligible => (
+            StatusCode::FORBIDDEN,
+            "voter_not_eligible",
+            "Eleitor sem vínculo vigente com o CA.",
+        ),
+        BoardError::RegistrationRequired => (
+            StatusCode::CONFLICT,
+            "registration_required",
+            "Cadastre a chave eleitoral antes da abertura.",
+        ),
+        BoardError::RegisteredKeyMismatch => (
+            StatusCode::CONFLICT,
+            "registration_key_conflict",
+            "A chave da cédula não corresponde à chave cadastrada.",
+        ),
+        BoardError::NotFound => (
+            StatusCode::NOT_FOUND,
+            "election_not_found",
+            "Eleição não encontrada.",
+        ),
+        BoardError::Closed | BoardError::VotingEnded => (
+            StatusCode::CONFLICT,
+            "voting_ended",
+            "O período de votação terminou.",
+        ),
+        BoardError::VotingNotStarted => (
+            StatusCode::CONFLICT,
+            "voting_not_started",
+            "O período de votação ainda não começou.",
+        ),
+        BoardError::AlreadyParticipated => (
+            StatusCode::CONFLICT,
+            "already_voted",
+            "A conta já votou nesta eleição.",
+        ),
+        BoardError::SubmissionConflict => (
+            StatusCode::CONFLICT,
+            "submission_conflict",
+            "O conteúdo diverge da cédula confirmada.",
+        ),
+        BoardError::LimitExceeded => (
+            StatusCode::CONFLICT,
+            "election_full",
+            "A eleição atingiu o limite de participantes.",
+        ),
+        BoardError::SigningUnavailable | BoardError::Storage(_) => {
+            return ApiError::service_unavailable();
+        }
+        BoardError::InvalidArtifact(_) | BoardError::AlreadyExists | BoardError::NotYetEnded => {
+            tracing::error!(%error, "Estado inconsistente ao registrar cédula.");
+            return ApiError::internal_server_error();
+        }
+    };
+    ApiError::new(status, code, message, None)
+}

@@ -217,8 +217,8 @@ def validate_one_example(
     return failures
 
 
-def validate_examples(spec: dict) -> int:
-    """Valida exemplos externos, examples.value e example."""
+def contract_registry(spec: dict) -> Registry:
+    """Registra o OpenAPI e seus tipos eleitorais sem acessar a rede."""
     spec_uri = SPEC_PATH.resolve().as_uri()
 
     registry = Registry().with_resource(
@@ -234,10 +234,16 @@ def validate_examples(spec: dict) -> int:
     # Resolva esse arquivo conhecido localmente, inclusive no runner sem rede.
     election_schema = root / "elections" / "schemas.json"
     with election_schema.open(encoding="utf-8") as schema_file:
-        registry = registry.with_resource(
+        return registry.with_resource(
             election_schema.as_uri(), Resource.from_contents(json.load(schema_file))
         )
 
+
+def validate_examples(spec: dict) -> int:
+    """Valida exemplos externos, examples.value e example."""
+    spec_uri = SPEC_PATH.resolve().as_uri()
+    root = SPEC_PATH.parent.resolve()
+    registry = contract_registry(spec)
     validated = 0
     failures: list[str] = []
 

@@ -166,11 +166,13 @@ void main() {
 
   test('HTTP simples é recusado antes de solicitar credenciais', () async {
     final transport = FakeHttpAdapter((_) => fail('envio em HTTP'));
-    final service = client(
-      transport,
-      baseUrl: 'http://backend.example.invalid',
-      token: () => fail('solicitou credenciais'),
+    expect(
+      () => client(
+        transport,
+        baseUrl: 'http://backend.example.invalid',
+        token: () => fail('solicitou credenciais'),
+      ),
+      throwsArgumentError,
     );
-    await expectLater(service.status(electionId), throwsStateError);
   });
 }

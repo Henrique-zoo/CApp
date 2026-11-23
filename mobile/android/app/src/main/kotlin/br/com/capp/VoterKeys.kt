@@ -5,9 +5,13 @@ import android.security.keystore.KeyProperties
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.security.KeyPairGenerator
+import java.security.KeyFactory
 import java.security.KeyStore
 import java.security.PrivateKey
 import java.security.Signature
+import java.security.interfaces.RSAPublicKey
+import java.security.spec.X509EncodedKeySpec
+import java.math.BigInteger
 
 /** A chave privada RSA permanece no AndroidKeyStore; o canal só expõe SPKI e assinatura. */
 internal object VoterKeys : MethodChannel.MethodCallHandler {
@@ -17,6 +21,25 @@ internal object VoterKeys : MethodChannel.MethodCallHandler {
 
     @Synchronized
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        if (call.method == "verify") {
+            val valid = try {
+                val encoded = requireNotNull(call.argument<ByteArray>("publicKey"))
+                val publicKey = KeyFactory.getInstance("RSA")
+                    .generatePublic(X509EncodedKeySpec(encoded)) as RSAPublicKey
+                require(publicKey.encoded.contentEquals(encoded))
+                require(publicKey.modulus.bitLength() in setOf(2048, 3072, 4096))
+                require(publicKey.publicExponent == BigInteger.valueOf(65537))
+                Signature.getInstance("SHA256withRSA/PSS").run {
+                    initVerify(publicKey)
+                    update(requireNotNull(call.argument<ByteArray>("message")))
+                    verify(requireNotNull(call.argument<ByteArray>("signature")))
+                }
+            } catch (error: Exception) {
+                false
+            }
+            result.success(valid)
+            return
+        }
         val alias = call.argument<String>("alias")
         if (alias == null || !aliasPattern.matches(alias)) {
             result.error("invalid_alias", "Identificador de chave inválido", null)

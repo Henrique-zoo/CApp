@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: CApp API
-  version: 4.2.0
+  version: 4.3.0
   description: |
     Contrato das rotas atualmente implementadas no backend CApp.
     Os caminhos são servidos sem prefixo /v1.
@@ -18,6 +18,7 @@ info:
     institucional, e não é persistido. Contas ativas preservam o e-mail escolhido.
     A partir de 4.1.0, as leituras do quadro eleitoral e de seu checkpoint são públicas.
     A versão 4.2.0 acrescenta o cadastro privado da chave quando a eleição o exige.
+    A versão 4.3.0 recebe cédulas cifradas e assinadas no dispositivo.
 
     A verificação institucional valida um Firebase ID token e um Microsoft access
     token da mesma pessoa, consulta a instituição pelo tenant Microsoft, verifica
@@ -36,6 +37,62 @@ tags:
     description: Distribuição de evidências para verificação pelos eleitores e autoridades.
 
 paths:
+  /elections/{id}/ballots:
+    parameters:
+      - $ref: "#/components/parameters/ElectionId"
+    post:
+      operationId: submitSecretBallot
+      tags: [Eleições]
+      summary: Registrar voto secreto e obter o recibo assinado
+      description: |
+        Enviar o envelope original do protocolo eleitoral v1. Cada posição da cédula
+        contém uma cifra ElGamal e corresponde a uma opção na ordem do manifesto.
+        O voterId dos novos votos é o UUID da conta autenticada. O eleitor precisa
+        ter vínculo vigente com um curso representado pelo CA. A chave é cadastrada
+        antes da abertura quando exigido ou vinculada no primeiro voto aceito.
+        Se a resposta se perder, reenviar a mesma cédula assinada recupera as
+        evidências originais, inclusive após o encerramento.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./elections/schemas.json#/$defs/SignedBallot"
+      responses:
+        "201":
+          description: Primeiro aceite. Registro e recibo confirmados no mesmo commit (recovered é false).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordedBallot"
+        "200":
+          description: Reenvio de cédula já confirmada. O registro e o recibo são os originais (recovered é true).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordedBallot"
+        "400":
+          description: UUID inválido ou cédula recusada por formato, assinatura ou contexto.
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: A conta, o App Check ou a elegibilidade eleitoral impedem a submissão.
+        "404":
+          description: Eleição desconhecida ou conta ainda não provisionada.
+        "409":
+          description: Prazo, cadastro prévio ausente, chave divergente, participação anterior, conflito de submissão ou limite de participantes.
+        "413":
+          description: O envelope excede 262144 bytes.
+        "415":
+          description: O servidor exige application/json.
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          description: Autenticação, emissão de recibo ou armazenamento indisponível.
+
   /elections/{id}/board:
     parameters:
       - $ref: "#/components/parameters/ElectionId"
@@ -603,6 +660,31 @@ components:
         microsoft.com vinculada. Enviar um único Authorization: Bearer <ID_TOKEN>.
         O access token Microsoft é enviado separadamente no corpo da verificação.
   schemas:
+    RecordedBallot:
+      type: object
+      additionalProperties: false
+      required: [entry, receipt, recovered]
+      properties:
+        entry:
+          type: object
+          additionalProperties: false
+          required: [payload, signature]
+          properties:
+            payload:
+              $ref: "./elections/schemas.json#/$defs/BoardEntry"
+            signature:
+              $ref: "./elections/schemas.json#/$defs/Base64Url"
+        receipt:
+          type: object
+          additionalProperties: false
+          required: [payload, signature]
+          properties:
+            payload:
+              $ref: "./elections/schemas.json#/$defs/Receipt"
+            signature:
+              $ref: "./elections/schemas.json#/$defs/Base64Url"
+        recovered:
+          type: boolean
     ElectionRegistrationProof:
       type: object
       additionalProperties: false
