@@ -246,7 +246,7 @@ impl ElectionBoard for PgElectionBoard {
         raw: &[u8],
     ) -> Result<RecordedBallot, BoardError> {
         let envelope = parse_strict_json(raw)?;
-        if voter.account_id.is_nil() || voter.voter_id.is_nil() {
+        if voter.account_id.is_nil() {
             return Err(BoardError::NotEligible);
         }
         // A verificação RSA e as exponenciações da cédula não dependem da
@@ -267,9 +267,10 @@ impl ElectionBoard for PgElectionBoard {
         .bind(voter.account_id)
         .fetch_optional(&self.pool)
         .await?;
+        // A repetição preserva a identidade pública e a chave do voto já aceito.
         let (verified_voter, verified_key) = match previous.as_ref() {
-            Some((id, ballot)) => (*id, text(&ballot["payload"]["publicKey"])?.to_owned()),
-            None => (voter.voter_id, voter.registered_public_key.clone()),
+            Some((id, ballot)) => (*id, Some(text(&ballot["payload"]["publicKey"])?.to_owned())),
+            None => (voter.account_id, None),
         };
         let verified = verify_ballot(
             raw,
@@ -277,7 +278,7 @@ impl ElectionBoard for PgElectionBoard {
                 election_id,
                 manifest_hash: origin.manifest_hash.clone(),
                 voter_id: verified_voter,
-                registered_public_key: Some(verified_key),
+                expected_public_key: verified_key,
                 option_ids: option_ids.clone(),
             },
         )?;
@@ -352,7 +353,7 @@ impl ElectionBoard for PgElectionBoard {
                            WHERE election_id=$1 AND voter_id=$2)",
         )
         .bind(election_id)
-        .bind(voter.voter_id)
+        .bind(verified_voter)
         .fetch_one(&mut *tx)
         .await?;
         if used_voter {
@@ -373,7 +374,7 @@ impl ElectionBoard for PgElectionBoard {
         )
         .bind(election_id)
         .bind(voter.account_id)
-        .bind(voter.voter_id)
+        .bind(verified_voter)
         .bind(submission_id)
         .bind(&verified.ballot_hash)
         .bind(now)
@@ -387,7 +388,7 @@ impl ElectionBoard for PgElectionBoard {
         )
         .bind(election_id)
         .bind(next_index)
-        .bind(voter.voter_id)
+        .bind(verified_voter)
         .bind(&board.head_hash)
         .bind(&signed.entry_hash)
         .bind(&verified.envelope)

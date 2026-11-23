@@ -35,7 +35,7 @@ fn context(payload: &Value) -> BallotContext {
         election_id: Uuid::parse_str(payload["electionId"].as_str().unwrap()).unwrap(),
         manifest_hash: payload["manifestHash"].as_str().unwrap().to_owned(),
         voter_id: Uuid::parse_str(payload["voterId"].as_str().unwrap()).unwrap(),
-        registered_public_key: Some(payload["publicKey"].as_str().unwrap().to_owned()),
+        expected_public_key: Some(payload["publicKey"].as_str().unwrap().to_owned()),
         option_ids: payload["ciphertexts"]
             .as_array()
             .unwrap()
@@ -182,7 +182,7 @@ fn ballot_vectors_validate_against_trusted_context_and_detect_substitution() {
             "election" => wrong.election_id = Uuid::new_v4(),
             "voter" => wrong.voter_id = Uuid::new_v4(),
             "manifest" => wrong.manifest_hash = "0".repeat(64),
-            "key" => wrong.registered_public_key = Some(signer().public_key_base64().unwrap()),
+            "key" => wrong.expected_public_key = Some(signer().public_key_base64().unwrap()),
             "order" => wrong.option_ids.swap(0, 1),
             _ => unreachable!(),
         }

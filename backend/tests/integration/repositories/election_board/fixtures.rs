@@ -71,7 +71,6 @@ impl Origin {
 
 pub(super) struct Voter {
     pub(super) account: Uuid,
-    id: Uuid,
     key: ServerSigner,
     pub(super) payload: Value,
 }
@@ -91,11 +90,10 @@ impl Voter {
             .await
             .unwrap();
         let mut payload = vector(ballot_case).clone();
-        let id = serde_json::from_value(payload["voterId"].clone()).unwrap();
+        payload["voterId"] = json!(account);
         payload["publicKey"] = json!(key.public_key_base64().unwrap());
         Self {
             account,
-            id,
             key,
             payload,
         }
@@ -104,8 +102,6 @@ impl Voter {
     pub(super) fn admitted(&self) -> EligibleVoter {
         EligibleVoter {
             account_id: self.account,
-            voter_id: self.id,
-            registered_public_key: self.key.public_key_base64().unwrap(),
             eligible_until: Utc::now() + Duration::hours(1),
         }
     }

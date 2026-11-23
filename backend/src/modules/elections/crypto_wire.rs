@@ -54,7 +54,7 @@ pub enum CryptoWireError {
     Signing,
 }
 
-/// Contexto confiável carregado do cadastro e do manifesto pelo servidor.
+/// Contexto da cédula obtido da conta autenticada e do manifesto oficial.
 #[derive(Debug, Clone)]
 pub struct BallotContext {
     /// Eleição da rota e do manifesto.
@@ -63,9 +63,8 @@ pub struct BallotContext {
     pub manifest_hash: String,
     /// Identidade eleitoral vinculada à conta autenticada.
     pub voter_id: Uuid,
-    /// Chave RSA esperada no fluxo com cadastro prévio; SPKI Base64url.
-    /// `None` não comprova cadastro: essa política pertence ao caso de uso.
-    pub registered_public_key: Option<String>,
+    /// Chave pública SPKI em Base64url do voto já aceito, quando houver.
+    pub expected_public_key: Option<String>,
     /// Ordem imutável de opções, incluindo Nulo na última posição.
     pub option_ids: Vec<Uuid>,
 }
@@ -77,7 +76,7 @@ pub struct VerifiedWireBallot {
     pub envelope: Value,
     /// SHA-256 do prefixo e payload canônico.
     pub ballot_hash: String,
-    /// SHA-256 do DER da chave previamente cadastrada.
+    /// SHA-256 do DER da chave pública da cédula.
     pub key_fingerprint: String,
     /// Cifras validadas, na ordem do manifesto, para acumulação transacional.
     pub ciphertexts: Vec<ElGamalCiphertext>,
@@ -620,7 +619,7 @@ fn verify_ballot_value(
         || voter_id != context.voter_id
         || manifest_hash != context.manifest_hash
         || context
-            .registered_public_key
+            .expected_public_key
             .as_deref()
             .is_some_and(|expected| public_key != expected)
     {

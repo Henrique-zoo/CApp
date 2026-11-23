@@ -45,7 +45,6 @@ async fn paged_export_keeps_its_original_snapshot_while_another_vote_commits() {
     let manifest_hash = object_digest(&origin.manifest["payload"]).unwrap();
     let cast = async || {
         let account_id = Uuid::new_v4();
-        let voter_id = Uuid::new_v4();
         sqlx::query("INSERT INTO app_user (id,firebase_uid) VALUES ($1,$2)")
             .bind(account_id)
             .bind(account_id.to_string())
@@ -54,13 +53,11 @@ async fn paged_export_keeps_its_original_snapshot_while_another_vote_commits() {
             .unwrap();
         let mut ballot = vector("valid/ballot-0").clone();
         ballot["manifestHash"] = json!(&manifest_hash);
-        ballot["voterId"] = json!(voter_id);
+        ballot["voterId"] = json!(account_id);
         ballot["submissionId"] = json!(Uuid::new_v4());
         ballot["publicKey"] = json!(&public_key);
         let voter = EligibleVoter {
             account_id,
-            voter_id,
-            registered_public_key: public_key.clone(),
             eligible_until: Utc::now() + Duration::hours(1),
         };
         let raw = serde_json::to_vec(&signer.sign_payload(&ballot).unwrap()).unwrap();
@@ -194,7 +191,14 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
     let exported =
         public_evidence(&db.pool, &format!("/elections/{id}/board"), StatusCode::OK).await;
     assert_eq!(exported, serde_json::to_value(&board).unwrap());
-    assert!(!exported.to_string().contains(&a.account.to_string()));
+    assert_eq!(
+        one.entry["payload"]["ballot"]["payload"]["voterId"],
+        json!(a.account)
+    );
+    assert_eq!(
+        other.entry["payload"]["ballot"]["payload"]["voterId"],
+        json!(b.account)
+    );
     let remote_anchor = public_evidence(
         &db.pool,
         &format!("/elections/{id}/board/checkpoint"),
@@ -299,9 +303,10 @@ async fn close_freezes_the_accepted_vote_and_preserves_its_receipt() {
         Err(BoardError::NotYetEnded)
     ));
     let ballot = voter.sign(&origin, voter.payload.clone());
-    let mut wrong_key = voter.admitted();
-    wrong_key.registered_public_key = late_voter.admitted().registered_public_key;
-    assert!(store.record(id, wrong_key, &ballot).await.is_err());
+    assert!(matches!(
+        store.record(id, late_voter.admitted(), &ballot).await,
+        Err(BoardError::InvalidEvidence(_))
+    ));
     let mut competing = voter.payload.clone();
     competing["submissionId"] = json!(Uuid::new_v4());
     let competing = voter.sign(&origin, competing);
@@ -316,6 +321,14 @@ async fn close_freezes_the_accepted_vote_and_preserves_its_receipt() {
             panic!("Duas operações da mesma conta precisam disputar um único aceite: {result:?}")
         }
     };
+    let mut changed_key = voter.payload.clone();
+    changed_key["publicKey"] = late_voter.payload["publicKey"].clone();
+    assert!(matches!(
+        store
+            .record(id, voter.admitted(), &late_voter.sign(&origin, changed_key))
+            .await,
+        Err(BoardError::InvalidEvidence(_))
+    ));
     sqlx::query("SELECT pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM ($1::timestamptz - clock_timestamp())))::float8)")
         .bind(end).execute(&db.pool).await.unwrap();
     let closed = store.close(id).await.unwrap();
