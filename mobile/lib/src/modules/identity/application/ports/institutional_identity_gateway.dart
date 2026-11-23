@@ -25,7 +25,7 @@
 /// Essas responsabilidades pertencem ao caso de uso e ao controlador.
 library;
 
-import '../errors/identity_exception.dart';
+import '../error/identity_exception.dart';
 import '../models/internal_user.dart';
 
 /// Obtém uma verificação institucional para a identidade autenticada.

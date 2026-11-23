@@ -55,13 +55,13 @@ export 'application/models/institutional_verification.dart'
     show InstitutionalVerification;
 export 'application/models/account_session_result.dart'
     show AccountSessionResult;
-export 'application/errors/identity_exception.dart'
+export 'application/error/identity_exception.dart'
     show IdentityException, IdentityFailureKind;
-export 'application/errors/session_identity_changed_exception.dart'
+export 'application/error/session_identity_changed_exception.dart'
     show SessionIdentityChangedException;
-export 'application/errors/session_cache_write_exception.dart'
+export 'application/error/session_cache_write_exception.dart'
     show SessionCacheWriteException;
-export 'application/errors/session_cache_removal_exception.dart'
+export 'application/error/session_cache_removal_exception.dart'
     show SessionCacheRemovalException;
 
 export 'application/models/internal_user.dart'
@@ -72,5 +72,5 @@ export 'application/models/internal_user.dart'
         isValidInstitutionEntrySemester;
 export 'application/models/saved_account.dart'
     show SavedAccount, AccountSignOutMode;
-export 'application/errors/account_password_required_exception.dart'
+export 'application/error/account_password_required_exception.dart'
     show AccountPasswordRequiredException;

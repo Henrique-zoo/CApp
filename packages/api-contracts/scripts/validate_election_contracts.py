@@ -259,10 +259,10 @@ def _ordered_options(items, manifest):
 
 
 def _snapshot(head, count, manifest, index, profile):
-    """Percorre somente a fotografia referenciada, conferindo índices e eleitores.
+    """Percorre o quadro indicado no encerramento e confere índices e contas.
 
-    Não consulta autenticação ou elegibilidade real. A identidade pública é
-    tomada como associação fornecida pelo backend no modelo aprovado.
+    A auditoria usa o UUID da conta CApp de cada cédula. A correspondência dele
+    com a autenticação e a elegibilidade são verificadas pelo backend no aceite.
     """
     entries = []
     seen = set()
@@ -272,9 +272,9 @@ def _snapshot(head, count, manifest, index, profile):
         entry = _artifact(index, head, "board-entry")
         _require(entry["index"] == expected, "Índice do quadro divergente")
         _require(entry["manifestHash"] == manifest_hash, "Quadro de outro manifesto")
-        voter = entry["ballot"]["payload"]["voterId"]
-        _require(voter not in seen, "Eleitor repetido na fotografia")
-        seen.add(voter)
+        account_id = entry["ballot"]["payload"]["voterId"]
+        _require(account_id not in seen, "Conta repetida no quadro")
+        seen.add(account_id)
         entries.append(entry)
         head = entry["previousHash"]
 

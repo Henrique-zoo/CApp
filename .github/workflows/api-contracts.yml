@@ -63,6 +63,9 @@ jobs:
             -p 'test_election_contracts.py' \
             -v
 
+      - name: Verify public boards against independently retained evidence
+        run: python -m unittest discover -s packages/api-contracts/scripts -p 'test_audit_election_board.py' -v
+
       - name: Test OASDiff versioning policy
         run: |
           python -m unittest discover \

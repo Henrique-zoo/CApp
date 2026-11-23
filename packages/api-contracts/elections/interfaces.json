@@ -29,7 +29,7 @@
         381,
         382
       ],
-      "responsibility": "Codecs, assinatura, registro transacional, recibos e adaptação ao aplicativo. Integra o Firebase existente; cliente CLI independente não é pré-requisito."
+      "responsibility": "Codecs, assinatura, registro transacional, recibos e votação no aplicativo CApp com Firebase Auth e App Check. A cifragem da cédula acontece no dispositivo do eleitor."
     },
     {
       "id": "D",
@@ -39,31 +39,10 @@
         143,
         144
       ],
-      "responsibility": "Auditor independente e testes adversariais. Usa formatos/vetores e referências públicas; não reutiliza um veredito booleano do servidor."
+      "responsibility": "Verificação independente no aplicativo CApp e testes adversariais. O app recalcula o veredito no dispositivo a partir das evidências e âncoras públicas."
     }
   ],
   "ports": [
-    {
-      "name": "AuthenticatedElector",
-      "owner": "B",
-      "implementedBy": "Adaptador Firebase/identidade na integração #386",
-      "input": [
-        "principal autenticado",
-        "electionId"
-      ],
-      "output": [
-        "userId interno",
-        "voterId opaco por conta/eleição",
-        "decisão de elegibilidade e validade institucional"
-      ],
-      "contract": [
-        "UID vem do token validado, nunca do corpo do voto.",
-        "Comunicação app/backend usa HTTPS e valida o certificado do servidor; tokens não são enviados inicialmente por HTTP para depois seguir redirecionamento.",
-        "Curso vem da evidência institucional vigente, sem declaração manual.",
-        "A consulta de contexto não reserva voto; nova participação reavalia elegibilidade.",
-        "Consulta de recibo aceito não exige nova chave ou permanência no curso."
-      ]
-    },
     {
       "name": "CryptographicCodec",
       "owner": "C",
@@ -115,23 +94,28 @@
         {
           "name": "recordBallot",
           "input": [
-            "userId autenticado",
+            "par (electionId,userId) da eleição solicitada e da conta CApp autenticada",
             "SignedBallot",
-            "manifesto/calendário esperados"
+            "manifesto/calendário esperados",
+            "acumulador atualizado e revisão da eleição esperada para votação secreta"
           ],
           "output": [
-            "aceite com BoardEntry e Receipt persistidos",
-            "recuperação idempotente",
+            "Receipt assinado na votação secreta, inclusive na repetição do mesmo envio",
+            "confirmação sem conteúdo na votação identificada",
             "recusa ou conflito para repetir com nova leitura"
           ],
           "invariants": [
             "UNIQUE(electionId,userId).",
+            "A conta vem da autenticação. O voterId assinado deve corresponder ao userId dessa conta.",
+            "Um novo voto exige que o curso da evidência institucional vigente corresponda ao curso vinculado ao CA da eleição.",
+            "A participação guarda a cédula aceita com a chave pública de assinatura gerada para essa eleição.",
             "Mesmo submissionId com payload diferente é recusado.",
-            "Mesmo voto/operação recupera recibo existente inclusive depois do encerramento.",
+            "Mesmo voto/operação recupera recibo existente inclusive depois do encerramento, sem alterar o acumulador.",
+            "A consulta de recibo aceito exige a conta autenticada e dispensa nova chave ou permanência no curso.",
             "Outro submissionId depois de um voto aceito não registra voto novo.",
-            "Índice, encadeamento, voto, participação e recibo são confirmados juntos.",
+            "Índice, encadeamento, voto, participação, recibo e acumulador são confirmados juntos.",
             "Sem recibo para gravação abortada.",
-            "Novo voto revalida estado e prazo vigente na operação atômica."
+            "Novo voto revalida estado, prazo vigente e revisão do acumulador na operação atômica."
           ]
         },
         {
@@ -161,12 +145,13 @@
             "revisão vigente"
           ],
           "output": [
-            "Closure com cabeça e número final de participantes"
+            "Closure com cabeça e número final de participantes, com o acumulador final congelado para apuração"
           ],
           "invariants": [
             "Não fechar antes do fim vigente.",
             "Fechamento, último voto, prorrogação e cancelamento são serializados.",
-            "Não admitir novos votos após a fotografia fechada.",
+            "O quadro, a contagem e o acumulador correspondem aos mesmos votos aceitos até o encerramento.",
+            "Não admitir novos votos após o encerramento.",
             "Repetição recupera o mesmo encerramento."
           ]
         },
@@ -225,7 +210,7 @@
     {
       "name": "PublicElectionReader",
       "owner": "C/D",
-      "implementedBy": "Exportação pública do backend e leitor do auditor",
+      "implementedBy": "Exportação pública do backend e leitor das evidências para auditoria no CApp",
       "input": [
         "identificador da eleição ou arquivo exportado"
       ],
