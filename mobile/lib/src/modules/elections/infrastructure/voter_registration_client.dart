@@ -10,6 +10,33 @@ import '../../../infrastructure/backend/elections/registration_api.dart';
 final class DeviceVoterKeys {
   static const channel = MethodChannel('br.com.capp/elections/voter-keys');
 
+  static String aliasFor(UuidValue account, UuidValue election) =>
+      'capp.elections.v1.${account.uuid.toLowerCase()}.${election.uuid.toLowerCase()}';
+
+  Future<bool> verify(
+    String publicKey,
+    Uint8List message,
+    String signature,
+  ) async {
+    Uint8List decode(String value) {
+      if (value.length > 1024 || !RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(value)) {
+        throw const FormatException('Base64url eleitoral inválido');
+      }
+      final bytes = base64Url.decode(base64Url.normalize(value));
+      if (_encode(bytes) != value) {
+        throw const FormatException('Base64url não canônico');
+      }
+      return bytes;
+    }
+
+    return await channel.invokeMethod<bool>('verify', {
+          'publicKey': decode(publicKey),
+          'message': message,
+          'signature': decode(signature),
+        }) ==
+        true;
+  }
+
   Future<String?> publicKey(String alias, {required bool create}) async {
     final der = await channel.invokeMethod<Uint8List>('publicKey', {
       'alias': alias,
@@ -59,7 +86,7 @@ final class VoterRegistrationClient {
     final state = await _api.read(electionId, guard);
     final id = electionId.uuid.toLowerCase();
     final owner = account.uuid.toLowerCase();
-    final alias = 'capp.elections.v1.$owner.$id';
+    final alias = DeviceVoterKeys.aliasFor(account, electionId);
     final key = await _keys.publicKey(alias, create: state.publicKey == null);
     guard();
     if (state.publicKey != null) {

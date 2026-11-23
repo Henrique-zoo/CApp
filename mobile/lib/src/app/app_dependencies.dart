@@ -47,9 +47,11 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import '../infrastructure/firebase/firebase_app_check_setup.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 import '../infrastructure/backend/backend_api.dart';
 import '../modules/elections/infrastructure/voter_registration_client.dart';
+import '../modules/elections/infrastructure/secret_voting.dart';
 import '../modules/identity/application/institutional_auth_service.dart';
 import '../modules/identity/identity.dart';
 import '../modules/identity/infrastructure/backend/backend_institutional_identity_gateway.dart';
@@ -73,22 +75,33 @@ final class AppDependencies {
   AppDependencies._({
     required this._backendApi,
     required this._accountAuth,
+    required this._preferences,
     required this.sessionController,
     required this.backendReadinessController,
   });
 
   final BackendApi _backendApi;
   final FirebaseAccountAuth _accountAuth;
+  final SharedPreferencesAsync _preferences;
+
+  UuidValue? _currentAccount() {
+    final state = sessionController.state;
+    if (state is! SessionSignedIn ||
+        state.firebaseUid != _accountAuth.currentUserId) {
+      return null;
+    }
+    return state.user?.id;
+  }
 
   late final VoterRegistrationClient voterRegistration =
-      VoterRegistrationClient(_backendApi.voterRegistration, () {
-        final state = sessionController.state;
-        if (state is! SessionSignedIn ||
-            state.firebaseUid != _accountAuth.currentUserId) {
-          return null;
-        }
-        return state.user?.id;
-      });
+      VoterRegistrationClient(_backendApi.voterRegistration, _currentAccount);
+
+  late final SecretVotingClient secretVoting = SecretVotingClient(
+    _backendApi.ballots,
+    _backendApi.voterRegistration,
+    _currentAccount,
+    _preferences,
+  );
 
   /// Coordenação exposta à interface pela API pública do módulo.
   ///
@@ -176,6 +189,7 @@ final class AppDependencies {
     return AppDependencies._(
       backendApi: backendApi,
       accountAuth: firebaseMicrosoftAuth,
+      preferences: preferences,
       backendReadinessController: BackendReadinessController(
         checkReadiness: backendApi.monitoring.getReadiness,
       ),
