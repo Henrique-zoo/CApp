@@ -30,7 +30,9 @@ library;
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
+import 'package:uuid/uuid.dart';
 
+import '../modules/elections/elections_widgets.dart';
 import 'app_dependencies.dart';
 import 'capp.dart';
 import 'session_lifecycle_observer.dart';
@@ -56,13 +58,24 @@ class AppRoot extends StatefulWidget {
   /// composição ou no descarte deste proprietário.
   ///
   /// [key] participa da identificação do widget na árvore Flutter.
-  const AppRoot({super.key, required this.dependencies});
+  const AppRoot({
+    super.key,
+    required this.dependencies,
+    this.electionId = '',
+    this.manifestHash = '',
+  });
 
   /// Composição utilizada pela interface e pertencente a este proprietário.
   ///
   /// Sua identidade determina se uma atualização preserva a composição atual
   /// ou inicia seu encerramento.
   final AppDependencies dependencies;
+
+  /// Identificador da eleição e hash público distribuído pela comissão.
+  final String electionId;
+
+  /// Âncora independente usada para conferir o manifesto servido pela API.
+  final String manifestHash;
 
   /// Cria o estado responsável pela montagem e pelo descarte da composição.
   @override
@@ -95,6 +108,34 @@ class _AppRootState extends State<AppRoot> {
     }
   }
 
+  Widget _electionHome() {
+    if (widget.electionId.isEmpty && widget.manifestHash.isEmpty) {
+      return const Center(child: Text('Nenhuma eleição disponível.'));
+    }
+    if (!Uuid.isValidUUIDFormat(fromString: widget.electionId) ||
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(widget.manifestHash)) {
+      return const Center(
+        child: Text('A configuração da eleição está incompleta ou inválida.'),
+      );
+    }
+    final election = UuidValue.withFormatValidation(
+      widget.electionId.toLowerCase(),
+    );
+    final dependencies = widget.dependencies;
+    final hash = widget.manifestHash;
+    return ElectionHome(
+      key: ValueKey((election, hash)),
+      classifyFailure: dependencies.classifyVotingFailure,
+      inspect: () => dependencies.secretVoting.inspect(
+        election,
+        trustedManifestHash: hash,
+      ),
+      register: () async {
+        await dependencies.voterRegistration.register(election);
+      },
+    );
+  }
+
   /// Monta a interface com os controladores da composição atual.
   ///
   /// A identidade da composição preserva a interface em reconstruções
@@ -107,6 +148,7 @@ class _AppRootState extends State<AppRoot> {
       key: ObjectKey(widget.dependencies),
       controller: widget.dependencies.sessionController,
       child: CApp(
+        electionHome: _electionHome(),
         sessionController: widget.dependencies.sessionController,
         backendReadinessController:
             widget.dependencies.backendReadinessController,

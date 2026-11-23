@@ -68,6 +68,7 @@ class CApp extends StatelessWidget {
     super.key,
     required this.sessionController,
     required this.backendReadinessController,
+    this.electionHome,
   });
 
   /// Fonte do estado e das operações de entrada.
@@ -75,6 +76,9 @@ class CApp extends StatelessWidget {
 
   /// Diagnóstico observado por todas as telas, inclusive rotas internas.
   final BackendReadinessController backendReadinessController;
+
+  /// Conteúdo eleitoral apresentado no Início após o login institucional.
+  final Widget? electionHome;
 
   /// Solicita saída apenas para uma conta conhecida e sem outra operação.
   ///
@@ -150,6 +154,7 @@ class CApp extends StatelessWidget {
             message: warning == null ? null : sessionFailureMessage(state),
             child: MainPage(
               state: state,
+              electionHome: electionHome,
               onSignOut: (mode) => _signOut(mode: mode),
             ),
           ),

@@ -69,5 +69,11 @@ Future<void> main() async {
         ..start();
 
   // Inicializa a interface Flutter.
-  runApp(AppRoot(dependencies: dependencies));
+  runApp(
+    AppRoot(
+      dependencies: dependencies,
+      electionId: const String.fromEnvironment('ELECTION_ID'),
+      manifestHash: const String.fromEnvironment('ELECTION_MANIFEST_SHA256'),
+    ),
+  );
 }

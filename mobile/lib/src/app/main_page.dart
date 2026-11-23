@@ -22,10 +22,18 @@ import '../modules/identity/identity_widgets.dart';
 
 /// Compõe o rodapé global e a apresentação da conta autenticada.
 class MainPage extends StatefulWidget {
-  const MainPage({super.key, required this.state, required this.onSignOut});
+  const MainPage({
+    super.key,
+    required this.state,
+    required this.onSignOut,
+    this.electionHome,
+  });
 
   /// Fotografia do ramo pronto; a identidade da subárvore pertence ao gate.
   final SessionSignedIn state;
+
+  /// Eleição apresentada na aba Início da sessão atual.
+  final Widget? electionHome;
 
   /// Executa o modo confirmado na Conta, com tratamento de falhas na composição.
   final Future<void> Function(AccountSignOutMode mode) onSignOut;
@@ -53,7 +61,7 @@ class _MainPageState extends State<MainPage> {
           ),
         Expanded(
           child: _selectedIndex == 0
-              ? const SizedBox.expand()
+              ? (widget.electionHome ?? const SizedBox.expand())
               : AccountPage(state: widget.state, onSignOut: widget.onSignOut),
         ),
       ],

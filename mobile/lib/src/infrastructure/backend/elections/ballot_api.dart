@@ -47,7 +47,7 @@ String _decodeEvidence(
   return text;
 }
 
-/// A leitura do quadro é pública. Somente a submissão leva tokens da sessão.
+/// O quadro é público. O voto e o recibo pessoal usam a sessão autenticada.
 final class BallotApi {
   BallotApi(this._dio);
   final Dio _dio;
@@ -80,16 +80,7 @@ final class BallotApi {
     final response = await _dio.post<Map<String, dynamic>>(
       '/elections/${id.uuid}/ballots',
       data: envelope,
-      options: Options(
-        contentType: Headers.jsonContentType,
-        followRedirects: false,
-        responseDecoder: _decodeEvidence,
-        extra: {
-          'firebaseAuth': true,
-          'firebaseAppCheck': true,
-          'firebaseAuthGuard': guard,
-        },
-      ),
+      options: _authenticated(guard),
     );
     guard();
     final data = response.data;
@@ -100,4 +91,29 @@ final class BallotApi {
     }
     return data;
   }
+
+  Future<Map<String, dynamic>> receipt(
+    UuidValue id,
+    void Function() guard,
+  ) async {
+    _requireHttps();
+    guard();
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/elections/${id.uuid}/receipts/me',
+      options: _authenticated(guard),
+    );
+    guard();
+    return response.data ?? (throw const FormatException('Recibo vazio'));
+  }
+
+  Options _authenticated(void Function() guard) => Options(
+    contentType: Headers.jsonContentType,
+    followRedirects: false,
+    responseDecoder: _decodeEvidence,
+    extra: {
+      'firebaseAuth': true,
+      'firebaseAppCheck': true,
+      'firebaseAuthGuard': guard,
+    },
+  );
 }

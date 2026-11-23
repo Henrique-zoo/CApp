@@ -50,6 +50,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../infrastructure/backend/backend_api.dart';
+import '../modules/elections/infrastructure/election_failure_adapter.dart';
 import '../modules/elections/infrastructure/voter_registration_client.dart';
 import '../modules/elections/infrastructure/secret_voting.dart';
 import '../modules/identity/application/institutional_auth_service.dart';
@@ -95,6 +96,8 @@ final class AppDependencies {
 
   late final VoterRegistrationClient voterRegistration =
       VoterRegistrationClient(_backendApi.voterRegistration, _currentAccount);
+
+  final classifyVotingFailure = classifyElectionFailure;
 
   late final SecretVotingClient secretVoting = SecretVotingClient(
     _backendApi.ballots,

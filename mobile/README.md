@@ -501,6 +501,26 @@ valores vazios interrompem a inicialização. O endereço de backend mostrado
 atende ao emulador Android; dispositivos físicos precisam de um endereço
 alcançável. A composição MSAL atual ainda não configura as outras plataformas.
 
+### Eleição no Início
+
+Para apresentar a eleição no Android, execute o app com o backend eleitoral
+em HTTPS, os parâmetros MSAL do login existente e estes dois parâmetros:
+
+~~~text
+--dart-define=ELECTION_ID=<uuid-da-eleicao>
+--dart-define=ELECTION_MANIFEST_SHA256=<hash-do-manifesto-em-64-digitos-hexadecimais-minusculos>
+~~~
+
+Use o hash do manifesto divulgado pela comissão por um canal independente do
+backend. Ele permite ao app conferir as chapas e o calendário antes de mostrá-los.
+Sem uma eleição configurada, o Início exibe **Nenhuma eleição disponível**.
+
+Entre com a conta institucional e abra a eleição antes do horário de início.
+**Habilitar para votar** cria a chave no Android e cadastra sua chave pública.
+Durante a votação, use o mesmo aparelho, escolha uma chapa ou **Voto nulo**,
+toque em **Votar** e confirme o envio. O recibo permite conferir a inclusão
+da cédula no quadro público.
+
 ## Documentação e validação
 
 O README concentra arquitetura, configuração, execução e um resumo dos fluxos.

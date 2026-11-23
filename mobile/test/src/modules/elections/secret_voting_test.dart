@@ -51,7 +51,10 @@ void main() {
   late List<String> posted;
   late UuidValue? active;
   late Set<String> signedByDevice;
-  Future<BallotSession> open({String? pin}) {
+  late String? localKey;
+  late DateTime now;
+  late Map<String, dynamic> ownReceipt;
+  SecretVotingClient client() {
     final api = BackendApi(
       baseUrl: 'https://example.invalid',
       getFirebaseAppCheckToken: () async => 'app-test',
@@ -63,8 +66,14 @@ void main() {
       api.voterRegistration,
       () => active,
       prefs,
-    ).open(election, trustedManifestHash: pin ?? trustedHash);
+      clock: () => now,
+    );
   }
+
+  Future<BallotSession> open({String? pin}) =>
+      client().open(election, trustedManifestHash: pin ?? trustedHash);
+  Future<ElectionInspection> inspect() =>
+      client().inspect(election, trustedManifestHash: trustedHash);
 
   setUp(() {
     state = {
@@ -74,8 +83,12 @@ void main() {
     };
     active = account;
     prefs = FakePreferences();
+    now = DateTime.utc(2026, 11, 19);
+    localKey = voterKey;
+    ownReceipt = envelope('receipt-0');
     board = {
       'manifest': envelope('manifest'),
+      'calendarOrigin': envelope('calendar-origin'),
       'entries': [envelope('entry-0')],
     };
     record = {
@@ -97,6 +110,10 @@ void main() {
       if (options.path == '/elections/$election/registration/me') {
         return jsonTestResponse(state);
       }
+      if (options.path == '/elections/$election/receipts/me') {
+        expect(options.method, 'GET');
+        return jsonTestResponse(ownReceipt);
+      }
       expect(options.path, '/elections/$election/ballots');
       expect(options.method, 'POST');
       posted.add(options.data as String);
@@ -109,7 +126,9 @@ void main() {
       if (call.method == 'publicKey') {
         expect(args['alias'], alias);
         expect(args['create'], false);
-        return base64Url.decode(base64Url.normalize(voterKey));
+        return localKey == null
+            ? null
+            : base64Url.decode(base64Url.normalize(localKey!));
       }
       final text = utf8.decode(args['message'] as Uint8List);
       if (call.method == 'sign') {
@@ -125,6 +144,7 @@ void main() {
       }
       for (final item in [
         'manifest',
+        'calendar-origin',
         'ballot-0',
         'ballot-1',
         'entry-0',
@@ -147,6 +167,127 @@ void main() {
   });
   tearDown(
     () => messenger.setMockMethodCallHandler(DeviceVoterKeys.channel, null),
+  );
+
+  test(
+    'mostra chapas e período autenticados mesmo antes do cadastro',
+    () async {
+      state = {'publicKey': null, 'voterId': null, 'participated': false};
+      final result = await inspect();
+      expect(result.registered, false);
+      expect(result.hasSavedReceipt, false);
+      expect(result.localKeyMatches, false);
+      expect(result.participated, false);
+      expect(result.session, isNull);
+      expect(result.options.map((o) => o.name), [
+        'Aurora',
+        'Horizonte',
+        'Nulo',
+      ]);
+      expect(result.options.map((o) => o.isNull), [false, false, true]);
+      expect(result.startsAt, DateTime.utc(2026, 11, 20, 12));
+      expect(result.endsAt, DateTime.utc(2026, 11, 22, 12));
+      expect(result.phase, ElectionPhase.preparation);
+      expect(result.timeUntilNextPhase, result.startsAt.difference(now));
+      now = result.startsAt;
+      expect(result.phase, ElectionPhase.voting);
+      expect(result.timeUntilNextPhase, result.endsAt.difference(now));
+      now = result.endsAt;
+      expect(result.phase, ElectionPhase.closed);
+      expect(result.timeUntilNextPhase, isNull);
+      await expectLater(open(), throwsStateError);
+      expect(prefs.values, isEmpty);
+    },
+  );
+
+  test('não exibe período ou encerramento adulterado', () async {
+    board['calendarOrigin'] = {
+      ...envelope('calendar-origin'),
+      'payload': {
+        ...vector('calendar-origin')['payload'],
+        'endsAt': '2026-11-29T12:00:00Z',
+      },
+    };
+    await expectLater(inspect(), throwsFormatException);
+    board['calendarOrigin'] = envelope('calendar-origin');
+    board['closure'] = envelope('receipt-0');
+    await expectLater(inspect(), throwsFormatException);
+    expect(transport.requests.every((r) => r.path.endsWith('/board')), true);
+  });
+
+  test(
+    'recupera e vincula o recibo em outro aparelho após o encerramento',
+    () async {
+      state['participated'] = true;
+      now = DateTime.utc(2026, 11, 23);
+      expect((await inspect()).localKeyMatches, true);
+      localKey = null;
+      final result = await inspect();
+      expect(result.phase, ElectionPhase.closed);
+      expect(result.registered, true);
+      expect(result.participated, true);
+      expect(result.localKeyMatches, false);
+      final receipt = await result.session!.recoverReceipt();
+      expect(receipt.recovered, true);
+      expect(jsonDecode(receipt.receiptJson), envelope('receipt-0'));
+      expect(prefs.values['$alias.signed-receipt'], receipt.receiptJson);
+      expect(await result.session!.isIncluded(receipt), true);
+      expect(posted, isEmpty);
+      expect(signedByDevice, isEmpty);
+    },
+  );
+
+  test(
+    'recusa recibo de outro eleitor mesmo com assinaturas válidas',
+    () async {
+      ownReceipt = envelope('receipt-1');
+      board['entries'] = [envelope('entry-0'), envelope('entry-1')];
+      state['participated'] = true;
+      final session = await open();
+      await expectLater(session.recoverReceipt(), throwsFormatException);
+      expect(prefs.values, isEmpty);
+      ownReceipt = {...envelope('receipt-0'), 'signature': 'AQID'};
+      await expectLater(session.recoverReceipt(), throwsFormatException);
+      active = null;
+      await expectLater(session.recoverReceipt(), throwsStateError);
+    },
+  );
+
+  test(
+    'preserva o recibo se a participação e depois o cadastro desaparecerem',
+    () async {
+      prefs.values[draftKey] = jsonEncode(envelope('ballot-0'));
+      final original = await open();
+      final draft = (await original.savedVote())!;
+      final receipt = await original.submit(draft);
+      board['entries'] = [];
+      state['participated'] = false;
+      final stale = await inspect();
+      expect(stale.hasSavedReceipt, true);
+      expect(stale.participated, false);
+      expect(
+        (await stale.session!.recoverReceipt()).receiptJson,
+        receipt.receiptJson,
+      );
+
+      state = {'publicKey': null, 'voterId': null, 'participated': false};
+      final lost = await inspect();
+      expect(lost.hasSavedReceipt, true);
+      expect(lost.registered, false);
+      final session = lost.session!;
+      final recovered = await session.recoverReceipt();
+      expect(recovered.receiptJson, receipt.receiptJson);
+      expect(await session.isIncluded(recovered), false);
+      await expectLater(
+        session.prepare(session.optionIds.first),
+        throwsStateError,
+      );
+      await expectLater(session.submit(draft), throwsStateError);
+      expect(posted, [draft.json]);
+      localKey = null;
+      await expectLater(session.recoverReceipt(), throwsStateError);
+      expect(prefs.values['$alias.signed-receipt'], receipt.receiptJson);
+    },
   );
 
   test(
@@ -200,9 +341,16 @@ void main() {
       final accepted = await session.submit(draft);
       expect(jsonDecode(accepted.receiptJson), envelope('receipt-0'));
       expect(accepted.recovered, false);
+      expect(prefs.values['$alias.signed-receipt'], accepted.receiptJson);
       expect(await session.isIncluded(accepted), true);
       board['entries'] = [];
-      expect(await session.isIncluded(accepted), false);
+      final recovered = await (await open()).recoverReceipt();
+      expect(recovered.receiptJson, accepted.receiptJson);
+      expect(await session.isIncluded(recovered), false);
+      expect(
+        transport.requests.any((r) => r.path.endsWith('/receipts/me')),
+        false,
+      );
       record['recovered'] = true;
       postStatus = 200;
       final retry = await session.submit(draft);
@@ -212,6 +360,45 @@ void main() {
       await expectLater(session.submit(draft), throwsFormatException);
       record['receipt'] = {...envelope('receipt-0'), 'signature': 'AQID'};
       await expectLater(session.submit(draft), throwsFormatException);
+    },
+  );
+
+  test(
+    'a consulta autentica o envelope e os campos exibidos do recibo',
+    () async {
+      final session = await open();
+      final genuine = await session.recoverReceipt();
+      AcceptedVote displayed({String? envelope, int? index}) => AcceptedVote(
+        receiptJson: envelope ?? genuine.receiptJson,
+        index: index ?? genuine.index,
+        entryHash: genuine.entryHash,
+        ballotHash: genuine.ballotHash,
+        recovered: true,
+      );
+      await expectLater(
+        session.isIncluded(displayed(index: 2)),
+        throwsFormatException,
+      );
+      final changed = {...envelope('receipt-0'), 'signature': 'AQID'};
+      await expectLater(
+        session.isIncluded(displayed(envelope: jsonEncode(changed))),
+        throwsFormatException,
+      );
+      board['entries'] = [envelope('entry-0'), envelope('entry-1')];
+      final other = vector('receipt-1')['payload'];
+      final otherVote = AcceptedVote(
+        receiptJson: jsonEncode(envelope('receipt-1')),
+        index: other['index'],
+        entryHash: other['entryHash'],
+        ballotHash: other['ballotHash'],
+        recovered: true,
+      );
+      await expectLater(session.isIncluded(otherVote), throwsFormatException);
+      await expectLater(
+        session.submit(SignedVote(jsonEncode(envelope('ballot-0')))),
+        throwsStateError,
+      );
+      expect(posted, isEmpty);
     },
   );
 

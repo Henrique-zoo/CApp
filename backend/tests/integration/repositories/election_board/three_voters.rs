@@ -94,6 +94,14 @@ async fn three_distinct_voters_can_verify_their_receipts_in_submission_order() {
     let board = public_evidence(&db.pool, &format!("/elections/{id}/board"), StatusCode::OK).await;
     let entries = board["entries"].as_array().unwrap();
     assert_eq!(entries.len(), order.len());
+    let accepted_accounts = sqlx::query_scalar::<_, Uuid>(
+        "SELECT account_id FROM election_participation WHERE election_id=$1 ORDER BY accepted_at",
+    )
+    .bind(id)
+    .fetch_all(&db.pool)
+    .await
+    .unwrap();
+    assert_eq!(accepted_accounts, order.map(|i| voters[i].account));
     let exported = board.to_string();
     let mut previous = manifest_hash;
     for (index, i) in order.into_iter().enumerate() {
@@ -107,6 +115,8 @@ async fn three_distinct_voters_can_verify_their_receipts_in_submission_order() {
         let ballot: Value = serde_json::from_slice(&ballots[i]).unwrap();
         assert_eq!(entries[index]["payload"]["ballot"], ballot);
         assert!(!exported.contains(&voters[i].account.to_string()));
+        // O verificador exige exatamente os campos públicos de cédula, entrada e
+        // recibo. Incluir a escolha ou o horário individual invalida o registro.
         let record = verify_record(
             &serde_json::to_vec(&entries[index]).unwrap(),
             &serde_json::to_vec(&receipt).unwrap(),
