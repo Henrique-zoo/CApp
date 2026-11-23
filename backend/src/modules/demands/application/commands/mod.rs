@@ -1,4 +1,7 @@
-//! Espaço reservado para comandos do módulo de demandas.
-//!
-//! Ainda não define operações. Este módulo organizará os casos de uso
-//! que alteram o estado do domínio.
+//! Comandos da camada de aplicação do módulo de demandas.
+
+mod create_demand;
+mod update_demand_status;
+
+pub use create_demand::*;
+pub use update_demand_status::*;

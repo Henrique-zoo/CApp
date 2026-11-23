@@ -1,4 +1,11 @@
-//! Espaço reservado para serviços de aplicação do módulo de demandas.
-//!
-//! Ainda não possui serviços. Sua responsabilidade prevista é coordenar
-//! regras de domínio, persistência e integrações durante os casos de uso.
+//! Serviços e casos de uso da camada de aplicação do módulo de demandas.
+
+mod create_demand;
+mod get_demand;
+mod list_demands;
+mod update_demand_status;
+
+pub use create_demand::*;
+pub use get_demand::*;
+pub use list_demands::*;
+pub use update_demand_status::*;
