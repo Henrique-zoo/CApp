@@ -47,16 +47,18 @@ Iterable<File> _sources(String root) => Directory(root)
 /// Registra os limites fiscalizáveis pelas diretivas das bibliotecas.
 void main() {
   test('aplicação não depende de outras camadas ou módulos', () {
-    final root = Directory('lib/src/modules/identity/application').absolute.uri
-        .toString();
-    for (final source in _sources('lib/src/modules/identity/application')) {
-      for (final uri in _directives(source)) {
-        if (_isExternalDependency(uri)) continue;
-        expect(
-          _target(source, uri).startsWith(root),
-          isTrue,
-          reason: '${source.path} depende de $uri',
-        );
+    for (final module in ['identity', 'elections']) {
+      final path = 'lib/src/modules/$module/application';
+      final root = Directory(path).absolute.uri.toString();
+      for (final source in _sources(path)) {
+        for (final uri in _directives(source)) {
+          if (_isExternalDependency(uri)) continue;
+          expect(
+            _target(source, uri).startsWith(root),
+            isTrue,
+            reason: '${source.path} depende de $uri',
+          );
+        }
       }
     }
   });
@@ -152,6 +154,7 @@ void main() {
     for (final api in [
       ('lib/src/modules/identity/identity.dart', 'application/'),
       ('lib/src/modules/identity/identity_widgets.dart', 'presentation/'),
+      ('lib/src/modules/elections/elections.dart', 'application/'),
     ]) {
       for (final uri in _directives(File(api.$1))) {
         expect(uri.startsWith(api.$2), isTrue, reason: '${api.$1}: $uri');

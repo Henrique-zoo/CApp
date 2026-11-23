@@ -5,6 +5,7 @@
 
 pub mod error;
 pub mod ports;
+pub mod registration;
 pub mod services;
 
 /// Porta do quadro público transacional.

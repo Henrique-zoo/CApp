@@ -11,11 +11,16 @@ use crypto_bigint::U2048;
 use serde_json::{Value, json};
 use sqlx::{PgPool, Postgres, Transaction};
 use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
+use crate::infrastructure::database::PgDatabase;
+
 use super::super::{
-    application::board::{
-        BoardError, BoardSnapshot, ElectionBoard, EligibleVoter, FrozenBoard, RecordedBallot,
+    application::{
+        board::{BoardError, BoardSnapshot, ElectionBoard, FrozenBoard, RecordedBallot},
+        ports::{BoardSnapshotStream, ElectionBoardReader},
+        registration::{VoterIdentity, validate_registered_key},
     },
     crypto_wire::{
         BallotContext, CryptoWireError, ServerSigner, object_digest, parse_strict_json,
@@ -28,6 +33,10 @@ use super::super::{
         },
         profile::MAX_VOTER_COUNT,
     },
+};
+use super::{
+    codec::decode_base64_url,
+    registration::{database_now, eligibility_deadline},
 };
 
 impl From<sqlx::Error> for BoardError {
@@ -68,6 +77,7 @@ struct BoardRow {
     starts_at: DateTime<Utc>,
     ends_at: DateTime<Utc>,
     status: String,
+    requires_voter_registration: bool,
     head_hash: String,
     voter_count: i32,
     accumulator: Value,
@@ -108,22 +118,10 @@ impl PgElectionBoard {
     pub fn new(pool: PgPool, signer: Arc<ServerSigner>) -> Self {
         Self { pool, signer }
     }
+}
 
-    /// Leitura pública consistente, sem exigir acesso à chave privada.
-    pub async fn read_snapshot(
-        pool: &PgPool,
-        election_id: Uuid,
-    ) -> Result<BoardSnapshot, BoardError> {
-        let mut tx = pool.begin().await?;
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-            .execute(&mut *tx)
-            .await?;
-        let board = load_board(&mut tx, election_id, false).await?;
-        let snapshot = snapshot_in_transaction(&mut tx, board).await?;
-        tx.commit().await?;
-        Ok(snapshot)
-    }
-
+#[async_trait::async_trait]
+impl ElectionBoardReader for PgDatabase {
     /// Exporta o mesmo JSON público em páginas, preservando uma única fotografia.
     ///
     /// A origem é lida antes de devolver o canal, permitindo tratar `NotFound`
@@ -131,11 +129,8 @@ impl PgElectionBoard {
     /// aguardando o consumidor. Desconectar o consumidor descarta a transação.
     /// Em falha posterior, envia erro e não termina o objeto JSON: um prefixo
     /// parcial nunca é apresentado como uma exportação completa bem-sucedida.
-    pub async fn stream_snapshot(
-        pool: &PgPool,
-        election_id: Uuid,
-    ) -> Result<mpsc::Receiver<Result<Vec<u8>, BoardError>>, BoardError> {
-        let mut tx = pool.begin().await?;
+    async fn stream_snapshot(&self, election_id: Uuid) -> Result<BoardSnapshotStream, BoardError> {
+        let mut tx = self.pool.begin().await?;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             .execute(&mut *tx)
             .await?;
@@ -146,14 +141,15 @@ impl PgElectionBoard {
                 let _ = sender.send(Err(error)).await;
             }
         });
-        Ok(receiver)
+
+        Ok(Box::pin(ReceiverStream::new(receiver)))
     }
 
     /// Distribui uma âncora assinada: último recibo, ou manifesto no quadro vazio.
     ///
     /// A resposta obtida do servidor ainda deve ser conservada em outro lugar
     /// para detectar truncamento/reescrita em exportações posteriores.
-    pub async fn read_checkpoint(pool: &PgPool, election_id: Uuid) -> Result<Value, BoardError> {
+    async fn read_checkpoint(&self, election_id: Uuid) -> Result<Value, BoardError> {
         let row: Option<(i32, Value, Option<Value>)> = sqlx::query_as(
             "SELECT b.voter_count, b.manifest, e.signed_receipt
              FROM election_board b
@@ -162,7 +158,7 @@ impl PgElectionBoard {
              WHERE b.election_id = $1",
         )
         .bind(election_id)
-        .fetch_optional(pool)
+        .fetch_optional(&self.pool)
         .await?;
         let (count, manifest, receipt) = row.ok_or(BoardError::NotFound)?;
         match (count, receipt) {
@@ -172,28 +168,36 @@ impl PgElectionBoard {
         }
     }
 
-    /// Recupera o recibo da conta autenticada sem exigir chave privada do servidor.
-    ///
-    /// O chamador autentica a conta e autoriza a consulta da própria participação.
-    /// Não publicar `authenticated_account_id` como filtro arbitrário de uma API.
-    pub async fn read_receipt(
-        pool: &PgPool,
+    async fn find_receipt(
+        &self,
         election_id: Uuid,
         authenticated_account_id: Uuid,
-    ) -> Result<Option<RecordedBallot>, BoardError> {
-        let stored = sqlx::query_as::<_, StoredVote>(
-            "SELECT p.voter_id, p.submission_id, p.ballot_hash,
-                    e.signed_ballot, e.signed_entry, e.signed_receipt
-             FROM election_participation p
-             JOIN election_board_entry e USING (election_id, voter_id)
-             WHERE p.election_id = $1 AND p.account_id = $2",
-        )
-        .bind(election_id)
-        .bind(authenticated_account_id)
-        .fetch_optional(pool)
-        .await?;
-        Ok(stored.map(|vote| vote.into_record(true)))
+    ) -> Result<Option<Value>, BoardError> {
+        let accepted =
+            read_accepted_vote(&self.pool, election_id, authenticated_account_id).await?;
+
+        Ok(accepted.map(|vote| vote.signed_receipt))
     }
+}
+
+async fn read_accepted_vote(
+    pool: &PgPool,
+    election_id: Uuid,
+    authenticated_account_id: Uuid,
+) -> Result<Option<StoredVote>, BoardError> {
+    let stored = sqlx::query_as(
+        "SELECT p.voter_id, p.submission_id, p.ballot_hash,
+                e.signed_ballot, e.signed_entry, e.signed_receipt
+         FROM election_participation p
+         JOIN election_board_entry e USING (election_id, voter_id)
+         WHERE p.election_id = $1 AND p.account_id = $2",
+    )
+    .bind(election_id)
+    .bind(authenticated_account_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(stored)
 }
 
 #[async_trait::async_trait]
@@ -213,8 +217,8 @@ impl ElectionBoard for PgElectionBoard {
         sqlx::query(
             "INSERT INTO election_board
              (election_id, manifest, calendar_origin, manifest_hash, schedule_hash,
-              starts_at, ends_at, head_hash, accumulator)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$4,$8)
+              starts_at, ends_at, head_hash, accumulator, requires_voter_registration)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$4,$8,$9)
              ON CONFLICT (election_id) DO NOTHING",
         )
         .bind(manifest.election_id)
@@ -225,12 +229,14 @@ impl ElectionBoard for PgElectionBoard {
         .bind(starts_at)
         .bind(ends_at)
         .bind(accumulator)
+        .bind(input.requires_voter_registration)
         .execute(&mut *tx)
         .await?;
         let board = load_board(&mut tx, manifest.election_id, true).await?;
         // A assinatura PSS pode variar numa repetição; os payloads são a origem.
         if board.manifest["payload"] != manifest.envelope["payload"]
             || board.calendar_origin["payload"] != calendar["payload"]
+            || board.requires_voter_registration != input.requires_voter_registration
         {
             return Err(BoardError::AlreadyExists);
         }
@@ -242,7 +248,7 @@ impl ElectionBoard for PgElectionBoard {
     async fn record(
         &self,
         election_id: Uuid,
-        voter: EligibleVoter,
+        voter: VoterIdentity,
         raw: &[u8],
     ) -> Result<RecordedBallot, BoardError> {
         let envelope = parse_strict_json(raw)?;
@@ -292,6 +298,7 @@ impl ElectionBoard for PgElectionBoard {
             || board.schedule_hash != origin.schedule_hash
             || board.starts_at != origin.starts_at
             || board.ends_at != origin.ends_at
+            || board.requires_voter_registration != origin.requires_voter_registration
         {
             return Err(BoardError::InvalidArtifact(
                 "origem modificada durante o aceite",
@@ -331,6 +338,7 @@ impl ElectionBoard for PgElectionBoard {
             ));
         }
 
+        let eligible_until = eligibility_deadline(&mut tx, election_id, voter).await?;
         let now = database_now(&mut tx).await?;
         if board.status != "open" {
             return Err(BoardError::Closed);
@@ -341,8 +349,21 @@ impl ElectionBoard for PgElectionBoard {
         if now >= board.ends_at {
             return Err(BoardError::VotingEnded);
         }
-        if now >= voter.eligible_until {
+        if eligible_until.is_none_or(|end| now >= end) {
             return Err(BoardError::NotEligible);
+        }
+        if board.requires_voter_registration {
+            let registered_key: Option<Vec<u8>> = sqlx::query_scalar(
+                "SELECT public_key FROM election_voter_registration
+                 WHERE election_id = $1 AND account_id = $2",
+            )
+            .bind(election_id)
+            .bind(voter.account_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let ballot_key = decode_base64_url(text(&verified.envelope["payload"]["publicKey"])?)
+                .map_err(|error| BoardError::InvalidEvidence(Box::new(error)))?;
+            validate_registered_key(registered_key.as_deref(), &ballot_key)?;
         }
         validate_signing_origin(&board, &self.signer)?;
         if board.voter_count >= MAX_VOTER_COUNT as i32 {
@@ -419,11 +440,21 @@ impl ElectionBoard for PgElectionBoard {
         election_id: Uuid,
         authenticated_account_id: Uuid,
     ) -> Result<Option<RecordedBallot>, BoardError> {
-        Self::read_receipt(&self.pool, election_id, authenticated_account_id).await
+        let accepted =
+            read_accepted_vote(&self.pool, election_id, authenticated_account_id).await?;
+
+        Ok(accepted.map(|vote| vote.into_record(true)))
     }
 
     async fn snapshot(&self, election_id: Uuid) -> Result<BoardSnapshot, BoardError> {
-        Self::read_snapshot(&self.pool, election_id).await
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            .execute(&mut *tx)
+            .await?;
+        let board = load_board(&mut tx, election_id, false).await?;
+        let snapshot = snapshot_in_transaction(&mut tx, board).await?;
+        tx.commit().await?;
+        Ok(snapshot)
     }
 
     async fn close(&self, election_id: Uuid) -> Result<BoardSnapshot, BoardError> {
@@ -484,13 +515,6 @@ async fn load_board(
         .fetch_optional(&mut **tx)
         .await?
         .ok_or(BoardError::NotFound)
-}
-
-async fn database_now(tx: &mut Transaction<'_, Postgres>) -> Result<DateTime<Utc>, BoardError> {
-    // CURRENT_TIMESTAMP seria o instante anterior à espera pelo lock.
-    Ok(sqlx::query_scalar("SELECT clock_timestamp()")
-        .fetch_one(&mut **tx)
-        .await?)
 }
 
 async fn snapshot_in_transaction(

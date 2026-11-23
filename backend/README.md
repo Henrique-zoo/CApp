@@ -362,12 +362,22 @@ Inclui:
 
 Responsável pelo sistema eleitoral.
 
-O quadro público usa a porta `ElectionBoard` e o adaptador `PgElectionBoard`.
-A abertura recebe um manifesto e um calendário assinados. O aceite recebe a
-conta autenticada, o identificador eleitoral e a chave pública esperada do
-eleitor, além dos bytes da cédula assinada. O serviço chamador fornece esses
-dados a partir da identidade e do cadastro. A chave privada do eleitor fica
-no dispositivo. A chave de assinatura do servidor é injetada no adaptador.
+As consultas do quadro, do checkpoint e do próprio recibo passam pelos serviços
+de aplicação e usam a porta `ElectionBoardReader`, implementada por `PgDatabase`.
+A exportação entrega o JSON em partes e usa uma única leitura consistente.
+As operações transacionais usam a porta `ElectionBoard` e o adaptador `PgElectionBoard`.
+A publicação recebe manifesto e calendário assinados e fixa a escolha da
+comissão sobre cadastro prévio. A configuração do CA contém os cursos que ele
+representa em `academic_center_course`, com os nomes da evidência do diretório.
+Cadastro e novo voto revalidam o vínculo com um desses cursos dentro da
+transação eleitoral.
+
+`GET /elections/{id}/registration/me` informa se a eleição exige cadastro e
+consulta a situação da própria conta. Quando exigido, `PUT` no mesmo endereço
+valida a prova de posse da chave antes da abertura. O primeiro voto deve usar
+essa chave. Nas demais eleições, a primeira cédula aceita vincula a chave à
+participação. Os novos votos usam o UUID da conta autenticada, e a chave
+privada permanece no dispositivo.
 
 O banco confirma participação, registro, recibo e produto das cifras numa
 transação. Nova tentativa da mesma operação recupera o recibo já emitido.

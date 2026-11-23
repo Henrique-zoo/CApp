@@ -25,6 +25,7 @@
       "mechanisms": [
         "Firebase Auth",
         "curso da evidência institucional vigente igual ao curso vinculado ao CA da eleição no momento do novo voto",
+        "prova de posse cadastrada antes da abertura quando a comissão exigir cadastro prévio",
         "UUID da conta CApp autenticada conferido com o voterId assinado"
       ],
       "premises": [

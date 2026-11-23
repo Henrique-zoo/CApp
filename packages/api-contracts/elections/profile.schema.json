@@ -201,11 +201,15 @@
     "signers": {
       "type": "object",
       "required": [
+        "voter-registration",
         "ballot",
         "decryption-share",
         "otherKinds"
       ],
       "properties": {
+        "voter-registration": {
+          "const": "payload.publicKey, proof of possession for the authenticated account and election"
+        },
         "ballot": {
           "const": "payload.publicKey from the signing pair generated for this election, stored with the accepted ballot for (electionId, userId)"
         },

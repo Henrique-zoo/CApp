@@ -421,6 +421,18 @@ fn given_valor_esta_autenticada_pela_sua_conta_firebase(_world: &mut AppWorld, _
     pending_step("\"{string}\" está autenticada pela sua conta Firebase");
 }
 
+/// Pendente: a eleição exige ou dispensa cadastro antes da abertura.
+#[given(regex = r"^que a eleição (exige|dispensa) o cadastro prévio da chave$")]
+fn given_exigencia_de_cadastro_previo(_world: &mut AppWorld, _exigencia: String) {
+    pending_step("que a eleição exige ou dispensa o cadastro prévio da chave");
+}
+
+/// Pendente: "{string}" cadastrou sua chave pública antes da abertura.
+#[given(regex = r#"^"([^"]*)" cadastrou sua chave pública antes da abertura$"#)]
+fn given_chave_cadastrada_antes_da_abertura(_world: &mut AppWorld, _eleitor: String) {
+    pending_step("\"{string}\" cadastrou sua chave pública antes da abertura");
+}
+
 /// Pendente: "{string}" não possui inscrição ou chave prévia nessa eleição.
 #[given(regex = r#"^"([^"]*)" não possui inscrição ou chave prévia nessa eleição$"#)]
 fn given_valor_nao_possui_inscricao_ou_chave_previa_nessa_eleicao(

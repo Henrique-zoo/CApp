@@ -202,6 +202,11 @@ um módulo: implementa portas, converte DTOs e traduz códigos de erro para as f
 da aplicação. Essa separação permite compartilhar o transporte sem centralizar
 as regras de todos os domínios em um cliente HTTP global.
 
+Em eleições, `VoterRegistrationService` coordena a consulta e o cadastro da
+chave da conta autenticada. A composição fornece o gateway HTTP e o adaptador
+de chaves nativas. O gateway converte o DTO e as recusas para o vocabulário da
+aplicação. A chave privada fica no Android Keystore ou no Keychain do iOS.
+
 ## Fluxo geral de uma operação
 
 Uma operação iniciada na interface normalmente percorre estes passos:

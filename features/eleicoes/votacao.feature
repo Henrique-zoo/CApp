@@ -20,17 +20,38 @@ Funcionalidade: Votação em eleições de Centros Acadêmicos
     E "Ana" está autenticada pela sua conta Firebase
     E as solicitações válidas de voto de "Ana" são assinadas com sua própria chave
 
-  Regra: O primeiro voto não exige cadastro eleitoral prévio
+  Regra: A comissão define se a chave precisa ser cadastrada antes da abertura
 
     @happy
-    Cenário: Votar pela primeira vez após a abertura
-      Dado que a eleição está no período de votação
+    Cenário: Votar pela primeira vez em uma eleição com cadastro dispensado
+      Dado que a eleição dispensa o cadastro prévio da chave
+      E a eleição está no período de votação
       E o estudante "Ana" possui vínculo acadêmico válido com o Centro Acadêmico "CA Engenharia"
       E "Ana" não possui inscrição ou chave prévia nessa eleição
       Quando registra seu primeiro voto na chapa "Aurora"
       Então o voto é confirmado
       E a chave pública da cédula é gravada no registro de participação de "Ana" nessa eleição
       E a chave privada permanece no dispositivo de "Ana"
+
+    @happy
+    Cenário: Votar com a chave cadastrada antes da abertura
+      Dado que a eleição exige o cadastro prévio da chave
+      E "Ana" cadastrou sua chave pública antes da abertura
+      E a eleição está no período de votação
+      E o estudante "Ana" possui vínculo acadêmico válido com o Centro Acadêmico "CA Engenharia"
+      Quando registra seu primeiro voto na chapa "Aurora"
+      Então o voto é confirmado
+      E a chave pública da cédula é gravada no registro de participação de "Ana" nessa eleição
+
+    @sad
+    Cenário: Recusar o primeiro voto sem a chave exigida
+      Dado que a eleição exige o cadastro prévio da chave
+      E a eleição está no período de votação
+      E o estudante "Ana" possui vínculo acadêmico válido com o Centro Acadêmico "CA Engenharia"
+      E "Ana" não possui inscrição ou chave prévia nessa eleição
+      Quando tenta registrar um voto na chapa "Aurora"
+      Então a tentativa de voto é recusada
+      E nenhum voto é registrado para o estudante "Ana"
 
   Regra: Somente estudantes com vínculo verificado com o curso do CA podem votar
 

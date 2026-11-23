@@ -109,6 +109,7 @@
             "A conta vem da autenticação. O voterId assinado deve corresponder ao userId dessa conta.",
             "Um novo voto exige que o curso da evidência institucional vigente corresponda ao curso vinculado ao CA da eleição.",
             "A participação guarda a cédula aceita com a chave pública de assinatura gerada para essa eleição.",
+            "A abertura usa a exigência de cadastro escolhida na criação. Quando o cadastro é obrigatório, a conta prova a posse antes da abertura e a primeira cédula usa a chave cadastrada.",
             "Mesmo submissionId com payload diferente é recusado.",
             "Mesmo voto/operação recupera recibo existente inclusive depois do encerramento, sem alterar o acumulador.",
             "A consulta de recibo aceito exige a conta autenticada e dispensa nova chave ou permanência no curso.",

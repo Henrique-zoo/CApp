@@ -76,7 +76,10 @@ final class FirebaseBearerInterceptor extends Interceptor {
     }
 
     try {
+      final guard = options.extra['firebaseAuthGuard'] as void Function()?;
+      guard?.call();
       final token = await _provideToken();
+      guard?.call();
       if (token == null || token.isEmpty) {
         handler.reject(
           DioException(

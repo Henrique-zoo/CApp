@@ -49,6 +49,9 @@ import '../infrastructure/firebase/firebase_app_check_setup.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../infrastructure/backend/backend_api.dart';
+import '../modules/elections/elections.dart';
+import '../modules/elections/infrastructure/backend/voter_registration_gateway.dart';
+import '../modules/elections/infrastructure/device_voter_keys.dart';
 import '../modules/identity/application/institutional_auth_service.dart';
 import '../modules/identity/identity.dart';
 import '../modules/identity/infrastructure/backend/backend_institutional_identity_gateway.dart';
@@ -78,6 +81,21 @@ final class AppDependencies {
 
   final BackendApi _backendApi;
   final FirebaseAccountAuth _accountAuth;
+
+  /// Caso de uso eleitoral com a sessão atual e os adaptadores do dispositivo.
+  late final VoterRegistrationService voterRegistration =
+      VoterRegistrationService(
+        BackendVoterRegistrationGateway(_backendApi.voterRegistration),
+        DeviceVoterKeys(),
+        () {
+          final session = sessionController.state;
+          if (session is! SessionSignedIn ||
+              session.firebaseUid != _accountAuth.currentUserId) {
+            return null;
+          }
+          return session.user?.id;
+        },
+      );
 
   /// Coordenação exposta à interface pela API pública do módulo.
   ///

@@ -3,7 +3,20 @@
 //! A identidade autenticada é associada à eleição antes do novo aceite. A
 //! verificação confere a evidência pública, e o adaptador de persistência
 //! confirma o voto e suas evidências em uma operação atômica. Uma repetição
-//! recupera o aceite existente.
+//! recupera o aceite existente. As consultas do quadro expõem as evidências
+//! persistidas, inclusive o recibo da conta autenticada.
+
+use std::pin::Pin;
+
+use serde_json::Value;
+use tokio_stream::Stream;
+use uuid::Uuid;
+
+use super::{
+    board::BoardError,
+    error::RegistrationError,
+    registration::{RegistrationStatus, VoterIdentity},
+};
 
 use crate::modules::elections::{
     application::error::{BallotVerificationError, RecordBallotError},
@@ -15,6 +28,29 @@ use crate::modules::elections::{
         },
     },
 };
+
+/// Sequência de fragmentos de uma única exportação JSON do quadro público.
+/// Cada erro indica que a exportação foi interrompida antes de terminar.
+pub type BoardSnapshotStream = Pin<Box<dyn Stream<Item = Result<Vec<u8>, BoardError>> + Send>>;
+
+/// Lê as evidências do quadro publicadas e o recibo da conta autenticada.
+#[async_trait::async_trait]
+pub trait ElectionBoardReader: Send + Sync {
+    /// Inicia uma leitura consistente. Devolve [`BoardError::NotFound`] antes
+    /// de abrir o fluxo quando a eleição não tem quadro publicado.
+    async fn stream_snapshot(&self, election_id: Uuid) -> Result<BoardSnapshotStream, BoardError>;
+
+    /// Obtém o último recibo assinado ou o manifesto quando o quadro está vazio.
+    async fn read_checkpoint(&self, election_id: Uuid) -> Result<Value, BoardError>;
+
+    /// Busca o recibo original da conta autenticada. `Ok(None)` indica que
+    /// não há recibo para essa conta na eleição solicitada.
+    async fn find_receipt(
+        &self,
+        election_id: Uuid,
+        authenticated_account_id: Uuid,
+    ) -> Result<Option<Value>, BoardError>;
+}
 
 /// Verifica a assinatura da cédula antes do aceite.
 #[async_trait::async_trait]
@@ -65,4 +101,35 @@ pub trait BallotStore: Send + Sync {
     /// em outro dispositivo. `Ok(None)` indica que a conta não tem recibo
     /// nessa eleição.
     async fn find_receipt(&self, key: VoteKey) -> Result<Option<Receipt>, RecordBallotError>;
+}
+
+/// Verifica a prova de posse e retorna a chave SPKI em DER.
+pub trait VoterKeyProofVerifier: Send + Sync {
+    /// Recebe os bytes originais para detectar JSON ambíguo antes da verificação.
+    fn verify(
+        &self,
+        proof: &[u8],
+        election_id: Uuid,
+        account_id: Uuid,
+    ) -> Result<Vec<u8>, RegistrationError>;
+}
+
+/// Consulta e persiste o cadastro privado antes da abertura.
+#[async_trait::async_trait]
+pub trait VoterRegistry: Send + Sync {
+    /// Consulta o cadastro ou voto aceito da própria conta.
+    async fn status(
+        &self,
+        election_id: Uuid,
+        account_id: Uuid,
+    ) -> Result<RegistrationStatus, RegistrationError>;
+
+    /// Confere prazo, elegibilidade e chave existente sob lock antes de inserir
+    /// a chave pública já verificada. Só confirma o novo cadastro após o commit.
+    async fn register_verified_key(
+        &self,
+        election_id: Uuid,
+        identity: VoterIdentity,
+        public_key: Vec<u8>,
+    ) -> Result<RegistrationStatus, RegistrationError>;
 }

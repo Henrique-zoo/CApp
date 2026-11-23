@@ -30,6 +30,7 @@ use crate::modules::identity::{
         ports::{
             IdentityTokenVerifier, InstitutionRepository, InstitutionalAffiliation,
             InstitutionalProfile, InstitutionalVerificationRepository, UserRepository,
+            VerifiedIdentity,
         },
     },
     domain::{
@@ -119,15 +120,7 @@ pub async fn restore(
     repositories: &(impl UserRepository + InstitutionRepository + InstitutionalVerificationRepository),
     token: &str,
 ) -> Result<AccountSession, AuthenticationError> {
-    let identity = verifier.verify(token).await?;
-    let user = repositories
-        .get_by_firebase_uid(&identity.firebase_uid)
-        .await?
-        .ok_or(AuthenticationError::AccountNotProvisioned)?;
-
-    if user.status() == UserStatus::Inactive {
-        return Err(AuthenticationError::AccountInactive);
-    }
+    let (user, identity) = authenticate_account(verifier, repositories, token).await?;
 
     let evidence = repositories
         .find_valid_by_firebase_uid(&identity.firebase_uid)
@@ -171,6 +164,27 @@ pub async fn restore(
     };
 
     Ok(AccountSession { user, verification })
+}
+
+/// Resolve a conta CApp a partir do token Firebase. A conta precisa estar
+/// provisionada e disponível. A consulta de evidência acadêmica cabe à
+/// operação que exige vínculo, ao passo que recuperar um recibo exige a conta.
+pub(crate) async fn authenticate_account(
+    verifier: &impl IdentityTokenVerifier,
+    repository: &impl UserRepository,
+    token: &str,
+) -> Result<(User, VerifiedIdentity), AuthenticationError> {
+    let identity = verifier.verify(token).await?;
+    let user = repository
+        .get_by_firebase_uid(&identity.firebase_uid)
+        .await?
+        .ok_or(AuthenticationError::AccountNotProvisioned)?;
+
+    if user.status() == UserStatus::Inactive {
+        return Err(AuthenticationError::AccountInactive);
+    }
+
+    Ok((user, identity))
 }
 
 /// Valida a origem dos dados e persiste a conclusão ou atualização do perfil.

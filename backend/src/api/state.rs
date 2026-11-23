@@ -7,6 +7,7 @@
 
 use crate::{
     infrastructure::database::PgDatabase,
+    modules::elections::infrastructure::PgVoterRegistry,
     modules::identity::infrastructure::{
         firebase::{AppCheckVerifier, FirebaseTokenVerifier},
         microsoft::MicrosoftGraphClient,
@@ -72,6 +73,9 @@ pub struct AppState {
 
     /// Clientes externos compartilhados, sem credenciais de usuários armazenadas.
     pub clients: Clients,
+
+    /// Adaptador do cadastro da chave eleitoral que reutiliza o pool de `pg_database`.
+    pub voter_registry: PgVoterRegistry,
 }
 
 impl AppState {
@@ -127,9 +131,12 @@ impl AppState {
     /// # }
     /// ```
     pub fn new(pg_database: PgDatabase, clients: Clients) -> Self {
+        let voter_registry = PgVoterRegistry::new(pg_database.pool.clone());
+
         Self {
             pg_database,
             clients,
+            voter_registry,
         }
     }
 }

@@ -5,10 +5,11 @@
 //! A implementação serializa aceite e encerramento e só devolve evidências de
 //! aceite depois do commit. Não implementa revisões de calendário da #132.
 
-use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
+
+use super::registration::VoterIdentity;
 
 /// Artefatos assinados e imutáveis que iniciam um quadro.
 ///
@@ -19,18 +20,8 @@ pub struct FrozenBoard {
     pub manifest: Vec<u8>,
     /// Envelope assinado do calendário inicial referenciado pelo manifesto.
     pub calendar_origin: Vec<u8>,
-}
-
-/// Identidade e elegibilidade verificadas pelo caso de uso de votação.
-///
-/// O caso de uso obtém a conta da autenticação e o prazo da evidência
-/// institucional. O repositório compara o prazo com o relógio do banco após
-/// adquirir o lock da eleição.
-pub struct EligibleVoter {
-    /// UUID da conta autenticada, exigido no campo `voterId` de um novo voto.
-    pub account_id: Uuid,
-    /// Limite exclusivo de validade da evidência institucional.
-    pub eligible_until: DateTime<Utc>,
+    /// Exigência de cadastro escolhida na criação e congelada na publicação.
+    pub requires_voter_registration: bool,
 }
 
 /// Registro confirmado e recibo original, preservados na recuperação.
@@ -89,6 +80,12 @@ pub enum BoardError {
     /// Evidência institucional vencida ou contexto inválido.
     #[error("Eleitor sem elegibilidade vigente")]
     NotEligible,
+    /// A eleição exige cadastro anterior à abertura e a conta não possui chave.
+    #[error("Cadastre a chave eleitoral antes da abertura")]
+    RegistrationRequired,
+    /// O voto usa uma chave diferente da cadastrada pela própria conta.
+    #[error("A chave da cédula não corresponde à chave cadastrada")]
+    RegisteredKeyMismatch,
     /// Outra submissão já consumiu a participação da conta.
     #[error("A conta já participou desta eleição")]
     AlreadyParticipated,
@@ -125,11 +122,12 @@ pub trait ElectionBoard: Send + Sync {
     async fn open(&self, board: FrozenBoard) -> Result<BoardSnapshot, BoardError>;
 
     /// Verifica, acumula e confirma um voto ou recupera o mesmo envelope aceito.
-    /// A primeira cédula aceita vincula a chave pública à participação.
+    /// A identidade vem da autenticação. A persistência revalida o vínculo e
+    /// confere a chave do cadastro quando essa política foi escolhida.
     async fn record(
         &self,
         election_id: Uuid,
-        voter: EligibleVoter,
+        voter: VoterIdentity,
         signed_ballot: &[u8],
     ) -> Result<RecordedBallot, BoardError>;
 

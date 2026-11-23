@@ -1,11 +1,11 @@
-//! Distribuição das evidências públicas para o eleitor e as autoridades.
+//! Rotas HTTP do quadro eleitoral e dos recursos privados da própria conta.
 
 use crate::api::state::AppState;
-use axum::{Router, routing::get};
+use axum::{Router, extract::DefaultBodyLimit, routing::get};
 
 pub mod dto;
+mod error;
 pub mod handlers;
-mod own_receipt;
 
 /// Publica o quadro e sua âncora assinada para verificação em outro dispositivo.
 pub fn public_board_routes() -> Router<AppState> {
@@ -17,8 +17,23 @@ pub fn public_board_routes() -> Router<AppState> {
         )
 }
 
-/// Consulta da própria conta; compor sob o middleware App Check das rotas protegidas.
-/// A sessão Firebase é validada no handler, sem exigir elegibilidade atual.
+/// Consulta do recibo da conta autenticada, inclusive após vencer seu vínculo.
+/// O router raiz registra esta rota sob o middleware de App Check.
 pub fn protected_receipt_routes() -> Router<AppState> {
-    Router::new().route("/elections/{id}/receipts/me", get(own_receipt::read))
+    Router::new().route(
+        "/elections/{id}/receipts/me",
+        get(handlers::read_own_receipt),
+    )
+}
+
+/// Permite cadastrar a chave e consultar a participação somente da conta autenticada.
+pub fn protected_registration_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/elections/{id}/registration/me",
+            get(handlers::read_own_registration).put(handlers::register_voter_key),
+        )
+        .layer(DefaultBodyLimit::max(
+            super::crypto_wire::MAX_SIGNED_MESSAGE_BYTES,
+        ))
 }
