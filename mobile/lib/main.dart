@@ -18,7 +18,7 @@
 /// ## Configuração e propriedade
 ///
 /// BACKEND_BASE_URL é recebido por --dart-define. O padrão
-/// http://10.0.2.2:3000 atende ao emulador Android; outros ambientes precisam
+/// https://10.0.2.2:8443 atende ao emulador Android; outros ambientes precisam
 /// informar um endereço alcançável pelo dispositivo.
 /// MSAL_CLIENT_ID e MSAL_ANDROID_REDIRECT_URI também são recebidos por --dart-define
 /// e são obrigatórios na composição Android atual. A URI precisa corresponder
@@ -59,7 +59,7 @@ Future<void> main() async {
       await AppDependencies.create(
           backendBaseUrl: const String.fromEnvironment(
             'BACKEND_BASE_URL',
-            defaultValue: 'http://10.0.2.2:3000',
+            defaultValue: 'https://10.0.2.2:8443',
           ),
           microsoftClientId: const String.fromEnvironment('MSAL_CLIENT_ID'),
           microsoftAndroidRedirectUri: const String.fromEnvironment(

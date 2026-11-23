@@ -3,6 +3,9 @@
 Plataforma digital para Centros Acadêmicos, composta por um aplicativo
 móvel e um backend compartilhado.
 
+Para executar a demonstração eleitoral no Android, siga o
+[roteiro de HTTPS com Caddy](deploy/https/README.md).
+
 O objetivo do CApp é fornecer uma infraestrutura comum para que
 diferentes Centros Acadêmicos possam disponibilizar informações,
 organizar atividades, gerenciar processos internos e melhorar a
