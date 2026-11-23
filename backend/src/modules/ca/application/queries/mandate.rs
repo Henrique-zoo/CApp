@@ -36,23 +36,8 @@ pub async fn get_current_mandate(
     Ok(active_mandate)
 }
 
-/// Lista todos os mandatos associados a um Centro Acadêmico (histórico).
+/// Lista todos os mandatos associados a um Centro Acadêmico ordenados cronologicamente (ativos e passados).
 pub async fn list_mandates(
-    ca_repo: &impl AcademicCenterRepository,
-    mandate_repo: &impl MandateRepository,
-    academic_center_id: Uuid,
-) -> Result<Vec<Mandate>, MandateApplicationError> {
-    get_mandates_history(ca_repo, mandate_repo, academic_center_id).await
-}
-
-/// Consulta o histórico completo de gestões de um Centro Acadêmico ordenado cronologicamente.
-///
-/// # Regras
-///
-/// - Retorna [`MandateApplicationError::AcademicCenterNotFound`] se o CA não existir.
-/// - Retorna a lista de mandatos ordenados do mais recente para o mais antigo.
-/// - Retorna `Ok(vec![])` quando o CA não possuir gestões registradas desde sua adesão.
-pub async fn get_mandates_history(
     ca_repo: &impl AcademicCenterRepository,
     mandate_repo: &impl MandateRepository,
     academic_center_id: Uuid,
@@ -69,6 +54,35 @@ pub async fn get_mandates_history(
         .await?;
 
     Ok(mandates)
+}
+
+/// Consulta o histórico completo de gestões concluídas ou arquivadas de um Centro Acadêmico ordenado cronologicamente,
+/// excluindo o mandato atualmente ativo.
+///
+/// # Regras
+///
+/// - Retorna [`MandateApplicationError::AcademicCenterNotFound`] se o CA não existir.
+/// - Retorna apenas a lista de mandatos não-ativos ordenados do mais recente para o mais antigo.
+/// - Retorna `Ok(vec![])` quando o CA não possuir gestões anteriores concluídas ou arquivadas.
+pub async fn get_mandates_history(
+    ca_repo: &impl AcademicCenterRepository,
+    mandate_repo: &impl MandateRepository,
+    academic_center_id: Uuid,
+) -> Result<Vec<Mandate>, MandateApplicationError> {
+    let ca = ca_repo.find_by_id(academic_center_id).await?;
+    if ca.is_none() {
+        return Err(MandateApplicationError::AcademicCenterNotFound(
+            academic_center_id,
+        ));
+    }
+
+    let mandates = mandate_repo
+        .find_all_by_academic_center_id(academic_center_id)
+        .await?;
+
+    let history: Vec<Mandate> = mandates.into_iter().filter(|m| !m.is_active()).collect();
+
+    Ok(history)
 }
 
 /// Consulta os detalhes de uma gestão específica do Centro Acadêmico pelo seu identificador.
@@ -264,16 +278,23 @@ mod tests {
         .unwrap();
         mandate_repo.save(&m2025).await.unwrap();
 
+        // Histórico de gestões concluídas retorna exclusivamente a gestão encerrada
         let history = get_mandates_history(&ca_repo, &mandate_repo, ca_id)
             .await
             .expect("should query history");
-        assert_eq!(history.len(), 2);
-        // Primeiro o mais recente (2025)
-        assert_eq!(history[0].id(), m2025.id());
-        assert_eq!(history[0].status(), MandateStatus::Active);
-        // Depois o anterior (2024)
-        assert_eq!(history[1].id(), m2024.id());
-        assert_eq!(history[1].status(), MandateStatus::Concluded);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].id(), m2024.id());
+        assert_eq!(history[0].status(), MandateStatus::Concluded);
+
+        // Listagem geral de mandatos retorna todas as gestões (ativas e passadas) ordenadas
+        let all = list_mandates(&ca_repo, &mandate_repo, ca_id)
+            .await
+            .expect("should list all mandates");
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].id(), m2025.id());
+        assert_eq!(all[0].status(), MandateStatus::Active);
+        assert_eq!(all[1].id(), m2024.id());
+        assert_eq!(all[1].status(), MandateStatus::Concluded);
 
         // Consulta detalhes pelo ID
         let detail = get_mandate_by_id(&ca_repo, &mandate_repo, ca_id, m2024.id())
@@ -281,6 +302,51 @@ mod tests {
             .expect("should find by id");
         assert_eq!(detail.id(), m2024.id());
         assert_eq!(detail.title(), Some("Gestão 2024"));
+    }
+
+    #[tokio::test]
+    async fn should_return_empty_history_when_ca_has_only_active_mandate() {
+        let ca_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let now = Utc::now();
+        let ca = AcademicCenter::reconstitute(
+            ca_id,
+            Uuid::new_v4(),
+            Some(user_id),
+            "CA Computação".into(),
+            Some("CACC".into()),
+            "Descrição".into(),
+            AcademicCenterStatus::Active,
+            now,
+            now,
+        )
+        .unwrap();
+
+        let ca_repo = MockCaRepo::default();
+        ca_repo.centers.write().unwrap().insert(ca_id, ca);
+
+        let mandate_repo = MockMandateRepo::default();
+
+        let m_active = Mandate::new(
+            ca_id,
+            user_id,
+            Some("Gestão Vigente"),
+            NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
+        )
+        .unwrap();
+        mandate_repo.save(&m_active).await.unwrap();
+
+        // Histórico de gestões concluídas deve ser vazio
+        let history = get_mandates_history(&ca_repo, &mandate_repo, ca_id)
+            .await
+            .unwrap();
+        assert!(history.is_empty());
+
+        // Mas a listagem geral contém o mandato ativo
+        let all = list_mandates(&ca_repo, &mandate_repo, ca_id).await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id(), m_active.id());
     }
 
     #[tokio::test]

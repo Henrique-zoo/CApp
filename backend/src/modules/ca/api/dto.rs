@@ -61,7 +61,7 @@ pub struct MandateMemberResponse {
     /// Cargo exercido na gestão.
     pub role: String,
     /// Indica se o vínculo do integrante permanece ativo na gestão.
-    pub active: bool,
+    pub is_active: bool,
     /// Instante UTC de início da vinculação.
     pub joined_at: DateTime<Utc>,
     /// Instante UTC de encerramento do vínculo, se aplicável.
@@ -75,7 +75,7 @@ impl From<MandateMember> for MandateMemberResponse {
             user_id: member.user_id(),
             name: member.name().to_string(),
             role: member.role().to_string(),
-            active: member.is_active(),
+            is_active: member.is_active(),
             joined_at: member.joined_at(),
             left_at: member.left_at(),
         }

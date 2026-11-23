@@ -765,7 +765,6 @@ paths:
                   durationInDays: 364
                   members:
                     - id: "018f0000-0000-7000-8000-000000000004"
-                      mandateId: "018f0000-0000-7000-8000-000000000001"
                       userId: "018f0000-0000-7000-8000-000000000003"
                       name: "Maria Silva"
                       role: "Presidente"
@@ -1115,7 +1114,6 @@ paths:
                 $ref: "#/components/schemas/MandateMemberResponse"
               example:
                 id: "018f0000-0000-7000-8000-000000000004"
-                mandateId: "018f0000-0000-7000-8000-000000000001"
                 userId: "018f0000-0000-7000-8000-000000000003"
                 name: "Maria Silva"
                 role: "Presidente"
@@ -1207,7 +1205,6 @@ paths:
                 $ref: "#/components/schemas/MandateMemberResponse"
               example:
                 id: "018f0000-0000-7000-8000-000000000004"
-                mandateId: "018f0000-0000-7000-8000-000000000001"
                 userId: "018f0000-0000-7000-8000-000000000003"
                 name: "Maria Silva"
                 role: "Presidente"
@@ -1681,7 +1678,6 @@ components:
       additionalProperties: false
       required:
         - id
-        - mandateId
         - name
         - role
         - isActive
@@ -1692,11 +1688,6 @@ components:
           format: uuid
           description: Identificador único do membro da gestão.
           example: "018f0000-0000-7000-8000-000000000004"
-        mandateId:
-          type: string
-          format: uuid
-          description: Identificador do mandato ao qual o integrante pertence.
-          example: "018f0000-0000-7000-8000-000000000001"
         userId:
           type: [string, "null"]
           format: uuid
