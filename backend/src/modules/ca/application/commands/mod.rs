@@ -1,4 +1,5 @@
-//! Espaço reservado para comandos do módulo de Centros Acadêmicos.
-//!
-//! Ainda não define operações. Este módulo organizará os casos de uso
-//! que alteram o estado do domínio.
+//! Casos de uso de escrita e modificação de estado de Centros Acadêmicos.
+
+mod configure_initial_mandate;
+
+pub use configure_initial_mandate::*;

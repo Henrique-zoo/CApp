@@ -1,6 +1,6 @@
-//! Camada de persistência prevista para o módulo de Centros Acadêmicos.
+//! Camada de persistência para o módulo de Centros Acadêmicos.
 //!
-//! [`repository`] reserva os adaptadores de acesso aos dados desse domínio.
-//! Ainda não existem consultas ou implementações de repositório.
+//! [`repository`] define os adaptadores PostgreSQL e em memória
+//! para Centros Acadêmicos e mandatos de gestão.
 
 pub mod repository;
