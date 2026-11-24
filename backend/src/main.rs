@@ -26,7 +26,6 @@ use std::{
     env::{self, VarError},
     net::TcpListener,
     sync::Arc,
-    time::Duration,
 };
 
 use anyhow::{Context, ensure};
@@ -75,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
 
     api::logging::init_logging()?;
 
+    let config = backend::config::Config::from_env().context("Configuração inválida")?;
     let (tls_config, tls_public_key) = tls::load_from_env()?;
     let election_signer = load_election_signer(&tls_public_key).await?;
 
@@ -83,20 +83,21 @@ async fn main() -> anyhow::Result<()> {
         VarError::NotUnicode(_) => anyhow::anyhow!("DATABASE_URL contém um valor UTF-8 inválido"),
     })?;
 
-    let http = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(3))
-        .timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
+    let http = config
+        .http
+        .build_client()
         .context("Não foi possível construir o cliente HTTP")?;
 
-    let firebase = FirebaseTokenVerifier::new(
+    let firebase = FirebaseTokenVerifier::with_config(
         env::var("FIREBASE_PROJECT_ID")
             .context("FIREBASE_PROJECT_ID não está definida ou é inválida")?,
         http.clone(),
+        config.http.clone(),
     )?;
 
-    let app_check = AppCheckVerifier::new(
+    let microsoft = MicrosoftGraphClient::with_config(http.clone(), config.http.clone());
+
+    let app_check = AppCheckVerifier::with_config(
         env::var("FIREBASE_PROJECT_NUMBER")
             .context("FIREBASE_PROJECT_NUMBER não está definida ou é inválida")?,
         env::var("FIREBASE_APP_CHECK_APP_IDS")
@@ -105,6 +106,7 @@ async fn main() -> anyhow::Result<()> {
             .map(|id| id.trim().to_owned())
             .collect(),
         http.clone(),
+        config.http.clone(),
     )?;
 
     let pool = PgPoolOptions::new()
@@ -123,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState::new(
         PgDatabase::new(pool),
-        Clients::new(firebase, MicrosoftGraphClient::new(http)),
+        Clients::new(firebase, microsoft),
     );
 
     let listener = TcpListener::bind(HTTPS_ADDRESS)

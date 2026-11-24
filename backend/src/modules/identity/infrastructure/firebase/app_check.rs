@@ -74,7 +74,22 @@ impl AppCheckVerifier {
     /// Configura o projeto numérico e uma lista não vazia de App IDs desse projeto.
     /// Não realiza I/O; erros de configuração impedem a inicialização do servidor.
     pub fn new(project_number: String, app_ids: Vec<String>, http: Client) -> anyhow::Result<Self> {
-        Self::build(project_number, app_ids, http, JWKS_URL.into())
+        Self::with_config(
+            project_number,
+            app_ids,
+            http,
+            crate::config::HttpConfig::default(),
+        )
+    }
+
+    /// Configura o verificador App Check com parâmetros customizados de timeouts e retentativas.
+    pub fn with_config(
+        project_number: String,
+        app_ids: Vec<String>,
+        http: Client,
+        http_config: crate::config::HttpConfig,
+    ) -> anyhow::Result<Self> {
+        Self::build(project_number, app_ids, http, JWKS_URL.into(), http_config)
     }
 
     /// Permite JWKS local exclusivamente em testes e na feature test-support.
@@ -85,7 +100,25 @@ impl AppCheckVerifier {
         http: Client,
         endpoint: String,
     ) -> anyhow::Result<Self> {
-        Self::build(project_number, app_ids, http, endpoint)
+        Self::new_with_endpoint_and_config(
+            project_number,
+            app_ids,
+            http,
+            endpoint,
+            crate::config::HttpConfig::default(),
+        )
+    }
+
+    /// Permite JWKS local com configuração customizada exclusivamente em testes e na feature test-support.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn new_with_endpoint_and_config(
+        project_number: String,
+        app_ids: Vec<String>,
+        http: Client,
+        endpoint: String,
+        http_config: crate::config::HttpConfig,
+    ) -> anyhow::Result<Self> {
+        Self::build(project_number, app_ids, http, endpoint, http_config)
     }
 
     fn build(
@@ -93,6 +126,7 @@ impl AppCheckVerifier {
         app_ids: Vec<String>,
         http: Client,
         endpoint: String,
+        http_config: crate::config::HttpConfig,
     ) -> anyhow::Result<Self> {
         anyhow::ensure!(
             !project_number.starts_with('0')
@@ -130,13 +164,14 @@ impl AppCheckVerifier {
         validation.validate_nbf = true;
 
         Ok(Self {
-            keys: JwksCache::new(
+            keys: JwksCache::with_config(
                 http,
                 endpoint,
                 CachePolicy {
                     fallback_ttl: MAX_CACHE_TTL,
                     maximum_ttl: Some(MAX_CACHE_TTL),
                 },
+                http_config,
             ),
             validation,
             app_ids: Arc::new(app_ids.into_iter().collect()),
