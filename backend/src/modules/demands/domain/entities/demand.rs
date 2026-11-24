@@ -253,7 +253,21 @@ impl DemandForum {
             Self::PhysicalSpace => "physical_space",
         }
     }
+
+    /// Retorna verdadeiro se o fórum for institucional.
+    pub const fn is_institutional(&self) -> bool {
+        matches!(self, Self::Institutional)
+    }
+
+    /// Retorna verdadeiro se o fórum for o do espaço físico do CA.
+    pub const fn is_physical_space(&self) -> bool {
+        matches!(self, Self::PhysicalSpace)
+    }
 }
+
+/// Alias semântico para o tipo de fórum de uma demanda.
+pub type ForumType = DemandForum;
+
 impl fmt::Display for DemandForum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
