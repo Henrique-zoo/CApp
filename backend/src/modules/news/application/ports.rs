@@ -79,6 +79,21 @@ pub trait NewsRepositoryPort: Send + Sync {
         published_at: Option<DateTime<Utc>>,
         archived_at: Option<DateTime<Utc>>,
     ) -> Result<NewsArticle, NewsRepositoryError>;
+
+    /// Lista os artigos com status publicado pertencentes a um Centro Acadêmico específico,
+    /// ordenados da data de publicação mais recente para a mais antiga (`published_at DESC`).
+    async fn find_published_by_ca(
+        &self,
+        ca_id: Uuid,
+    ) -> Result<Vec<NewsArticle>, NewsRepositoryError>;
+
+    /// Lista os artigos publicados de um Centro Acadêmico, delegando para [`NewsRepositoryPort::find_published_by_ca`].
+    async fn list_published_by_ca(
+        &self,
+        ca_id: Uuid,
+    ) -> Result<Vec<NewsArticle>, NewsRepositoryError> {
+        self.find_published_by_ca(ca_id).await
+    }
 }
 
 /// Contrato para validações de autorização institucional nos Centros Acadêmicos.

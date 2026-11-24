@@ -100,6 +100,27 @@ impl NewsRepositoryPort for InMemoryNewsRepository {
 
         Ok(article.clone())
     }
+
+    async fn find_published_by_ca(
+        &self,
+        ca_id: Uuid,
+    ) -> Result<Vec<NewsArticle>, NewsRepositoryError> {
+        let guard = self.storage.read().await;
+        let mut articles: Vec<NewsArticle> = guard
+            .values()
+            .filter(|a| a.ca_id == ca_id && a.status == NewsStatus::Published)
+            .cloned()
+            .collect();
+
+        articles.sort_by(|a, b| {
+            b.published_at
+                .cmp(&a.published_at)
+                .then_with(|| b.created_at.cmp(&a.created_at))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+
+        Ok(articles)
+    }
 }
 
 /// Adaptador de persistência para PostgreSQL via SQLx.
@@ -266,6 +287,50 @@ impl NewsRepositoryPort for PgNewsRepository {
                 None => Err(NewsRepositoryError::NotFound(id)),
             }
         }
+    }
+
+    async fn find_published_by_ca(
+        &self,
+        ca_id: Uuid,
+    ) -> Result<Vec<NewsArticle>, NewsRepositoryError> {
+        let status_str = NewsStatus::Published.as_str();
+
+        let rows = sqlx::query(
+            r#"
+            SELECT id, ca_id, author_id, title, body, status, revision, created_at, published_at, archived_at
+            FROM news_article
+            WHERE ca_id = $1 AND status = $2
+            ORDER BY published_at DESC NULLS LAST, created_at DESC
+            "#,
+        )
+        .bind(ca_id)
+        .bind(status_str)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| NewsRepositoryError::DatabaseError(e.to_string()))?;
+
+        let mut articles = Vec::with_capacity(rows.len());
+        for r in rows {
+            let status_raw: String = r.get("status");
+            let status: NewsStatus = status_raw.parse().map_err(|e| {
+                NewsRepositoryError::DatabaseError(format!("Status inválido no banco: {e}"))
+            })?;
+
+            articles.push(NewsArticle::reconstruct(
+                r.get("id"),
+                r.get("ca_id"),
+                r.get("author_id"),
+                r.get("title"),
+                r.get("body"),
+                status,
+                r.get("revision"),
+                r.get("created_at"),
+                r.get("published_at"),
+                r.get("archived_at"),
+            ));
+        }
+
+        Ok(articles)
     }
 }
 
@@ -482,5 +547,76 @@ mod tests {
             NewsRepositoryError::NotFound(err_id) => assert_eq!(err_id, id_inexistente),
             outro => panic!("Esperava NotFound, recebeu: {outro:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn deve_filtrar_e_ordenar_noticias_publicadas_por_published_at_desc() {
+        let repo = InMemoryNewsRepository::new();
+        let ca_id = Uuid::new_v4();
+        let ca_outro = Uuid::new_v4();
+        let author_id = Uuid::new_v4();
+        let now = Utc::now();
+
+        let n1 = NewsArticle::reconstruct(
+            Uuid::new_v4(),
+            ca_id,
+            author_id,
+            "Antigo".to_string(),
+            "Corpo".to_string(),
+            NewsStatus::Published,
+            1,
+            now - chrono::Duration::days(10),
+            Some(now - chrono::Duration::days(5)),
+            None,
+        );
+
+        let n2 = NewsArticle::reconstruct(
+            Uuid::new_v4(),
+            ca_id,
+            author_id,
+            "Recente".to_string(),
+            "Corpo".to_string(),
+            NewsStatus::Published,
+            1,
+            now - chrono::Duration::days(5),
+            Some(now - chrono::Duration::days(1)),
+            None,
+        );
+
+        let n_outro_ca = NewsArticle::reconstruct(
+            Uuid::new_v4(),
+            ca_outro,
+            author_id,
+            "Outro CA".to_string(),
+            "Corpo".to_string(),
+            NewsStatus::Published,
+            1,
+            now,
+            Some(now),
+            None,
+        );
+
+        let n_draft = NewsArticle::reconstruct(
+            Uuid::new_v4(),
+            ca_id,
+            author_id,
+            "Draft".to_string(),
+            "Corpo".to_string(),
+            NewsStatus::Draft,
+            1,
+            now,
+            None,
+            None,
+        );
+
+        repo.save(&n1).await.unwrap();
+        repo.save(&n2).await.unwrap();
+        repo.save(&n_outro_ca).await.unwrap();
+        repo.save(&n_draft).await.unwrap();
+
+        let resultado = repo.find_published_by_ca(ca_id).await.unwrap();
+        assert_eq!(resultado.len(), 2);
+        assert_eq!(resultado[0].title, "Recente");
+        assert_eq!(resultado[1].title, "Antigo");
     }
 }

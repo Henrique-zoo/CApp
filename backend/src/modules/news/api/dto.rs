@@ -30,6 +30,13 @@ pub struct SubmitForReviewRequestDto {
     pub actor_id: Option<Uuid>,
 }
 
+/// Parâmetros de consulta via query string para a listagem pública de notícias: `GET /news`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ListNewsQueryParams {
+    /// Identificador do Centro Acadêmico ativo.
+    pub ca_id: Option<Uuid>,
+}
+
 /// Representação pública de uma notícia no mural do Centro Acadêmico.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewsArticleResponseDto {

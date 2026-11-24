@@ -18,7 +18,10 @@ pub use commands::{
 pub use ports::{
     NewsAuthorizationError, NewsAuthorizationPort, NewsRepositoryError, NewsRepositoryPort,
 };
-pub use queries::{GetNewsArticleQuery, GetNewsArticleUseCase};
+pub use queries::{
+    GetNewsArticleQuery, GetNewsArticleUseCase, GetPublishedNewsDetailQuery,
+    GetPublishedNewsDetailUseCase, ListPublishedNewsByCaQuery, ListPublishedNewsByCaUseCase,
+};
 pub use services::NewsApplicationService;
 
 use crate::modules::news::domain::NewsDomainError;
