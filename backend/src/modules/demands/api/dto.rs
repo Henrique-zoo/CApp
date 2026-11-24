@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::modules::demands::domain::entities::Demand;
+use crate::modules::demands::domain::entities::{Demand, DemandComment};
 
 /// Payload de requisição para criação de uma nova demanda.
 #[derive(Debug, Clone, Deserialize)]
@@ -219,5 +219,59 @@ impl From<&Demand> for DemandResponse {
 impl From<Demand> for DemandResponse {
     fn from(demand: Demand) -> Self {
         Self::from(&demand)
+    }
+}
+
+/// Payload de requisição para publicação de um comentário em uma demanda.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateDemandCommentRequest {
+    /// Conteúdo textual do comentário ou resposta.
+    pub content: String,
+
+    /// Identificador opcional do autor no corpo da requisição.
+    #[serde(default, alias = "author_id")]
+    pub author_id: Option<Uuid>,
+}
+
+/// Representação serializada pública de um comentário ou interação na demanda.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DemandCommentResponse {
+    /// Identificador único do comentário.
+    pub id: Uuid,
+
+    /// Identificador da demanda associada.
+    pub demand_id: Uuid,
+
+    /// Identificador do usuário autor do comentário.
+    pub author_id: Uuid,
+
+    /// Papel do autor na interação (`student` ou `ca_management`).
+    pub author_role: String,
+
+    /// Conteúdo textual do comentário.
+    pub content: String,
+
+    /// Instante de publicação em UTC.
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<&DemandComment> for DemandCommentResponse {
+    fn from(comment: &DemandComment) -> Self {
+        Self {
+            id: comment.id(),
+            demand_id: comment.demand_id(),
+            author_id: comment.author_id(),
+            author_role: comment.author_role().as_str().to_string(),
+            content: comment.content().to_string(),
+            created_at: comment.created_at(),
+        }
+    }
+}
+
+impl From<DemandComment> for DemandCommentResponse {
+    fn from(comment: DemandComment) -> Self {
+        Self::from(&comment)
     }
 }

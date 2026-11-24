@@ -4,13 +4,16 @@
 //! integridade do fórum institucional vs espaço físico, restrições CHECK e histórico de status.
 
 use crate::support::TestDatabase;
-use backend::modules::demands::domain::entities::{
-    Demand, DemandForum, DemandStatus, DemandStatusHistoryEntry,
-};
+use backend::modules::demands::domain::entities::Demand;
+use backend::modules::demands::domain::entities::DemandForum;
+use backend::modules::demands::domain::entities::DemandStatus;
+use backend::modules::demands::domain::entities::DemandStatusHistoryEntry;
 use chrono::Utc;
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
+use sqlx::Row;
 use uuid::Uuid;
-
+use backend::modules::demands::domain::entities::DemandComment;
+use backend::modules::demands::domain::entities::DemandCommentAuthorRole;
 /// Cria uma instituição no banco de teste.
 async fn create_test_institution(pool: &PgPool, name: &str) -> Uuid {
     let id = Uuid::new_v4();
@@ -31,7 +34,6 @@ async fn create_test_institution(pool: &PgPool, name: &str) -> Uuid {
 
     id
 }
-
 /// Cria um Centro Acadêmico no banco de teste.
 async fn create_test_ca(pool: &PgPool, institution_id: Uuid, name: &str, acronym: &str) -> Uuid {
     let id = Uuid::new_v4();
@@ -50,7 +52,6 @@ async fn create_test_ca(pool: &PgPool, institution_id: Uuid, name: &str, acronym
 
     id
 }
-
 /// Cria um usuário no banco de teste.
 async fn create_test_user(pool: &PgPool, firebase_uid: &str) -> Uuid {
     let id = Uuid::new_v4();
@@ -64,7 +65,6 @@ async fn create_test_user(pool: &PgPool, firebase_uid: &str) -> Uuid {
 
     id
 }
-
 #[tokio::test]
 async fn should_persist_and_retrieve_physical_space_demand_and_reconstitute() {
     let db = TestDatabase::new().await;
@@ -192,7 +192,6 @@ async fn should_persist_and_retrieve_physical_space_demand_and_reconstitute() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_persist_and_retrieve_institutional_demand_with_course_and_forwarding() {
     let db = TestDatabase::new().await;
@@ -283,7 +282,6 @@ async fn should_persist_and_retrieve_institutional_demand_with_course_and_forwar
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_enforce_foreign_key_constraints_for_academic_center_and_author() {
     let db = TestDatabase::new().await;
@@ -354,7 +352,6 @@ async fn should_enforce_foreign_key_constraints_for_academic_center_and_author()
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_enforce_database_check_constraints_for_demand() {
     let db = TestDatabase::new().await;
@@ -452,7 +449,6 @@ async fn should_enforce_database_check_constraints_for_demand() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_enforce_status_history_cascade_and_constraints() {
     let db = TestDatabase::new().await;
@@ -537,7 +533,6 @@ async fn should_enforce_status_history_cascade_and_constraints() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_create_demand_and_initial_history_atomically_using_postgres_repository() {
     use backend::modules::demands::{
@@ -619,7 +614,6 @@ async fn should_create_demand_and_initial_history_atomically_using_postgres_repo
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_return_none_when_demand_not_found_in_postgres_repository() {
     use backend::modules::demands::{
@@ -639,7 +633,6 @@ async fn should_return_none_when_demand_not_found_in_postgres_repository() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_list_and_filter_demands_with_ca_isolation_in_postgres_repository() {
     use backend::modules::demands::{
@@ -848,7 +841,6 @@ async fn should_list_and_filter_demands_with_ca_isolation_in_postgres_repository
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_update_demand_status_and_persist_history_entry_atomically() {
     use backend::modules::demands::{
@@ -970,6 +962,230 @@ async fn should_update_demand_status_and_persist_history_entry_atomically() {
     );
     assert_eq!(updated_2.status_history()[2].changed_by_id(), manager_id);
     assert_eq!(updated_2.status_history()[2].comment(), Some(opinion_2));
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_enforce_comment_database_constraints_and_foreign_keys() {
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "Universidade Comentários").await;
+    let ca_id = create_test_ca(&db.pool, institution_id, "CA Comentários", "CACOM").await;
+    let author_id = create_test_user(&db.pool, "user-comment-cst").await;
+
+    let demand_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO demand (id, academic_center_id, author_id, forum, description) \
+         VALUES ($1, $2, $3, 'physical_space', 'Demanda para teste de comentários')",
+    )
+    .bind(demand_id)
+    .bind(ca_id)
+    .bind(author_id)
+    .execute(&db.pool)
+    .await
+    .expect("should insert demand");
+
+    // 1. Demanda inexistente (FK)
+    let non_existent_demand = Uuid::new_v4();
+    let orphan_demand_res = sqlx::query(
+        "INSERT INTO demand_comment (demand_id, author_id, author_role, content) \
+         VALUES ($1, $2, 'student', 'Conteúdo válido')",
+    )
+    .bind(non_existent_demand)
+    .bind(author_id)
+    .execute(&db.pool)
+    .await;
+    assert!(
+        orphan_demand_res.is_err(),
+        "deve rejeitar comentário para demanda inexistente (FK)"
+    );
+
+    // 2. Autor inexistente (FK)
+    let non_existent_author = Uuid::new_v4();
+    let orphan_author_res = sqlx::query(
+        "INSERT INTO demand_comment (demand_id, author_id, author_role, content) \
+         VALUES ($1, $2, 'student', 'Conteúdo válido')",
+    )
+    .bind(demand_id)
+    .bind(non_existent_author)
+    .execute(&db.pool)
+    .await;
+    assert!(
+        orphan_author_res.is_err(),
+        "deve rejeitar comentário com autor inexistente (FK)"
+    );
+
+    // 3. Papel inválido (CHECK)
+    let invalid_role_res = sqlx::query(
+        "INSERT INTO demand_comment (demand_id, author_id, author_role, content) \
+         VALUES ($1, $2, 'role_invalido', 'Conteúdo válido')",
+    )
+    .bind(demand_id)
+    .bind(author_id)
+    .execute(&db.pool)
+    .await;
+    assert!(
+        invalid_role_res.is_err(),
+        "deve rejeitar comentário com papel inválido (CHECK)"
+    );
+
+    // 4. Conteúdo vazio ou só espaços (CHECK)
+    let empty_content_res = sqlx::query(
+        "INSERT INTO demand_comment (demand_id, author_id, author_role, content) \
+         VALUES ($1, $2, 'student', '   ')",
+    )
+    .bind(demand_id)
+    .bind(author_id)
+    .execute(&db.pool)
+    .await;
+    assert!(
+        empty_content_res.is_err(),
+        "deve rejeitar comentário com conteúdo em branco (CHECK)"
+    );
+
+    // 5. Conteúdo excedendo 2000 caracteres (CHECK)
+    let long_content = "a".repeat(2001);
+    let long_content_res = sqlx::query(
+        "INSERT INTO demand_comment (demand_id, author_id, author_role, content) \
+         VALUES ($1, $2, 'student', $3)",
+    )
+    .bind(demand_id)
+    .bind(author_id)
+    .bind(&long_content)
+    .execute(&db.pool)
+    .await;
+    assert!(
+        long_content_res.is_err(),
+        "deve rejeitar comentário excedendo 2000 caracteres (CHECK)"
+    );
+
+    // 6. Inserção válida
+    let comment_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO demand_comment (id, demand_id, author_id, author_role, content) \
+         VALUES ($1, $2, $3, 'student', 'Primeiro comentário')",
+    )
+    .bind(comment_id)
+    .bind(demand_id)
+    .bind(author_id)
+    .execute(&db.pool)
+    .await
+    .expect("deve inserir comentário válido");
+
+    // 7. Tentativa de deletar autor do comentário falha (ON DELETE RESTRICT)
+    let delete_author_res = sqlx::query("DELETE FROM app_user WHERE id = $1")
+        .bind(author_id)
+        .execute(&db.pool)
+        .await;
+    assert!(
+        delete_author_res.is_err(),
+        "deve impedir exclusão de usuário com comentários vinculados (RESTRICT)"
+    );
+
+    // 8. Ao deletar a demanda, comentários são removidos em cascata (ON DELETE CASCADE)
+    sqlx::query("DELETE FROM demand WHERE id = $1")
+        .bind(demand_id)
+        .execute(&db.pool)
+        .await
+        .expect("deve excluir demanda");
+
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM demand_comment WHERE demand_id = $1")
+        .bind(demand_id)
+        .fetch_one(&db.pool)
+        .await
+        .expect("should count comments");
+    assert_eq!(count, 0, "comentários devem ter sido removidos em cascata");
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_persist_and_list_comments_chronologically_in_postgres_repository() {
+    use backend::modules::demands::{
+        application::ports::DemandCommentRepository,
+        infrastructure::PostgresDemandCommentRepository,
+    };
+
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "Universidade de Brasília").await;
+    let ca_id = create_test_ca(
+        &db.pool,
+        institution_id,
+        "Centro Acadêmico de Redes",
+        "CAER",
+    )
+    .await;
+    let author_id = create_test_user(&db.pool, "author-chron-1").await;
+    let manager_id = create_test_user(&db.pool, "manager-chron-1").await;
+
+    let demand_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO demand (id, academic_center_id, author_id, forum, description) \
+         VALUES ($1, $2, $3, 'institutional', 'Demanda para linha do tempo')",
+    )
+    .bind(demand_id)
+    .bind(ca_id)
+    .bind(author_id)
+    .execute(&db.pool)
+    .await
+    .expect("should insert demand");
+
+    let repo = PostgresDemandCommentRepository::new(db.pool.clone());
+    let base_time = Utc::now();
+
+    let c1 = DemandComment::new(
+        Uuid::new_v4(),
+        demand_id,
+        author_id,
+        DemandCommentAuthorRole::Student,
+        "Primeiro comentário do estudante".to_string(),
+        base_time,
+    )
+    .unwrap();
+
+    let c2 = DemandComment::new(
+        Uuid::new_v4(),
+        demand_id,
+        manager_id,
+        DemandCommentAuthorRole::CaManagement,
+        "Resposta oficial da gestão".to_string(),
+        base_time + chrono::Duration::minutes(5),
+    )
+    .unwrap();
+
+    let c3 = DemandComment::new(
+        Uuid::new_v4(),
+        demand_id,
+        author_id,
+        DemandCommentAuthorRole::Student,
+        "Réplica do estudante".to_string(),
+        base_time + chrono::Duration::minutes(15),
+    )
+    .unwrap();
+
+    // Insere fora de ordem
+    repo.create(&c2).await.expect("c2 inserido");
+    repo.create(&c3).await.expect("c3 inserido");
+    repo.create(&c1).await.expect("c1 inserido");
+
+    let retrieved = repo
+        .list_by_demand_id(demand_id)
+        .await
+        .expect("deve recuperar comentários");
+
+    assert_eq!(retrieved.len(), 3);
+    assert_eq!(retrieved[0].id(), c1.id());
+    assert_eq!(retrieved[0].author_role(), DemandCommentAuthorRole::Student);
+    assert_eq!(retrieved[0].content(), "Primeiro comentário do estudante");
+
+    assert_eq!(retrieved[1].id(), c2.id());
+    assert_eq!(
+        retrieved[1].author_role(),
+        DemandCommentAuthorRole::CaManagement
+    );
+    assert_eq!(retrieved[1].content(), "Resposta oficial da gestão");
+
+    assert_eq!(retrieved[2].id(), c3.id());
+    assert_eq!(retrieved[2].author_role(), DemandCommentAuthorRole::Student);
+    assert_eq!(retrieved[2].content(), "Réplica do estudante");
 
     db.close().await;
 }

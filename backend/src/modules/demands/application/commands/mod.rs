@@ -2,6 +2,7 @@
 
 mod create_demand;
 mod update_demand_status;
-
 pub use create_demand::*;
 pub use update_demand_status::*;
+pub use post_comment::*;
+mod post_comment;

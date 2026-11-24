@@ -15,9 +15,15 @@ use uuid::Uuid;
 use crate::modules::demands::{
     application::{
         error::{AffiliationError, DemandRepositoryError},
-        ports::{AcademicAffiliation, AcademicAffiliationPort, DemandFilter, DemandRepository},
+        ports::{
+            AcademicAffiliation, AcademicAffiliationPort, DemandCommentRepository, DemandFilter,
+            DemandRepository,
+        },
     },
-    domain::entities::{Demand, DemandForum, DemandStatus, DemandStatusHistoryEntry},
+    domain::entities::{
+        Demand, DemandComment, DemandCommentAuthorRole, DemandForum, DemandStatus,
+        DemandStatusHistoryEntry,
+    },
 };
 
 /// Estrutura de linha dedicada para mapeamento relacional da tabela `demand`.
@@ -46,6 +52,79 @@ struct DemandStatusHistoryRow {
     changed_by_id: Uuid,
     comment: Option<String>,
     created_at: DateTime<Utc>,
+}
+
+/// Estrutura de linha dedicada para mapeamento relacional da tabela `demand_comment`.
+#[derive(Debug, sqlx::FromRow)]
+struct DemandCommentRow {
+    id: Uuid,
+    demand_id: Uuid,
+    author_id: Uuid,
+    author_role: String,
+    content: String,
+    created_at: DateTime<Utc>,
+}
+
+/// Repositório de comentários de demanda em memória para testes unitários.
+#[derive(Debug, Clone, Default)]
+pub struct InMemoryDemandCommentRepository {
+    comments: Arc<RwLock<Vec<DemandComment>>>,
+}
+
+impl InMemoryDemandCommentRepository {
+    /// Cria uma nova instância vazia do repositório de comentários em memória.
+    pub fn new() -> Self {
+        Self {
+            comments: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    /// Retorna todos os comentários armazenados em memória.
+    pub fn all(&self) -> Vec<DemandComment> {
+        let guard = self.comments.read().unwrap();
+        guard.clone()
+    }
+
+    /// Quantidade de comentários armazenados.
+    pub fn count(&self) -> usize {
+        let guard = self.comments.read().unwrap();
+        guard.len()
+    }
+
+    /// Limpa o repositório em memória.
+    pub fn clear(&self) {
+        let mut guard = self.comments.write().unwrap();
+        guard.clear();
+    }
+}
+
+#[async_trait::async_trait]
+impl DemandCommentRepository for InMemoryDemandCommentRepository {
+    async fn create(&self, comment: &DemandComment) -> Result<(), DemandRepositoryError> {
+        let mut guard = self.comments.write().unwrap();
+        guard.push(comment.clone());
+        Ok(())
+    }
+
+    async fn list_by_demand_id(
+        &self,
+        demand_id: Uuid,
+    ) -> Result<Vec<DemandComment>, DemandRepositoryError> {
+        let guard = self.comments.read().unwrap();
+        let mut list: Vec<DemandComment> = guard
+            .iter()
+            .filter(|c| c.demand_id() == demand_id)
+            .cloned()
+            .collect();
+
+        list.sort_by(|a, b| {
+            a.created_at()
+                .cmp(&b.created_at())
+                .then_with(|| a.id().cmp(&b.id()))
+        });
+
+        Ok(list)
+    }
 }
 
 /// Repositório de demandas em memória para testes unitários determinísticos.
@@ -590,5 +669,99 @@ impl AcademicAffiliationPort for PostgresDemandRepository {
             ca_represented_courses: represented_courses,
             is_ca_manager,
         })
+    }
+}
+
+/// Implementação do repositório de comentários de demanda sobre o PostgreSQL.
+#[derive(Debug, Clone)]
+pub struct PostgresDemandCommentRepository {
+    pool: PgPool,
+}
+
+impl PostgresDemandCommentRepository {
+    /// Cria um novo repositório de comentários com o pool PostgreSQL fornecido.
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// Retorna uma referência ao pool de conexões PostgreSQL subjacente.
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+}
+
+#[async_trait::async_trait]
+impl DemandCommentRepository for PostgresDemandCommentRepository {
+    async fn create(&self, comment: &DemandComment) -> Result<(), DemandRepositoryError> {
+        sqlx::query(
+            "INSERT INTO demand_comment (
+                id, demand_id, author_id, author_role, content, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(comment.id())
+        .bind(comment.demand_id())
+        .bind(comment.author_id())
+        .bind(comment.author_role().as_str())
+        .bind(comment.content())
+        .bind(comment.created_at())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DemandRepositoryError::Internal(e.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn list_by_demand_id(
+        &self,
+        demand_id: Uuid,
+    ) -> Result<Vec<DemandComment>, DemandRepositoryError> {
+        let rows = sqlx::query_as::<_, DemandCommentRow>(
+            "SELECT id, demand_id, author_id, author_role, content, created_at
+             FROM demand_comment
+             WHERE demand_id = $1
+             ORDER BY created_at ASC, id ASC",
+        )
+        .bind(demand_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DemandRepositoryError::Internal(e.to_string()))?;
+
+        let mut comments = Vec::with_capacity(rows.len());
+        for row in rows {
+            let author_role: DemandCommentAuthorRole = row
+                .author_role
+                .parse()
+                .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
+
+            let comment = DemandComment::new(
+                row.id,
+                row.demand_id,
+                row.author_id,
+                author_role,
+                row.content,
+                row.created_at,
+            )
+            .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
+
+            comments.push(comment);
+        }
+
+        Ok(comments)
+    }
+}
+
+#[async_trait::async_trait]
+impl DemandCommentRepository for PostgresDemandRepository {
+    async fn create(&self, comment: &DemandComment) -> Result<(), DemandRepositoryError> {
+        let repo = PostgresDemandCommentRepository::new(self.pool.clone());
+        repo.create(comment).await
+    }
+
+    async fn list_by_demand_id(
+        &self,
+        demand_id: Uuid,
+    ) -> Result<Vec<DemandComment>, DemandRepositoryError> {
+        let repo = PostgresDemandCommentRepository::new(self.pool.clone());
+        repo.list_by_demand_id(demand_id).await
     }
 }

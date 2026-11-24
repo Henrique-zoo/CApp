@@ -152,3 +152,29 @@ impl crate::modules::demands::application::ports::AcademicAffiliationPort for Pg
         repo.get_affiliation(author_id, academic_center_id).await
     }
 }
+
+#[async_trait::async_trait]
+impl crate::modules::demands::application::ports::DemandCommentRepository for PgDatabase {
+    async fn create(
+        &self,
+        comment: &crate::modules::demands::domain::entities::DemandComment,
+    ) -> Result<(), crate::modules::demands::application::error::DemandRepositoryError> {
+        let repo = crate::modules::demands::infrastructure::PostgresDemandCommentRepository::new(
+            self.pool.clone(),
+        );
+        repo.create(comment).await
+    }
+
+    async fn list_by_demand_id(
+        &self,
+        demand_id: uuid::Uuid,
+    ) -> Result<
+        Vec<crate::modules::demands::domain::entities::DemandComment>,
+        crate::modules::demands::application::error::DemandRepositoryError,
+    > {
+        let repo = crate::modules::demands::infrastructure::PostgresDemandCommentRepository::new(
+            self.pool.clone(),
+        );
+        repo.list_by_demand_id(demand_id).await
+    }
+}

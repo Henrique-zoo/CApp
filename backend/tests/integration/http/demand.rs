@@ -4,40 +4,42 @@
 //! validações de autenticação e regras de negócio de pertencimento ao CA/curso.
 
 use crate::support::TestDatabase;
-use axum::{
-    Router,
-    body::{Body, to_bytes},
-    http::{Request, StatusCode},
-};
-use backend::{
-    api::state::AppState, infrastructure::database::PgDatabase,
-    test_support::local_identity_clients,
-};
+use axum::Router;
+use axum::body::Body;
+use axum::body::to_bytes;
+use axum::http::Request;
+use axum::http::StatusCode;
+use backend::api::state::AppState;
+use backend::infrastructure::database::PgDatabase;
+use backend::test_support::local_identity_clients;
 use chrono::Utc;
-use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use serde_json::{Value, json};
-use sqlx::{PgPool, Row};
+use jsonwebtoken::Algorithm;
+use jsonwebtoken::EncodingKey;
+use jsonwebtoken::Header;
+use jsonwebtoken::encode;
+use serde_json::Value;
+use serde_json::json;
+use sqlx::PgPool;
+use sqlx::Row;
 use tower::ServiceExt;
 use uuid::Uuid;
-use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
-
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::path;
 const PROJECT: &str = "http-demand-tests";
-
 const KEY: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/jwt/test-only-rsa-private.pem"
 ));
-
 const JWKS: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/jwt/jwks.json"
 ));
-
 /// Gera token local RS256 com identidade Microsoft vinculada, sem Firebase real.
 fn token(uid: &str, object: Uuid) -> String {
     token_with_email(uid, object, "241098765@aluno.unb.br")
 }
-
 fn token_with_email(uid: &str, object: Uuid, email: &str) -> String {
     let now = Utc::now().timestamp();
     let mut header = Header::new(Algorithm::RS256);
@@ -64,7 +66,6 @@ fn token_with_email(uid: &str, object: Uuid, email: &str) -> String {
     )
     .unwrap()
 }
-
 /// Envia uma requisição em memória e interpreta seu corpo e status code.
 async fn request(
     app: &Router,
@@ -98,7 +99,6 @@ async fn request(
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),
     )
 }
-
 /// Envia uma requisição GET em memória e interpreta seu corpo e status code.
 async fn get_request(app: &Router, path: &str, token: Option<&str>) -> (StatusCode, Value) {
     let builder = Request::builder().uri(path).method("GET");
@@ -119,7 +119,6 @@ async fn get_request(app: &Router, path: &str, token: Option<&str>) -> (StatusCo
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),
     )
 }
-
 /// Envia uma requisição PATCH em memória e interpreta seu corpo e status code.
 async fn patch_request(
     app: &Router,
@@ -153,7 +152,6 @@ async fn patch_request(
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),
     )
 }
-
 /// Helper para configurar o ambiente de banco e mock JWKS.
 async fn setup_app(db: &TestDatabase) -> (Router, MockServer) {
     let jwks = MockServer::start().await;
@@ -186,7 +184,6 @@ async fn setup_app(db: &TestDatabase) -> (Router, MockServer) {
     let app = backend::modules::demands::api::router().with_state(state);
     (app, jwks)
 }
-
 /// Cria instituição, Centro Acadêmico, usuário e verificação institucional.
 #[allow(clippy::too_many_arguments)]
 async fn create_test_context(
@@ -264,7 +261,6 @@ async fn create_test_context(
 
     (institution_id, ca_id, user_id)
 }
-
 /// Cria e vincula um estudante adicional com verificação institucional válida à mesma instituição.
 async fn create_test_student(
     pool: &PgPool,
@@ -318,7 +314,6 @@ async fn create_test_student(
 
     user_id
 }
-
 #[tokio::test]
 async fn should_create_physical_space_demand_successfully() {
     let db = TestDatabase::new().await;
@@ -401,7 +396,6 @@ async fn should_create_physical_space_demand_successfully() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_create_institutional_demand_successfully_for_enrolled_student() {
     let db = TestDatabase::new().await;
@@ -449,7 +443,6 @@ async fn should_create_institutional_demand_successfully_for_enrolled_student() 
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_create_institutional_demand_successfully_for_ca_manager_even_if_different_course() {
     let db = TestDatabase::new().await;
@@ -494,7 +487,6 @@ async fn should_create_institutional_demand_successfully_for_ca_manager_even_if_
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_unauthenticated_request_with_401() {
     let db = TestDatabase::new().await;
@@ -515,7 +507,6 @@ async fn should_reject_unauthenticated_request_with_401() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_demand_for_nonexistent_ca_with_404() {
     let db = TestDatabase::new().await;
@@ -552,7 +543,6 @@ async fn should_reject_demand_for_nonexistent_ca_with_404() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_institutional_demand_when_student_not_in_course_or_management_with_403() {
     let db = TestDatabase::new().await;
@@ -591,7 +581,6 @@ async fn should_reject_institutional_demand_when_student_not_in_course_or_manage
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_physical_space_demand_with_course_with_422() {
     let db = TestDatabase::new().await;
@@ -632,7 +621,6 @@ async fn should_reject_physical_space_demand_with_course_with_422() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_institutional_demand_without_course_with_422() {
     let db = TestDatabase::new().await;
@@ -670,7 +658,6 @@ async fn should_reject_institutional_demand_without_course_with_422() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_demand_with_empty_description_with_422() {
     let db = TestDatabase::new().await;
@@ -707,7 +694,6 @@ async fn should_reject_demand_with_empty_description_with_422() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_list_physical_space_demands_for_student_of_another_course() {
     let db = TestDatabase::new().await;
@@ -766,7 +752,6 @@ async fn should_list_physical_space_demands_for_student_of_another_course() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_filter_own_demands_with_mine_param() {
     let db = TestDatabase::new().await;
@@ -849,7 +834,6 @@ async fn should_filter_own_demands_with_mine_param() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_filter_demands_by_forum_and_status() {
     let db = TestDatabase::new().await;
@@ -930,7 +914,6 @@ async fn should_filter_demands_by_forum_and_status() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_isolate_demands_between_different_academic_centers() {
     let db = TestDatabase::new().await;
@@ -1010,7 +993,6 @@ async fn should_isolate_demands_between_different_academic_centers() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_return_empty_list_when_no_demands_exist_in_ca() {
     let db = TestDatabase::new().await;
@@ -1041,7 +1023,6 @@ async fn should_return_empty_list_when_no_demands_exist_in_ca() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_listing_unauthenticated_request_with_401() {
     let db = TestDatabase::new().await;
@@ -1055,7 +1036,6 @@ async fn should_reject_listing_unauthenticated_request_with_401() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_listing_when_ca_does_not_exist_with_404() {
     let db = TestDatabase::new().await;
@@ -1086,7 +1066,6 @@ async fn should_reject_listing_when_ca_does_not_exist_with_404() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_listing_when_ca_is_inactive_with_422() {
     let db = TestDatabase::new().await;
@@ -1116,7 +1095,6 @@ async fn should_reject_listing_when_ca_is_inactive_with_422() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_listing_when_student_membership_not_active_with_403() {
     let db = TestDatabase::new().await;
@@ -1146,7 +1124,6 @@ async fn should_reject_listing_when_student_membership_not_active_with_403() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_institutional_listing_when_student_not_in_course_or_management_with_403() {
     let db = TestDatabase::new().await;
@@ -1176,7 +1153,6 @@ async fn should_reject_institutional_listing_when_student_not_in_course_or_manag
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_listing_with_invalid_forum_query_param_with_400() {
     let db = TestDatabase::new().await;
@@ -1206,7 +1182,6 @@ async fn should_reject_listing_with_invalid_forum_query_param_with_400() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_listing_with_invalid_status_query_param_with_400() {
     let db = TestDatabase::new().await;
@@ -1236,7 +1211,6 @@ async fn should_reject_listing_with_invalid_status_query_param_with_400() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_allow_ca_manager_to_update_physical_space_demand_status_with_opinion() {
     let db = TestDatabase::new().await;
@@ -1324,7 +1298,6 @@ async fn should_allow_ca_manager_to_update_physical_space_demand_status_with_opi
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_allow_ca_manager_to_forward_institutional_demand_to_coordination() {
     let db = TestDatabase::new().await;
@@ -1410,7 +1383,6 @@ async fn should_allow_ca_manager_to_forward_institutional_demand_to_coordination
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_forwarding_physical_space_demand_to_coordination_with_422() {
     let db = TestDatabase::new().await;
@@ -1467,7 +1439,6 @@ async fn should_reject_forwarding_physical_space_demand_to_coordination_with_422
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_status_update_without_opinion_with_422() {
     let db = TestDatabase::new().await;
@@ -1521,7 +1492,6 @@ async fn should_reject_status_update_without_opinion_with_422() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_status_update_by_regular_student_without_management_role_with_403() {
     let db = TestDatabase::new().await;
@@ -1612,7 +1582,6 @@ async fn should_reject_status_update_by_regular_student_without_management_role_
     let _ = student_id;
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_status_update_by_manager_of_another_ca_with_403() {
     let db = TestDatabase::new().await;
@@ -1696,7 +1665,6 @@ async fn should_reject_status_update_by_manager_of_another_ca_with_403() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_status_update_for_demand_belonging_to_another_ca_with_404() {
     let db = TestDatabase::new().await;
@@ -1781,7 +1749,6 @@ async fn should_reject_status_update_for_demand_belonging_to_another_ca_with_404
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_allow_getting_demand_details_and_history_with_200() {
     let db = TestDatabase::new().await;
@@ -1868,7 +1835,6 @@ async fn should_allow_getting_demand_details_and_history_with_200() {
 
     db.close().await;
 }
-
 #[tokio::test]
 async fn should_reject_student_of_another_course_from_getting_institutional_demand_details() {
     let db = TestDatabase::new().await;
@@ -1928,6 +1894,610 @@ async fn should_reject_student_of_another_course_from_getting_institutional_dema
 
     assert_eq!(g_status, StatusCode::FORBIDDEN, "{g_body}");
     assert_eq!(g_body["error"]["code"], "user_not_permitted_in_ca");
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_post_comment_successfully_by_demand_author() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-author-cmt";
+    let obj = Uuid::new_v4();
+    let (_inst_id, ca_id, user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    let jwt = token(uid, obj);
+    let demands_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+
+    // Cria a demanda inicial
+    let (status, demand_body) = request(
+        &app,
+        &demands_path,
+        Some(&jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "title": "Reparo da janela",
+            "description": "A janela da sala do CA está com o fecho quebrado."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{demand_body}");
+
+    let demand_id = demand_body["id"].as_str().expect("demand id");
+    let comment_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/comments");
+
+    let comment_payload = json!({
+        "content": "Anexei também a foto detalhada do fecho emperrado."
+    });
+
+    let (c_status, c_body) = request(&app, &comment_path, Some(&jwt), Some(comment_payload)).await;
+
+    assert_eq!(
+        c_status,
+        StatusCode::CREATED,
+        "autor deve conseguir comentar: {c_body}"
+    );
+    assert_eq!(c_body["demandId"], demand_id);
+    assert_eq!(c_body["authorId"], user_id.to_string());
+    assert_eq!(c_body["authorRole"], "student");
+    assert_eq!(
+        c_body["content"],
+        "Anexei também a foto detalhada do fecho emperrado."
+    );
+
+    // Confere no banco de dados
+    let comment_id = Uuid::parse_str(c_body["id"].as_str().unwrap()).unwrap();
+    let row = sqlx::query(
+        "SELECT demand_id, author_id, author_role, content FROM demand_comment WHERE id = $1",
+    )
+    .bind(comment_id)
+    .fetch_one(&db.pool)
+    .await
+    .expect("comentário deve existir no banco");
+
+    let db_demand_id: Uuid = row.get("demand_id");
+    let db_author_id: Uuid = row.get("author_id");
+    let db_role: String = row.get("author_role");
+    let db_content: String = row.get("content");
+
+    assert_eq!(db_demand_id.to_string(), demand_id);
+    assert_eq!(db_author_id, user_id);
+    assert_eq!(db_role, "student");
+    assert_eq!(
+        db_content,
+        "Anexei também a foto detalhada do fecho emperrado."
+    );
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_post_official_response_successfully_by_ca_management() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let manager_uid = "manager-cmt-1";
+    let manager_obj = Uuid::new_v4();
+    let (inst_id, ca_id, manager_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        manager_uid,
+        manager_obj,
+        true,
+        Some("Ciência da Computação"),
+        true, // is_ca_manager = true
+        "active",
+    )
+    .await;
+
+    // Estudante secundário autor da demanda
+    let student_uid = "student-author-secondary";
+    let student_obj = Uuid::new_v4();
+    let _student_id = create_test_student(
+        &db.pool,
+        inst_id,
+        student_uid,
+        student_obj,
+        true,
+        Some("Ciência da Computação"),
+    )
+    .await;
+
+    let student_jwt = token_with_email(student_uid, student_obj, "241098765@aluno.unb.br");
+    let manager_jwt = token_with_email(manager_uid, manager_obj, "241098766@aluno.unb.br");
+
+    // Estudante cria a demanda
+    let demands_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (status, demand_body) = request(
+        &app,
+        &demands_path,
+        Some(&student_jwt),
+        Some(json!({
+            "forum": "institutional",
+            "title": "Revisão curricular",
+            "description": "Necessidade de atualização de bibliografia.",
+            "course_name": "Ciência da Computação"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{demand_body}");
+    let demand_id = demand_body["id"].as_str().expect("demand id");
+
+    // Gestor responde oficialmente à demanda
+    let comment_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/comments");
+    let response_payload = json!({
+        "content": "Entramos em contato com a coordenação para agendar reunião sobre a ementa."
+    });
+
+    let (c_status, c_body) = request(
+        &app,
+        &comment_path,
+        Some(&manager_jwt),
+        Some(response_payload),
+    )
+    .await;
+
+    assert_eq!(
+        c_status,
+        StatusCode::CREATED,
+        "gestor deve conseguir responder oficialmente: {c_body}"
+    );
+    assert_eq!(c_body["demandId"], demand_id);
+    assert_eq!(c_body["authorId"], manager_id.to_string());
+    assert_eq!(c_body["authorRole"], "ca_management");
+    assert_eq!(
+        c_body["content"],
+        "Entramos em contato com a coordenação para agendar reunião sobre a ementa."
+    );
+
+    // Estudante autor visualiza a resposta oficial da gestão
+    let (list_status, list_body) = get_request(&app, &comment_path, Some(&student_jwt)).await;
+    assert_eq!(list_status, StatusCode::OK);
+    let comments = list_body.as_array().expect("array de comentários");
+    assert_eq!(comments.len(), 1);
+    assert_eq!(comments[0]["authorRole"], "ca_management");
+    assert_eq!(comments[0]["authorId"], manager_id.to_string());
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_list_comments_in_chronological_order() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let manager_uid = "manager-timeline";
+    let manager_obj = Uuid::new_v4();
+    let (inst_id, ca_id, _manager_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        manager_uid,
+        manager_obj,
+        true,
+        Some("Ciência da Computação"),
+        true, // gestor
+        "active",
+    )
+    .await;
+
+    let student_uid = "student-timeline";
+    let student_obj = Uuid::new_v4();
+    let _student_id = create_test_student(
+        &db.pool,
+        inst_id,
+        student_uid,
+        student_obj,
+        true,
+        Some("Ciência da Computação"),
+    )
+    .await;
+
+    let student_jwt = token_with_email(student_uid, student_obj, "241098765@aluno.unb.br");
+    let manager_jwt = token_with_email(manager_uid, manager_obj, "241098766@aluno.unb.br");
+
+    // Estudante cria demanda
+    let demands_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (_, demand_body) = request(
+        &app,
+        &demands_path,
+        Some(&student_jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "title": "Ar-condicionado",
+            "description": "Equipamento parado"
+        })),
+    )
+    .await;
+    let demand_id = demand_body["id"].as_str().unwrap();
+    let comment_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/comments");
+
+    // 1. Estudante posta comentário 1
+    let (s1, _) = request(
+        &app,
+        &comment_path,
+        Some(&student_jwt),
+        Some(json!({ "content": "Primeira mensagem do estudante" })),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::CREATED);
+
+    // 2. Gestor posta resposta 2
+    let (s2, _) = request(
+        &app,
+        &comment_path,
+        Some(&manager_jwt),
+        Some(json!({ "content": "Resposta da gestão do CA" })),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::CREATED);
+
+    // 3. Estudante posta réplica 3
+    let (s3, _) = request(
+        &app,
+        &comment_path,
+        Some(&student_jwt),
+        Some(json!({ "content": "Obrigado pelo retorno da gestão" })),
+    )
+    .await;
+    assert_eq!(s3, StatusCode::CREATED);
+
+    // Lista linha do tempo
+    let (list_status, list_body) = get_request(&app, &comment_path, Some(&student_jwt)).await;
+    assert_eq!(list_status, StatusCode::OK);
+    let comments = list_body.as_array().expect("array de comentários");
+    assert_eq!(comments.len(), 3);
+
+    assert_eq!(comments[0]["authorRole"], "student");
+    assert_eq!(comments[0]["content"], "Primeira mensagem do estudante");
+
+    assert_eq!(comments[1]["authorRole"], "ca_management");
+    assert_eq!(comments[1]["content"], "Resposta da gestão do CA");
+
+    assert_eq!(comments[2]["authorRole"], "student");
+    assert_eq!(comments[2]["content"], "Obrigado pelo retorno da gestão");
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_reject_comment_by_unauthorized_third_party_with_403() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let author_uid = "student-author-legit";
+    let author_obj = Uuid::new_v4();
+    let (inst_id, ca_id, _author_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        author_uid,
+        author_obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    // Terceiro: estudante com vínculo ativo, mas não é autor nem gestor
+    let third_party_uid = "student-third-party";
+    let third_party_obj = Uuid::new_v4();
+    let _third_party_id = create_test_student(
+        &db.pool,
+        inst_id,
+        third_party_uid,
+        third_party_obj,
+        true,
+        Some("Ciência da Computação"),
+    )
+    .await;
+
+    let author_jwt = token_with_email(author_uid, author_obj, "241098765@aluno.unb.br");
+    let third_party_jwt =
+        token_with_email(third_party_uid, third_party_obj, "241098766@aluno.unb.br");
+
+    // Autor cria demanda
+    let demands_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (_, demand_body) = request(
+        &app,
+        &demands_path,
+        Some(&author_jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "description": "Demanda privada do autor"
+        })),
+    )
+    .await;
+    let demand_id = demand_body["id"].as_str().unwrap();
+
+    let comment_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/comments");
+
+    // Terceiro tenta comentar -> 403
+    let (c_status, c_body) = request(
+        &app,
+        &comment_path,
+        Some(&third_party_jwt),
+        Some(json!({ "content": "Comentário de terceiro não autorizado" })),
+    )
+    .await;
+    assert_eq!(c_status, StatusCode::FORBIDDEN, "{c_body}");
+    assert_eq!(c_body["error"]["code"], "user_not_permitted_in_ca");
+
+    // Terceiro tenta visualizar comentários -> 403
+    let (l_status, l_body) = get_request(&app, &comment_path, Some(&third_party_jwt)).await;
+    assert_eq!(l_status, StatusCode::FORBIDDEN, "{l_body}");
+    assert_eq!(l_body["error"]["code"], "user_not_permitted_in_ca");
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_reject_comment_with_empty_or_whitespace_content_with_422() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-empty-cmt";
+    let obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    let jwt = token(uid, obj);
+    let demands_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (_, demand_body) = request(
+        &app,
+        &demands_path,
+        Some(&jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "description": "Demanda válida"
+        })),
+    )
+    .await;
+    let demand_id = demand_body["id"].as_str().unwrap();
+
+    let comment_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/comments");
+
+    let (status, body) = request(
+        &app,
+        &comment_path,
+        Some(&jwt),
+        Some(json!({ "content": "   \t \n  " })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "empty_comment");
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_reject_comment_exceeding_max_length_with_422() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-long-cmt";
+    let obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    let jwt = token(uid, obj);
+    let demands_path = format!("/api/v1/academic-centers/{ca_id}/demands");
+    let (_, demand_body) = request(
+        &app,
+        &demands_path,
+        Some(&jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "description": "Demanda válida"
+        })),
+    )
+    .await;
+    let demand_id = demand_body["id"].as_str().unwrap();
+
+    let comment_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/comments");
+
+    let long_text = "c".repeat(2001);
+    let (status, body) = request(
+        &app,
+        &comment_path,
+        Some(&jwt),
+        Some(json!({ "content": long_text })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "comment_too_long");
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_reject_comment_for_nonexistent_ca_with_404() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-valid-ca-404";
+    let obj = Uuid::new_v4();
+    let (_inst_id, _real_ca_id, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    let jwt = token(uid, obj);
+    let non_existent_ca = Uuid::new_v4();
+    let demand_id = Uuid::new_v4();
+    let comment_path =
+        format!("/api/v1/academic-centers/{non_existent_ca}/demands/{demand_id}/comments");
+
+    let (status, body) = request(
+        &app,
+        &comment_path,
+        Some(&jwt),
+        Some(json!({ "content": "Comentário para CA inexistente" })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"]["code"], "academic_center_not_found");
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_reject_comment_for_nonexistent_demand_with_404() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-valid-demand-404";
+    let obj = Uuid::new_v4();
+    let (_inst_id, ca_id, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    let jwt = token(uid, obj);
+    let non_existent_demand = Uuid::new_v4();
+    let comment_path =
+        format!("/api/v1/academic-centers/{ca_id}/demands/{non_existent_demand}/comments");
+
+    let (status, body) = request(
+        &app,
+        &comment_path,
+        Some(&jwt),
+        Some(json!({ "content": "Comentário para demanda inexistente" })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"]["code"], "demand_not_found");
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_reject_comment_when_demand_belongs_to_another_ca_with_400() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let uid = "student-ca-isolation";
+    let obj = Uuid::new_v4();
+    let (inst_id, ca_1, _user_id) = create_test_context(
+        &db.pool,
+        "Centro Acadêmico de Computação",
+        "CACC",
+        uid,
+        obj,
+        true,
+        Some("Ciência da Computação"),
+        false,
+        "active",
+    )
+    .await;
+
+    // Cria CA 2 na mesma instituição
+    let ca_2 = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, name, acronym, description, status)
+         VALUES ($1, $2, 'Centro Acadêmico de Redes', 'CAER', 'CA 2', 'active')",
+    )
+    .bind(ca_2)
+    .bind(inst_id)
+    .execute(&db.pool)
+    .await
+    .expect("insert ca 2");
+
+    let jwt = token(uid, obj);
+
+    // Cria demanda no CA 2
+    let demands_path_ca2 = format!("/api/v1/academic-centers/{ca_2}/demands");
+    let (_, demand_body) = request(
+        &app,
+        &demands_path_ca2,
+        Some(&jwt),
+        Some(json!({
+            "forum": "physical_space",
+            "description": "Demanda no CA 2"
+        })),
+    )
+    .await;
+    let demand_id = demand_body["id"].as_str().unwrap();
+
+    // Tenta comentar na demanda apontando para CA 1 na rota
+    let comment_path_ca1 = format!("/api/v1/academic-centers/{ca_1}/demands/{demand_id}/comments");
+    let (status, body) = request(
+        &app,
+        &comment_path_ca1,
+        Some(&jwt),
+        Some(json!({ "content": "Tentativa de comentar através do CA 1" })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "demand_belongs_to_another_ca");
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_reject_unauthenticated_comment_with_401() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks) = setup_app(&db).await;
+
+    let ca_id = Uuid::new_v4();
+    let demand_id = Uuid::new_v4();
+    let comment_path = format!("/api/v1/academic-centers/{ca_id}/demands/{demand_id}/comments");
+
+    let (status, body) = request(
+        &app,
+        &comment_path,
+        None,
+        Some(json!({ "content": "Sem token" })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert_eq!(body["error"]["code"], "unauthorized");
 
     db.close().await;
 }

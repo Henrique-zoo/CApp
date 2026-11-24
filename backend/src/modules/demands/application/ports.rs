@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::modules::demands::{
     application::error::{AffiliationError, DemandRepositoryError},
-    domain::entities::{Demand, DemandForum, DemandStatus},
+    domain::entities::{Demand, DemandComment, DemandForum, DemandStatus},
 };
 
 /// Critérios de filtragem para listagem de demandas no repositório.
@@ -59,6 +59,33 @@ impl<T: DemandRepository + ?Sized> DemandRepository for &T {
 
     async fn update(&self, demand: &Demand) -> Result<(), DemandRepositoryError> {
         (**self).update(demand).await
+    }
+}
+
+/// Contrato de persistência para comentários e interações em demandas.
+#[async_trait::async_trait]
+pub trait DemandCommentRepository: Send + Sync {
+    /// Cria e persiste um novo comentário em uma demanda.
+    async fn create(&self, comment: &DemandComment) -> Result<(), DemandRepositoryError>;
+
+    /// Lista todos os comentários de uma demanda em ordem cronológica ascendente (`created_at ASC, id ASC`).
+    async fn list_by_demand_id(
+        &self,
+        demand_id: Uuid,
+    ) -> Result<Vec<DemandComment>, DemandRepositoryError>;
+}
+
+#[async_trait::async_trait]
+impl<T: DemandCommentRepository + ?Sized> DemandCommentRepository for &T {
+    async fn create(&self, comment: &DemandComment) -> Result<(), DemandRepositoryError> {
+        (**self).create(comment).await
+    }
+
+    async fn list_by_demand_id(
+        &self,
+        demand_id: Uuid,
+    ) -> Result<Vec<DemandComment>, DemandRepositoryError> {
+        (**self).list_by_demand_id(demand_id).await
     }
 }
 

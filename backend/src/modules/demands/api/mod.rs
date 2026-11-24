@@ -4,13 +4,10 @@
 //! [`error`] traduz as falhas de aplicação para os códigos HTTP adequados.
 
 use axum::Router;
-
 use crate::api::state::AppState;
-
 pub mod dto;
 pub mod error;
 pub mod handlers;
-
 /// Monta o roteador da API para o módulo de demandas.
 ///
 /// # Rotas
@@ -45,5 +42,13 @@ pub fn router() -> Router<AppState> {
         .route(
             "/academic-centers/{academic_center_id}/demands/{demand_id}/status",
             axum::routing::patch(handlers::handle_update_demand_status),
+        )
+        .route(
+            "/api/v1/academic-centers/{academic_center_id}/demands/{demand_id}/comments",
+            axum::routing::post(handlers::handle_post_comment).get(handlers::handle_list_comments),
+        )
+        .route(
+            "/academic-centers/{academic_center_id}/demands/{demand_id}/comments",
+            axum::routing::post(handlers::handle_post_comment).get(handlers::handle_list_comments),
         )
 }

@@ -22,6 +22,9 @@ pub const MAX_COURSE_NAME_LENGTH: usize = 255;
 /// Limite máximo em caracteres para a justificativa ou comentário de alteração de status.
 pub const MAX_COMMENT_LENGTH: usize = 1000;
 
+/// Limite máximo em caracteres para o conteúdo de um comentário ou interação na demanda.
+pub const MAX_DEMAND_COMMENT_CONTENT_LENGTH: usize = 2000;
+
 /// Valida a descrição ou conteúdo da demanda.
 ///
 /// Espaços periféricos são desconsiderados (`trim`). O texto não pode ser vazio
@@ -184,6 +187,28 @@ pub fn validate_comment(comment: &str) -> Result<(), DemandError> {
 pub fn validate_optional_comment(comment: Option<&str>) -> Result<(), DemandError> {
     if let Some(c) = comment {
         validate_comment(c)?;
+    }
+    Ok(())
+}
+
+/// Valida o conteúdo textual de um comentário ou interação na demanda.
+///
+/// Espaços periféricos são desconsiderados (`trim`). O texto não pode ser vazio
+/// nem exceder [`MAX_DEMAND_COMMENT_CONTENT_LENGTH`].
+///
+/// # Erros
+///
+/// Retorna [`DemandError::EmptyCommentContent`] se o texto for vazio ou só espaços.
+/// Retorna [`DemandError::CommentContentTooLong`] se exceder [`MAX_DEMAND_COMMENT_CONTENT_LENGTH`].
+pub fn validate_comment_content(content: &str) -> Result<(), DemandError> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return Err(DemandError::EmptyCommentContent);
+    }
+    if trimmed.chars().count() > MAX_DEMAND_COMMENT_CONTENT_LENGTH {
+        return Err(DemandError::CommentContentTooLong {
+            max: MAX_DEMAND_COMMENT_CONTENT_LENGTH,
+        });
     }
     Ok(())
 }
@@ -554,5 +579,31 @@ mod tests {
         assert_eq!(demand.description(), "A porta não fecha adequadamente");
         assert_eq!(demand.category(), Some("Manutenção"));
         assert_eq!(demand.course_name(), Some("Engenharia de Redes"));
+    }
+
+    #[test]
+    fn should_validate_demand_comment_content_rules() {
+        assert!(validate_comment_content("Comentário válido").is_ok());
+        assert!(validate_comment_content("  Comentário com espaços periféricos  ").is_ok());
+
+        assert_eq!(
+            validate_comment_content(""),
+            Err(DemandError::EmptyCommentContent)
+        );
+        assert_eq!(
+            validate_comment_content("   \t \n  "),
+            Err(DemandError::EmptyCommentContent)
+        );
+
+        let valid_2000 = "c".repeat(MAX_DEMAND_COMMENT_CONTENT_LENGTH);
+        assert!(validate_comment_content(&valid_2000).is_ok());
+
+        let invalid_2001 = "c".repeat(MAX_DEMAND_COMMENT_CONTENT_LENGTH + 1);
+        assert_eq!(
+            validate_comment_content(&invalid_2001),
+            Err(DemandError::CommentContentTooLong {
+                max: MAX_DEMAND_COMMENT_CONTENT_LENGTH,
+            })
+        );
     }
 }

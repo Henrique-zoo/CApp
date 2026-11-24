@@ -4,8 +4,11 @@ mod create_demand;
 mod get_demand;
 mod list_demands;
 mod update_demand_status;
-
 pub use create_demand::*;
 pub use get_demand::*;
 pub use list_demands::*;
 pub use update_demand_status::*;
+pub use list_comments::*;
+pub use post_comment::*;
+mod list_comments;
+mod post_comment;
