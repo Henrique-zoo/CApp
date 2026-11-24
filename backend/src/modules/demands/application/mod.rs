@@ -12,4 +12,5 @@ pub mod services;
 pub use commands::*;
 pub use error::*;
 pub use ports::*;
+pub use queries::*;
 pub use services::*;

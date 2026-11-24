@@ -7,8 +7,25 @@ use uuid::Uuid;
 
 use crate::modules::demands::{
     application::error::{AffiliationError, DemandRepositoryError},
-    domain::entities::Demand,
+    domain::entities::{Demand, DemandForum, DemandStatus},
 };
+
+/// Critérios de filtragem para listagem de demandas no repositório.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DemandFilter {
+    /// Centro Acadêmico obrigatório (garante isolamento estrito entre CAs).
+    pub academic_center_id: Uuid,
+    /// Fórum específico opcional (ex: apenas `physical_space` ou `institutional`).
+    pub forum: Option<DemandForum>,
+    /// Status específico opcional (ex: apenas `open`).
+    pub status: Option<DemandStatus>,
+    /// Autor específico opcional (utilizado para filtragem de demandas próprias).
+    pub author_id: Option<Uuid>,
+    /// Limite máximo de registros retornados.
+    pub limit: Option<usize>,
+    /// Deslocamento inicial de registros.
+    pub offset: Option<usize>,
+}
 
 /// Contrato de persistência para entidades e histórico de demandas.
 #[async_trait::async_trait]
@@ -18,6 +35,9 @@ pub trait DemandRepository: Send + Sync {
 
     /// Localiza uma demanda por seu identificador único estável.
     async fn find_by_id(&self, id: Uuid) -> Result<Option<Demand>, DemandRepositoryError>;
+
+    /// Lista e filtra demandas persistidas de acordo com os critérios fornecidos.
+    async fn list(&self, filter: &DemandFilter) -> Result<Vec<Demand>, DemandRepositoryError>;
 }
 
 #[async_trait::async_trait]
@@ -28,6 +48,10 @@ impl<T: DemandRepository + ?Sized> DemandRepository for &T {
 
     async fn find_by_id(&self, id: Uuid) -> Result<Option<Demand>, DemandRepositoryError> {
         (**self).find_by_id(id).await
+    }
+
+    async fn list(&self, filter: &DemandFilter) -> Result<Vec<Demand>, DemandRepositoryError> {
+        (**self).list(filter).await
     }
 }
 

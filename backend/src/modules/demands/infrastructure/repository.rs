@@ -15,10 +15,38 @@ use uuid::Uuid;
 use crate::modules::demands::{
     application::{
         error::{AffiliationError, DemandRepositoryError},
-        ports::{AcademicAffiliation, AcademicAffiliationPort, DemandRepository},
+        ports::{AcademicAffiliation, AcademicAffiliationPort, DemandFilter, DemandRepository},
     },
     domain::entities::{Demand, DemandForum, DemandStatus, DemandStatusHistoryEntry},
 };
+
+/// Estrutura de linha dedicada para mapeamento relacional da tabela `demand`.
+#[derive(Debug, sqlx::FromRow)]
+struct DemandRow {
+    id: Uuid,
+    academic_center_id: Uuid,
+    author_id: Uuid,
+    forum: String,
+    title: Option<String>,
+    description: String,
+    category: Option<String>,
+    course_name: Option<String>,
+    status: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+/// Estrutura de linha dedicada para mapeamento relacional da tabela `demand_status_history`.
+#[derive(Debug, sqlx::FromRow)]
+struct DemandStatusHistoryRow {
+    id: Uuid,
+    demand_id: Uuid,
+    from_status: Option<String>,
+    to_status: String,
+    changed_by_id: Uuid,
+    comment: Option<String>,
+    created_at: DateTime<Utc>,
+}
 
 /// Repositório de demandas em memória para testes unitários determinísticos.
 #[derive(Debug, Clone, Default)]
@@ -64,6 +92,49 @@ impl DemandRepository for InMemoryDemandRepository {
     async fn find_by_id(&self, id: Uuid) -> Result<Option<Demand>, DemandRepositoryError> {
         let guard = self.demands.read().unwrap();
         Ok(guard.get(&id).cloned())
+    }
+
+    async fn list(&self, filter: &DemandFilter) -> Result<Vec<Demand>, DemandRepositoryError> {
+        let guard = self.demands.read().unwrap();
+        let mut filtered: Vec<Demand> = guard
+            .values()
+            .filter(|d| {
+                if d.academic_center_id() != filter.academic_center_id {
+                    return false;
+                }
+                if filter.forum.is_some_and(|forum| d.forum() != forum) {
+                    return false;
+                }
+                if filter.status.is_some_and(|status| d.status() != status) {
+                    return false;
+                }
+                if filter
+                    .author_id
+                    .is_some_and(|author_id| d.author_id() != author_id)
+                {
+                    return false;
+                }
+                true
+            })
+            .cloned()
+            .collect();
+
+        // Ordenação determinística: created_at DESC, id DESC
+        filtered.sort_by(|a, b| {
+            b.created_at()
+                .cmp(&a.created_at())
+                .then_with(|| b.id().cmp(&a.id()))
+        });
+
+        let offset = filter.offset.unwrap_or(0);
+        let iter = filtered.into_iter().skip(offset);
+        let result = if let Some(limit) = filter.limit {
+            iter.take(limit).collect()
+        } else {
+            iter.collect()
+        };
+
+        Ok(result)
     }
 }
 
@@ -202,7 +273,7 @@ impl DemandRepository for PostgresDemandRepository {
     }
 
     async fn find_by_id(&self, id: Uuid) -> Result<Option<Demand>, DemandRepositoryError> {
-        let demand_row = sqlx::query(
+        let demand_row = sqlx::query_as::<_, DemandRow>(
             "SELECT id, academic_center_id, author_id, forum, title, description,
                     category, course_name, status, created_at, updated_at
              FROM demand WHERE id = $1",
@@ -216,65 +287,48 @@ impl DemandRepository for PostgresDemandRepository {
             return Ok(None);
         };
 
-        let demand_id: Uuid = row.get("id");
-        let academic_center_id: Uuid = row.get("academic_center_id");
-        let author_id: Uuid = row.get("author_id");
-        let forum_str: String = row.get("forum");
-        let title: Option<String> = row.get("title");
-        let description: String = row.get("description");
-        let category: Option<String> = row.get("category");
-        let course_name: Option<String> = row.get("course_name");
-        let status_str: String = row.get("status");
-        let created_at: DateTime<Utc> = row.get("created_at");
-        let updated_at: DateTime<Utc> = row.get("updated_at");
-
-        let forum: DemandForum = forum_str
+        let forum: DemandForum = row
+            .forum
             .parse()
             .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
-        let status: DemandStatus = status_str
+        let status: DemandStatus = row
+            .status
             .parse()
             .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
 
-        let history_rows = sqlx::query(
+        let history_rows = sqlx::query_as::<_, DemandStatusHistoryRow>(
             "SELECT id, demand_id, from_status, to_status, changed_by_id, comment, created_at
              FROM demand_status_history
              WHERE demand_id = $1
              ORDER BY created_at ASC",
         )
-        .bind(demand_id)
+        .bind(row.id)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| DemandRepositoryError::Internal(e.to_string()))?;
 
         let mut history_entries = Vec::with_capacity(history_rows.len());
         for h_row in history_rows {
-            let h_id: Uuid = h_row.get("id");
-            let h_demand_id: Uuid = h_row.get("demand_id");
-            let from_status_str: Option<String> = h_row.get("from_status");
-            let to_status_str: String = h_row.get("to_status");
-            let changed_by_id: Uuid = h_row.get("changed_by_id");
-            let comment: Option<String> = h_row.get("comment");
-            let h_created_at: DateTime<Utc> = h_row.get("created_at");
-
-            let from_status = match from_status_str {
+            let from_status = match h_row.from_status {
                 Some(s) => Some(
                     s.parse::<DemandStatus>()
                         .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?,
                 ),
                 None => None,
             };
-            let to_status: DemandStatus = to_status_str
+            let to_status: DemandStatus = h_row
+                .to_status
                 .parse()
                 .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
 
             let entry = DemandStatusHistoryEntry::new(
-                h_id,
-                h_demand_id,
+                h_row.id,
+                h_row.demand_id,
                 from_status,
                 to_status,
-                changed_by_id,
-                comment,
-                h_created_at,
+                h_row.changed_by_id,
+                h_row.comment,
+                h_row.created_at,
             )
             .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
 
@@ -282,22 +336,97 @@ impl DemandRepository for PostgresDemandRepository {
         }
 
         let demand = Demand::reconstitute(
-            demand_id,
-            academic_center_id,
-            author_id,
+            row.id,
+            row.academic_center_id,
+            row.author_id,
             forum,
-            title,
-            description,
-            category,
-            course_name,
+            row.title,
+            row.description,
+            row.category,
+            row.course_name,
             status,
-            created_at,
-            updated_at,
+            row.created_at,
+            row.updated_at,
             history_entries,
         )
         .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
 
         Ok(Some(demand))
+    }
+
+    async fn list(&self, filter: &DemandFilter) -> Result<Vec<Demand>, DemandRepositoryError> {
+        let mut builder = sqlx::QueryBuilder::new(
+            "SELECT id, academic_center_id, author_id, forum, title, description, \
+                    category, course_name, status, created_at, updated_at \
+             FROM demand \
+             WHERE academic_center_id = ",
+        );
+        builder.push_bind(filter.academic_center_id);
+
+        if let Some(forum) = filter.forum {
+            builder.push(" AND forum = ");
+            builder.push_bind(forum.as_str());
+        }
+
+        if let Some(status) = filter.status {
+            builder.push(" AND status = ");
+            builder.push_bind(status.as_str());
+        }
+
+        if let Some(author_id) = filter.author_id {
+            builder.push(" AND author_id = ");
+            builder.push_bind(author_id);
+        }
+
+        builder.push(" ORDER BY created_at DESC, id DESC");
+
+        if let Some(limit) = filter.limit {
+            builder.push(" LIMIT ");
+            builder.push_bind(limit as i64);
+        }
+
+        if let Some(offset) = filter.offset {
+            builder.push(" OFFSET ");
+            builder.push_bind(offset as i64);
+        }
+
+        let rows = builder
+            .build_query_as::<DemandRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DemandRepositoryError::Internal(e.to_string()))?;
+
+        let mut demands = Vec::with_capacity(rows.len());
+        for row in rows {
+            let forum: DemandForum = row
+                .forum
+                .parse()
+                .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
+            let status: DemandStatus = row
+                .status
+                .parse()
+                .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
+
+            let demand = Demand::reconstitute(
+                row.id,
+                row.academic_center_id,
+                row.author_id,
+                forum,
+                row.title,
+                row.description,
+                row.category,
+                row.course_name,
+                status,
+                row.created_at,
+                row.updated_at,
+                Vec::new(),
+            )
+            .map_err(|e| DemandRepositoryError::Internal(format!("{e}")))?;
+
+            demands.push(demand);
+        }
+
+        Ok(demands)
     }
 }
 

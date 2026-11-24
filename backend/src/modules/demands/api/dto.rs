@@ -37,6 +37,34 @@ pub struct CreateDemandRequest {
     pub author_id: Option<Uuid>,
 }
 
+/// Parâmetros de consulta via query string para listagem e filtragem de demandas.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ListDemandsQueryParams {
+    /// Fórum alvo da demanda (`institutional` ou `physical_space`).
+    pub forum: Option<String>,
+
+    /// Status atual no ciclo de vida da demanda (`open`, `in_analysis`, etc.).
+    pub status: Option<String>,
+
+    /// Quando verdadeiro, restringe os resultados às demandas registradas pelo usuário autenticado.
+    #[serde(default)]
+    pub mine: Option<bool>,
+
+    /// Quantidade máxima de registros retornados (paginação).
+    pub limit: Option<usize>,
+
+    /// Deslocamento inicial de registros para paginação.
+    pub offset: Option<usize>,
+
+    /// Número da página baseada em 1 (conveniência para clientes).
+    pub page: Option<usize>,
+
+    /// Tamanho da página (alias para limite de registros).
+    #[serde(alias = "page_size")]
+    pub page_size: Option<usize>,
+}
+
 /// Representação serializada pública de uma demanda acadêmica ou de espaço físico.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
