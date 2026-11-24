@@ -38,6 +38,9 @@ pub trait DemandRepository: Send + Sync {
 
     /// Lista e filtra demandas persistidas de acordo com os critérios fornecidos.
     async fn list(&self, filter: &DemandFilter) -> Result<Vec<Demand>, DemandRepositoryError>;
+
+    /// Atualiza o status, data de modificação e histórico de uma demanda existente.
+    async fn update(&self, demand: &Demand) -> Result<(), DemandRepositoryError>;
 }
 
 #[async_trait::async_trait]
@@ -52,6 +55,10 @@ impl<T: DemandRepository + ?Sized> DemandRepository for &T {
 
     async fn list(&self, filter: &DemandFilter) -> Result<Vec<Demand>, DemandRepositoryError> {
         (**self).list(filter).await
+    }
+
+    async fn update(&self, demand: &Demand) -> Result<(), DemandRepositoryError> {
+        (**self).update(demand).await
     }
 }
 

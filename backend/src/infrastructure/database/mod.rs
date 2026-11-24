@@ -124,6 +124,16 @@ impl crate::modules::demands::application::ports::DemandRepository for PgDatabas
         );
         repo.list(filter).await
     }
+
+    async fn update(
+        &self,
+        demand: &crate::modules::demands::domain::entities::Demand,
+    ) -> Result<(), crate::modules::demands::application::error::DemandRepositoryError> {
+        let repo = crate::modules::demands::infrastructure::PostgresDemandRepository::new(
+            self.pool.clone(),
+        );
+        repo.update(demand).await
+    }
 }
 
 #[async_trait::async_trait]

@@ -94,6 +94,12 @@ impl DemandRepository for InMemoryDemandRepository {
         Ok(guard.get(&id).cloned())
     }
 
+    async fn update(&self, demand: &Demand) -> Result<(), DemandRepositoryError> {
+        let mut guard = self.demands.write().unwrap();
+        guard.insert(demand.id(), demand.clone());
+        Ok(())
+    }
+
     async fn list(&self, filter: &DemandFilter) -> Result<Vec<Demand>, DemandRepositoryError> {
         let guard = self.demands.read().unwrap();
         let mut filtered: Vec<Demand> = guard
@@ -427,6 +433,52 @@ impl DemandRepository for PostgresDemandRepository {
         }
 
         Ok(demands)
+    }
+
+    async fn update(&self, demand: &Demand) -> Result<(), DemandRepositoryError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| DemandRepositoryError::Internal(e.to_string()))?;
+
+        sqlx::query(
+            "UPDATE demand
+             SET status = $1, updated_at = $2
+             WHERE id = $3 AND academic_center_id = $4",
+        )
+        .bind(demand.status().as_str())
+        .bind(demand.updated_at())
+        .bind(demand.id())
+        .bind(demand.academic_center_id())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| DemandRepositoryError::Internal(e.to_string()))?;
+
+        if let Some(entry) = demand.status_history().last() {
+            sqlx::query(
+                "INSERT INTO demand_status_history (
+                    id, demand_id, from_status, to_status, changed_by_id, comment, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (id) DO NOTHING",
+            )
+            .bind(entry.id())
+            .bind(entry.demand_id())
+            .bind(entry.from_status().map(|s| s.as_str().to_string()))
+            .bind(entry.to_status().as_str())
+            .bind(entry.changed_by_id())
+            .bind(entry.comment())
+            .bind(entry.created_at())
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DemandRepositoryError::Internal(e.to_string()))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| DemandRepositoryError::Internal(e.to_string()))?;
+
+        Ok(())
     }
 }
 

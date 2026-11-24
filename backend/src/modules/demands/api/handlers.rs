@@ -21,12 +21,15 @@ use crate::{
     },
     modules::{
         demands::{
-            api::dto::{CreateDemandRequest, DemandResponse, ListDemandsQueryParams},
+            api::dto::{
+                CreateDemandRequest, DemandResponse, ListDemandsQueryParams,
+                UpdateDemandStatusRequest,
+            },
             application::{
-                commands::CreateDemandCommand,
+                commands::{CreateDemandCommand, UpdateDemandStatusCommand},
                 error::DemandApplicationError,
-                queries::ListDemandsQuery,
-                services::{create_demand, list_demands},
+                queries::{GetDemandQuery, ListDemandsQuery},
+                services::{create_demand, get_demand, list_demands, update_demand_status},
             },
             domain::entities::{DemandForum, DemandStatus},
         },
@@ -229,4 +232,75 @@ pub async fn handle_list_demands(
     let response: Vec<DemandResponse> = demands.into_iter().map(DemandResponse::from).collect();
 
     Ok((StatusCode::OK, Json(response)))
+}
+
+/// Consulta os detalhes e o histórico completo de uma demanda específica.
+///
+/// # Rota
+///
+/// `GET /api/v1/academic-centers/{academic_center_id}/demands/{demand_id}`
+///
+/// # Respostas
+///
+/// - `200 OK`: Detalhes e histórico da demanda solicitada.
+/// - `401 Unauthorized`: Credenciais ausentes ou inválidas.
+/// - `403 Forbidden`: Usuário sem permissão no CA/curso ou sem vínculo estudantil ativo.
+/// - `404 Not Found`: Centro Acadêmico ou demanda inexistente.
+/// - `422 Unprocessable Entity`: Centro Acadêmico inativo.
+pub async fn handle_get_demand(
+    State(state): State<AppState>,
+    Path((academic_center_id, demand_id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+) -> ApiResult<impl IntoResponse> {
+    let user_id = authenticate_caller(&state, &headers).await?;
+
+    let query = GetDemandQuery::new(academic_center_id, demand_id, user_id);
+
+    let demand = get_demand(&state.pg_database, &state.pg_database, query).await?;
+
+    Ok((StatusCode::OK, Json(DemandResponse::from(demand))))
+}
+
+/// Atualiza o status de uma demanda pela gestão do Centro Acadêmico com parecer obrigatório.
+///
+/// # Rota
+///
+/// `PATCH /api/v1/academic-centers/{academic_center_id}/demands/{demand_id}/status`
+///
+/// # Respostas
+///
+/// - `200 OK`: Demanda com status atualizado e novo registro no histórico.
+/// - `400 Bad Request`: Payload JSON malformado ou status inválido/desconhecido.
+/// - `401 Unauthorized`: Credenciais ausentes ou inválidas.
+/// - `403 Forbidden`: Usuário sem cargo de gestão ativo no Centro Acadêmico.
+/// - `404 Not Found`: Centro Acadêmico ou demanda inexistente.
+/// - `422 Unprocessable Entity`: Violação de regras (parecer vazio, encaminhamento proibido para espaço físico, transição inválida ou CA inativo).
+pub async fn handle_update_demand_status(
+    State(state): State<AppState>,
+    Path((academic_center_id, demand_id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+    body: Result<Json<UpdateDemandStatusRequest>, JsonRejection>,
+) -> ApiResult<impl IntoResponse> {
+    let Json(payload) = body.map_err(|_| ApiError::bad_request())?;
+
+    let manager_id = authenticate_caller(&state, &headers).await?;
+
+    let new_status: DemandStatus = payload
+        .status
+        .parse()
+        .map_err(DemandApplicationError::from)?;
+
+    let opinion = payload.opinion.unwrap_or_default();
+
+    let command = UpdateDemandStatusCommand::new(
+        academic_center_id,
+        demand_id,
+        manager_id,
+        new_status,
+        opinion,
+    );
+
+    let demand = update_demand_status(&state.pg_database, &state.pg_database, command).await?;
+
+    Ok((StatusCode::OK, Json(DemandResponse::from(demand))))
 }

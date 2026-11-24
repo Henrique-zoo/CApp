@@ -271,7 +271,6 @@ pub fn validate_status_transition(
             DemandStatus::Completed,
         )
         | (DemandForum::Institutional, DemandStatus::ForwardedToCoordination, DemandStatus::Open)
-        | (DemandForum::Institutional, DemandStatus::Completed, DemandStatus::Open)
         | (DemandForum::Institutional, DemandStatus::Completed, DemandStatus::InAnalysis)
         | (
             DemandForum::Institutional,
