@@ -15,6 +15,7 @@ use crate::{
     modules::{
         ca::api as ca_api,
         elections::api as elections_api,
+        events::api as events_api,
         identity::{api as identity_api, infrastructure::firebase::AppCheckVerifier},
     },
 };
@@ -96,6 +97,7 @@ pub fn create_router(state: AppState, app_check: AppCheckVerifier) -> Router {
         .merge(identity_api::router())
         .merge(ca_api::router())
         .merge(elections_api::protected_json_routes())
+        .merge(events_api::router())
         .merge(crate::modules::demands::api::router())
         .merge(crate::modules::faq::api::router())
         .route("/health", get(|| async { "O servidor está saudável." }))
