@@ -4,3 +4,4 @@
 //! para Centros Acadêmicos e mandatos de gestão.
 
 pub mod repository;
+pub use repository::*;

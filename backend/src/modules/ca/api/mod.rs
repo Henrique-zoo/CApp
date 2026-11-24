@@ -3,16 +3,12 @@
 //! [`dto`] contém os contratos de entrada e saída JSON;
 //! [`handlers`] adapta as requisições HTTP aos casos de uso de Centro Acadêmico e mandato.
 
-use axum::{
-    Router,
-    routing::{get, post},
-};
-
+use axum::Router;
+use axum::routing::get;
+use axum::routing::post;
 use crate::api::state::AppState;
-
 pub mod dto;
 pub mod handlers;
-
 /// Monta o roteador Axum com os endpoints de Centros Acadêmicos e mandatos de gestão.
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -87,5 +83,37 @@ pub fn router() -> Router<AppState> {
         .route(
             "/api/v1/academic-centers/{id}/mandate",
             post(handlers::configure_initial_mandate).get(handlers::get_current_mandate),
+        )
+        .route(
+            "/api/v1/academic-centers/{academic_center_id}/polls",
+            post(handlers::create_poll).get(handlers::list_polls),
+        )
+        .route(
+            "/api/v1/academic-centers/{academic_center_id}/polls/{poll_id}",
+            get(handlers::get_poll),
+        )
+        .route(
+            "/api/v1/academic-centers/{academic_center_id}/polls/{poll_id}/votes",
+            post(handlers::vote_poll),
+        )
+        .route(
+            "/api/v1/academic-centers/{academic_center_id}/polls/{poll_id}/close",
+            post(handlers::close_poll),
+        )
+        .route(
+            "/academic-centers/{academic_center_id}/polls",
+            post(handlers::create_poll).get(handlers::list_polls),
+        )
+        .route(
+            "/academic-centers/{academic_center_id}/polls/{poll_id}",
+            get(handlers::get_poll),
+        )
+        .route(
+            "/academic-centers/{academic_center_id}/polls/{poll_id}/votes",
+            post(handlers::vote_poll),
+        )
+        .route(
+            "/academic-centers/{academic_center_id}/polls/{poll_id}/close",
+            post(handlers::close_poll),
         )
 }

@@ -4,3 +4,5 @@ mod academic_center;
 mod demand;
 mod faq;
 mod identity;
+
+mod student_polls;
