@@ -23,7 +23,7 @@
 //! desabilitados. A construção desses adaptadores não executa I/O.
 
 use std::{
-    env::{self, VarError},
+    env,
     net::TcpListener,
     sync::Arc,
 };
@@ -75,13 +75,8 @@ async fn main() -> anyhow::Result<()> {
     let server_config = backend::config::ServerConfig::from_env()?;
     let https_address = &server_config.bind_address;
     let config = backend::config::Config::from_env().context("Configuração inválida")?;
-    let (tls_config, tls_public_key) = tls::load_from_env()?;
-    let election_signer = load_election_signer(&tls_public_key).await?;
-
-    let database_url = env::var("DATABASE_URL").map_err(|error| match error {
-        VarError::NotPresent => anyhow::anyhow!("DATABASE_URL não está definida"),
-        VarError::NotUnicode(_) => anyhow::anyhow!("DATABASE_URL contém um valor UTF-8 inválido"),
-    })?;
+    let app_config = backend::config::AppConfig::from_env()?;
+    let database_url = app_config.database_url().expose_secret();
 
     let http = config
         .http
@@ -110,9 +105,15 @@ async fn main() -> anyhow::Result<()> {
     )?;
 
     let pool = PgPoolOptions::new()
-        .connect(&database_url)
+        .connect(database_url)
         .await
-        .context("Não foi possível conectar ao PostgreSQL")?;
+        .map_err(|error| anyhow::anyhow!(
+            "Não foi possível conectar ao PostgreSQL: {}",
+            backend::config::sanitize_connection_error(&error)
+        ))?;
+
+    let (tls_config, tls_public_key) = tls::load_from_env()?;
+    let election_signer = load_election_signer(&tls_public_key).await?;
 
     tracing::info!("Aplicando migrations do banco de dados");
 
