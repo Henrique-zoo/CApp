@@ -1,4 +1,11 @@
-//! Espaço reservado para entidades do módulo de notícias.
+//! Entidades do módulo de notícias.
 //!
-//! Ainda não define tipos. Os modelos de domínio deverão expressar identidade
-//! e estado do negócio sem depender dos formatos HTTP ou SQL.
+//! Reúne os modelos de domínio de notícias, seu ciclo de vida editorial,
+//! invariantes e integridade estrutural.
+
+pub mod news_article;
+
+pub use news_article::{
+    News, NewsArticle, NewsArticleError, NewsError, NewsPost, NewsStatus, Noticia, NoticiaError,
+    StatusNoticia,
+};
