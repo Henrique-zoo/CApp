@@ -1,4 +1,5 @@
 import 'package:capp/src/infrastructure/backend/elections/ballot_api.dart';
+import 'package:capp/src/infrastructure/backend/elections/ballot_dto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:uuid/uuid.dart';
@@ -9,6 +10,13 @@ void main() {
   final id = UuidValue.withFormatValidation(
     '558260d1-5b98-4ab1-ad5e-cc6f8b9ebf8c',
   );
+  const ballot = BallotSubmissionDto(
+    manifestHash: 'fixture-hash',
+    publicKey: 'fixture-key',
+    ciphertexts: [],
+    signature: 'fixture-signature',
+  );
+
   BallotApi client(String text, {int status = 200}) {
     final http = FakeHttpAdapter(
       (_) => ResponseBody.fromString(
@@ -36,7 +44,7 @@ void main() {
       '{"recovered":false,"receipt":{},"receipt":{}}',
       status: 201,
     );
-    await expectLater(api.submit(id, '{}', () {}), ambiguous);
+    await expectLater(api.submit(id, ballot, () {}), ambiguous);
   });
 
   test(
@@ -54,7 +62,7 @@ void main() {
   test('preserva o corpo JSON e o status de conflito do backend', () async {
     final api = client('{"error":{"code":"already_voted"}}', status: 409);
     await expectLater(
-      api.submit(id, '{}', () {}),
+      api.submit(id, ballot, () {}),
       throwsA(
         isA<DioException>()
             .having((e) => e.response?.statusCode, 'HTTP', 409)

@@ -64,9 +64,10 @@ class ElectionContractTests(unittest.TestCase):
             x["$ref"].split("/")[-1] for x in self.schema["$defs"]["Payload"]["oneOf"]
         ]
         expected = {
-            self.schema["$defs"][x]["properties"]["kind"]["const"] for x in names
+            self.schema["$defs"][x]["properties"].get("kind", {"const": "ballot"})["const"]
+            for x in names
         }
-        self.assertEqual(expected, {x["payload"]["kind"] for x in self.corpus["cases"]})
+        self.assertEqual(expected, {x["payload"].get("kind", "ballot") for x in self.corpus["cases"]})
 
     def test_invalid_vectors_are_rejected(self):
         """Outras implementações podem reproduzir as mesmas recusas por camada."""
@@ -130,8 +131,8 @@ class ElectionContractTests(unittest.TestCase):
 
     def test_jcs_uses_utf16_key_order(self):
         """JCS diverge da ordenação ingênua por pontos de código Unicode."""
-        value = {"\ue000": 1, "\U00010000": 2}
-        expected = '{"\U00010000":2,"\ue000":1}'.encode()
+        value = {"version": 1, "kind": "receipt", "\ue000": 1, "\U00010000": 2}
+        expected = '{"kind":"receipt","version":1,"\U00010000":2,"\ue000":1}'.encode()
         self.assertTrue(signing_bytes(value, self.profile).endswith(expected))
         self.assertNotEqual(
             json.dumps(
@@ -154,7 +155,7 @@ class ElectionContractTests(unittest.TestCase):
         """Uma cédula alterada falha com a assinatura original e chave pública real."""
         case = self.cases["valid/ballot-0"]
         value = copy.deepcopy(case["payload"])
-        value["submissionId"] = "99999999-1111-4111-8111-111111111111"
+        value["accountId"] = "99999999-1111-4111-8111-111111111111"
         with self.assertRaises(ContractError):
             verify_signature(value, case["signature"], value["publicKey"], self.profile)
 
@@ -226,7 +227,7 @@ class ElectionContractTests(unittest.TestCase):
         closure = self.payload("valid/closure")
         last = copy.deepcopy(self.index[closure["headHash"]])
         previous = self.index[last["previousHash"]]
-        last["ballot"]["payload"]["voterId"] = previous["ballot"]["payload"]["voterId"]
+        last["ballot"]["payload"]["accountId"] = previous["ballot"]["payload"]["accountId"]
         index = {**self.index, closure["headHash"]: last}
         with self.assertRaisesRegex(ContractError, "Conta repetida no quadro"):
             self.relations(closure, index)
@@ -248,41 +249,16 @@ class ElectionContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(ContractError, error):
                     self.relations(receipt)
 
-    def test_schedule_rejects_unchanged_or_earlier_end(self):
-        """Adiamento exige um novo fim estritamente posterior ao anterior."""
-        manifest = self.payload("valid/manifest")
-        origin = self.index[manifest["calendarOriginHash"]]
-        for end in [origin["endsAt"], "2026-11-21T12:00:00Z"]:
-            value = self.payload("valid/delay")
-            value["endsAt"] = end
-            with self.assertRaises(ContractError):
-                self.relations(value)
+    def test_closure_uses_canonical_time(self):
+        """O termo assina o instante do encerramento no formato compartilhado."""
+        envelope = {
+            "payload": self.payload("valid/closure"),
+            "signature": self.cases["valid/closure"]["signature"],
+        }
+        self.assertFalse(list(self.validator.iter_errors(envelope)))
 
-    def test_schedule_preserves_occurred_start(self):
-        """Uma prorrogação durante a votação não altera a abertura já ocorrida."""
-        value = self.payload("valid/extension")
-        value["startsAt"] = "2026-11-21T13:00:00Z"
-        with self.assertRaises(ContractError):
-            self.relations(value)
-
-    def test_preparation_delay_can_change_duration(self):
-        """A comissão define outro fim, sem obrigação de preservar a duração original."""
-        value = self.payload("valid/delay")
-        self.assertIsNone(value["manifestHash"])
-        self.relations(value)
-
-    def test_preparation_delay_does_not_require_manifest(self):
-        """O calendário pode mudar antes de as autoridades prepararem suas chaves."""
-        value = self.payload("valid/delay")
-        origin_hash = value["previousScheduleHash"]
-        self.relations(value, {origin_hash: self.index[origin_hash]})
-
-    def test_closure_rejects_early_end(self):
-        """Encerramento utiliza o calendário efetivo depois das prorrogações."""
-        value = self.payload("valid/closure")
-        value["closedAt"] = "2026-11-24T12:00:00Z"
-        with self.assertRaises(ContractError):
-            self.relations(value)
+        envelope["payload"]["closedAt"] = "2026-11-25T12:00:00+00:00"
+        self.assertTrue(list(self.validator.iter_errors(envelope)))
 
     def test_incomplete_has_no_totals(self):
         """Falta de autoridade mantém ausência de totais e não anula automaticamente."""

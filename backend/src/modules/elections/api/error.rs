@@ -3,7 +3,7 @@
 //! Os códigos públicos distinguem recusas de falhas de armazenamento. Os
 //! detalhes técnicos ficam nos logs do servidor.
 
-use axum::http::StatusCode;
+use axum::{extract::rejection::JsonRejection, http::StatusCode};
 
 use crate::{
     api::error::ApiError,
@@ -126,6 +126,11 @@ pub(super) fn ballot_error(error: BoardError) -> ApiError {
             "voting_ended",
             "O período de votação terminou.",
         ),
+        BoardError::Cancelled => (
+            StatusCode::CONFLICT,
+            "election_cancelled",
+            "A eleição foi cancelada.",
+        ),
         BoardError::VotingNotStarted => (
             StatusCode::CONFLICT,
             "voting_not_started",
@@ -136,11 +141,6 @@ pub(super) fn ballot_error(error: BoardError) -> ApiError {
             "already_voted",
             "A conta já votou nesta eleição.",
         ),
-        BoardError::SubmissionConflict => (
-            StatusCode::CONFLICT,
-            "submission_conflict",
-            "O conteúdo diverge da cédula confirmada.",
-        ),
         BoardError::LimitExceeded => (
             StatusCode::CONFLICT,
             "election_full",
@@ -149,10 +149,90 @@ pub(super) fn ballot_error(error: BoardError) -> ApiError {
         BoardError::SigningUnavailable | BoardError::Storage(_) => {
             return ApiError::service_unavailable();
         }
-        BoardError::InvalidArtifact(_) | BoardError::AlreadyExists | BoardError::NotYetEnded => {
+        BoardError::InvalidArtifact(_)
+        | BoardError::AlreadyExists
+        | BoardError::NotYetEnded
+        | BoardError::AuthorityNotAssigned
+        | BoardError::ShareAlreadyAccepted
+        | BoardError::PreparationIncomplete
+        | BoardError::InvalidAdministration(_) => {
             tracing::error!(%error, "Estado inconsistente ao registrar cédula.");
             return ApiError::internal_server_error();
         }
     };
     ApiError::new(status, code, message, None)
+}
+
+pub(super) fn tally_error(error: BoardError) -> ApiError {
+    let (status, code, message) = match error {
+        BoardError::Cancelled => (
+            StatusCode::CONFLICT,
+            "election_cancelled",
+            "A eleição foi cancelada.",
+        ),
+        BoardError::Closed => (
+            StatusCode::CONFLICT,
+            "election_closed",
+            "A eleição já foi encerrada.",
+        ),
+        BoardError::InvalidAdministration(reason) => {
+            (StatusCode::BAD_REQUEST, "invalid_election_change", reason)
+        }
+        BoardError::NotYetEnded => (
+            StatusCode::CONFLICT,
+            "tally_not_available",
+            "A votação ainda não foi encerrada.",
+        ),
+        BoardError::AuthorityNotAssigned => (
+            StatusCode::FORBIDDEN,
+            "authority_not_assigned",
+            "Esta conta não representa a autoridade indicada.",
+        ),
+        BoardError::ShareAlreadyAccepted => (
+            StatusCode::CONFLICT,
+            "share_already_accepted",
+            "A autoridade já publicou uma contribuição.",
+        ),
+        BoardError::PreparationIncomplete => (
+            StatusCode::CONFLICT,
+            "preparation_incomplete",
+            "Aguarde as chaves das autoridades designadas.",
+        ),
+        BoardError::AlreadyExists | BoardError::VotingEnded => (
+            StatusCode::CONFLICT,
+            "preparation_closed",
+            "O período de preparação terminou.",
+        ),
+        BoardError::InvalidEvidence(_) => (
+            StatusCode::BAD_REQUEST,
+            "invalid_tally_evidence",
+            "A evidência não confere com a apuração.",
+        ),
+        other => return public_read_error(other),
+    };
+    ApiError::new(status, code, message, None)
+}
+
+/// Preserva o envelope de erro da API para rejeições do extrator JSON.
+/// Os limites do router permanecem ativos; falhas de sintaxe ou de tipos são 400.
+pub(super) fn signed_request_error(
+    rejection: JsonRejection,
+    invalid_code: &'static str,
+    invalid_message: &'static str,
+) -> ApiError {
+    match rejection.status() {
+        StatusCode::PAYLOAD_TOO_LARGE => ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payload_too_large",
+            "A mensagem eleitoral excede o limite.",
+            None,
+        ),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE => ApiError::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_media_type",
+            "Envie a mensagem eleitoral como application/json.",
+            None,
+        ),
+        _ => ApiError::new(StatusCode::BAD_REQUEST, invalid_code, invalid_message, None),
+    }
 }

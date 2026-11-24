@@ -138,9 +138,16 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Não foi possível criar o socket TCP")?;
 
+    let election_clock = state.start_election_clock();
     let service = api::router::create_router(state);
 
-    axum::serve(listener, service).await?;
+    let result = axum::serve(listener, service).await;
+
+    if let Some(clock) = election_clock {
+        clock.abort();
+    }
+
+    result?;
 
     Ok(())
 }

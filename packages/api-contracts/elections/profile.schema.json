@@ -5,7 +5,7 @@
     "version",
     "canonicalization",
     "encoding",
-    "signedPrefixHex",
+    "domainsHex",
     "digest",
     "digestEncoding",
     "signature",
@@ -35,8 +35,22 @@
     "encoding": {
       "const": "UTF-8"
     },
-    "signedPrefixHex": {
-      "const": "434150502d454c454354494f4e532f310a"
+    "domainsHex": {
+      "const": {
+        "ballot": "434150502d454c454354494f4e532f42414c4c4f542f3100",
+        "voter-registration": "434150502d454c454354494f4e532f524547495354524154494f4e2f3100",
+        "manifest": "434150502d454c454354494f4e532f4d414e49464553542f3100",
+        "board-entry": "434150502d454c454354494f4e532f424f4152442d454e5452592f3100",
+        "receipt": "434150502d454c454354494f4e532f524543454950542f3100",
+        "cancellation": "434150502d454c454354494f4e532f43414e43454c4c4154494f4e2f3100",
+        "closure": "434150502d454c454354494f4e532f434c4f535552452f3100",
+        "aggregate": "434150502d454c454354494f4e532f4147475245474154452f3100",
+        "authority-registration": "434150502d454c454354494f4e532f415554484f524954592d524547495354524154494f4e2f3100",
+        "decryption-share": "434150502d454c454354494f4e532f44454352595054494f4e2d53484152452f3100",
+        "result": "434150502d454c454354494f4e532f524553554c542f3100",
+        "authority-key-proof": "434150502d454c454354494f4e532f415554484f524954592d4b45592d50524f4f462f3100",
+        "decryption-proof": "434150502d454c454354494f4e532f44454352595054494f4e2d50524f4f462f3100"
+      }
     },
     "digest": {
       "const": "SHA-256"
@@ -193,7 +207,7 @@
       "additionalProperties": false
     },
     "signatureInput": {
-      "const": "prefix || UTF8(JCS(payload))"
+      "const": "Objetos assinados com kind e version: domain(payload.kind) || UTF8(JCS(payload)); ballot: domain(ballot) || UTF8(JCS(payload tipado com electionId, accountId, manifestHash, publicKey, ciphertexts)); o cadastro assina domain(voter-registration) || UTF8(JCS({electionId, accountId, publicKey})), mas transmite apenas {publicKey} e assinatura."
     },
     "objectDigest": {
       "const": "SHA256(signatureInput), excluding the outer signature"
@@ -204,7 +218,8 @@
         "voter-registration",
         "ballot",
         "decryption-share",
-        "otherKinds"
+        "otherKinds",
+        "authority-registration"
       ],
       "properties": {
         "voter-registration": {
@@ -218,6 +233,9 @@
         },
         "otherKinds": {
           "const": "server signing key; manifest contains its public copy"
+        },
+        "authority-registration": {
+          "const": "payload.authority.signingKey, proof of possession for the assigned account and election"
         }
       },
       "additionalProperties": false
@@ -231,7 +249,6 @@
         "manifestPublication",
         "calendar",
         "cancellation",
-        "scheduleChain",
         "boardChain",
         "receipt",
         "counting",
@@ -270,10 +287,6 @@
           "minLength": 1
         },
         "cancellation": {
-          "type": "string",
-          "minLength": 1
-        },
-        "scheduleChain": {
           "type": "string",
           "minLength": 1
         },
@@ -349,7 +362,7 @@
       ],
       "properties": {
         "hash": {
-          "const": "c = integer_big_endian(SHA256(prefix || UTF8(JCS(challengePayload)))) mod q"
+          "const": "c = integer_big_endian(SHA256(domain(challengePayload.kind) || UTF8(JCS(challengePayload)))) mod q"
         },
         "authorityKey": {
           "type": "object",

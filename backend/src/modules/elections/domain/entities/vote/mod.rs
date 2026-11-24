@@ -135,7 +135,7 @@ impl Vote {
         })
     }
 
-    /// Recupera o aceite idêntico, inclusive após encerramento ou troca de curso.
+    /// Recupera o aceite de mesmo conteúdo autenticado, inclusive após encerramento.
     ///
     /// Autenticar a conta antes desta consulta. Não chama a regra de novo aceite:
     /// não exige eleição aberta, nova elegibilidade ou posse da chave privada.
@@ -147,11 +147,8 @@ impl Vote {
         {
             return Err(VoteError::IdentityMismatch);
         }
-        if ballot.ballot().submission_id() != self.accepted.ballot().submission_id() {
-            return Err(VoteError::AlreadyParticipated);
-        }
         if ballot.ballot_hash() != self.accepted.ballot_hash() {
-            return Err(VoteError::SubmissionConflict);
+            return Err(VoteError::AlreadyParticipated);
         }
         Ok(self)
     }

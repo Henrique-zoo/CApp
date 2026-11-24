@@ -274,10 +274,6 @@ pub enum VoteError {
     #[error("A conta já participou desta eleição")]
     AlreadyParticipated,
 
-    /// O mesmo identificador de envio foi usado com outro payload.
-    #[error("O identificador de envio já possui outro conteúdo")]
-    SubmissionConflict,
-
     /// Contexto ou opções inválidos na cédula.
     #[error(transparent)]
     InvalidBallot(#[from] InvalidBallot),

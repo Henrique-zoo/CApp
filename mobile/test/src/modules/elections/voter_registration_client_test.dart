@@ -18,10 +18,10 @@ void main() {
   final vector = loadApiContractExample('election-voter-registration.json');
   final payload = vector['payload']! as Map<String, dynamic>;
   final accountId = UuidValue.withFormatValidation(
-    payload['accountId'] as String,
+    'a7000000-0000-4000-8000-000000000001',
   );
   final electionId = UuidValue.withFormatValidation(
-    payload['electionId'] as String,
+    'a7000000-0000-4000-8000-000000000137',
   );
   final publicKey = payload['publicKey'] as String;
   const empty = {
@@ -76,9 +76,8 @@ void main() {
       final text = utf8.decode(arguments['message'] as Uint8List);
       expect(
         text,
-        'CAPP-ELECTIONS/1\n{"accountId":"$accountId",'
-        '"electionId":"$electionId","kind":"voter-registration",'
-        '"publicKey":"$publicKey","version":1}',
+        'CAPP-ELECTIONS/REGISTRATION/1\u0000{"accountId":"$accountId",'
+        '"electionId":"$electionId","publicKey":"$publicKey"}',
       );
       final signature = vector['signature'] as String;
       return base64Url.decode(base64Url.normalize(signature));

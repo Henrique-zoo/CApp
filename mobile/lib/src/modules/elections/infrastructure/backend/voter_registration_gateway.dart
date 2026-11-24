@@ -27,11 +27,7 @@ final class BackendVoterRegistrationGateway
     void Function() ensureCurrentAccount,
   ) => _request(
     () => _api.register(proof.electionId, {
-      'payload': voterRegistrationPayload(
-        proof.accountId,
-        proof.electionId,
-        proof.publicKey,
-      ),
+      'payload': voterRegistrationRequestPayload(proof.publicKey),
       'signature': proof.signature,
     }, ensureCurrentAccount),
   );

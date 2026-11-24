@@ -1,14 +1,14 @@
-//! Quadro PostgreSQL: uma transação confirma participação, registro e acumulador.
+//! Quadro PostgreSQL: uma transação confirma a cédula, o recibo e o acumulador.
 //!
-//! A linha de `election_board` é bloqueada antes de verificar o relógio do banco.
+//! A linha de `election` é bloqueada antes de verificar o relógio do banco.
 //! Aceites e encerramento adquirem esse mesmo lock. Leituras públicas usam uma
 //! fotografia REPEATABLE READ, sem expor o acumulador durante a votação.
+//! O acumulador é armazenado em binário na ordem do manifesto. No encerramento,
+//! seus valores são convertidos em strings decimais para assinar o agregado público.
 
-use std::sync::Arc;
-
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Utc};
 use crypto_bigint::U2048;
-use serde_json::{Value, json};
+use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -18,24 +18,28 @@ use crate::infrastructure::database::PgDatabase;
 
 use super::super::{
     application::{
-        board::{BoardError, BoardSnapshot, ElectionBoard, FrozenBoard, RecordedBallot},
-        ports::{BoardSnapshotStream, ElectionBoardReader},
-        registration::{VoterIdentity, validate_registered_key},
-    },
-    crypto_wire::{
-        BallotContext, CryptoWireError, ServerSigner, object_digest, parse_strict_json,
-        verify_ballot, verify_calendar_origin, verify_manifest, verify_signed_object,
+        administration::BoardCancellation,
+        board::{
+            AcceptedVote, BoardClosing, BoardClosure, BoardError, BoardPublication, BoardSnapshot,
+            NewVote, RecordedBallot, VoteState, VoteWindow,
+        },
+        ports::{
+            BoardClosureTransaction, BoardSnapshotStream, ElectionBoardReader,
+            ElectionBoardRepository, VoteRepository, VoteTransaction,
+        },
+        registration::VoterIdentity,
+        verification::BallotVerificationContext,
     },
     domain::{
         cryptography::elgamal::{
-            ElGamalCiphertext, EncryptedBallot, GROUP_ID, accumulate_ballot, empty_accumulator,
-            validate_public_key,
+            ElGamalCiphertext, GROUP_ID, empty_accumulator, validate_public_key,
         },
-        profile::MAX_VOTER_COUNT,
+        entities::vote::VoteKey,
+        identifiers::ElectionId,
     },
 };
 use super::{
-    codec::decode_base64_url,
+    codec::decode_fingerprint,
     registration::{database_now, eligibility_deadline},
 };
 
@@ -45,52 +49,51 @@ impl From<sqlx::Error> for BoardError {
     }
 }
 
-impl From<CryptoWireError> for BoardError {
-    fn from(value: CryptoWireError) -> Self {
-        match value {
-            CryptoWireError::Signing => Self::SigningUnavailable,
-            invalid => Self::InvalidEvidence(Box::new(invalid)),
-        }
-    }
-}
-
-/// Adaptador de escrita; sua chave assina somente evidências confirmáveis.
-///
-/// O servidor conserva sua própria chave. Nenhum segredo externo, escolha em
-/// claro ou nonce de cifragem é recebido ou persistido por este adaptador.
+/// Persistência dos votos e do quadro eleitoral no mesmo pool PostgreSQL.
 #[derive(Clone)]
-pub struct PgElectionBoard {
-    pool: PgPool,
-    signer: Arc<ServerSigner>,
+pub struct PgElectionBoardRepository {
+    pub(super) pool: PgPool,
 }
 
 /// Quantidade máxima de registros carregados por página da exportação HTTP.
 pub const SNAPSHOT_PAGE_SIZE: i64 = 32;
 
+const COMPONENT_BYTES: usize = U2048::BYTES;
+const CIPHERTEXT_BYTES: usize = 2 * COMPONENT_BYTES;
+
 #[derive(sqlx::FromRow)]
 struct BoardRow {
     election_id: Uuid,
     manifest: Value,
-    calendar_origin: Value,
+    option_ids: Vec<Uuid>,
     manifest_hash: String,
-    schedule_hash: String,
     starts_at: DateTime<Utc>,
     ends_at: DateTime<Utc>,
+    server_signing_key: String,
     status: String,
-    requires_voter_registration: bool,
     head_hash: String,
     voter_count: i32,
-    accumulator: Value,
+    accumulator: Vec<u8>,
     closure: Option<Value>,
     aggregate: Option<Value>,
+    cancelled_at: Option<DateTime<Utc>>,
+    cancelled_by: Option<Uuid>,
+    cancellation_reason: Option<String>,
+}
+
+impl BoardRow {
+    fn cancellation(&self) -> Option<BoardCancellation> {
+        Some(BoardCancellation {
+            cancelled_at: self.cancelled_at?,
+            cancelled_by: self.cancelled_by?,
+            reason: self.cancellation_reason.as_ref()?.clone(),
+        })
+    }
 }
 
 #[derive(sqlx::FromRow)]
 struct StoredVote {
-    voter_id: Uuid,
-    submission_id: Uuid,
-    ballot_hash: String,
-    signed_ballot: Value,
+    ballot_hash: Vec<u8>,
     signed_entry: Value,
     signed_receipt: Value,
 }
@@ -113,10 +116,10 @@ impl StoredVote {
     }
 }
 
-impl PgElectionBoard {
-    /// Usa o pool da aplicação e a chave de assinatura própria do servidor.
-    pub fn new(pool: PgPool, signer: Arc<ServerSigner>) -> Self {
-        Self { pool, signer }
+impl PgElectionBoardRepository {
+    /// Usa o pool compartilhado com os leitores e o cadastro eleitoral.
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 }
 
@@ -129,12 +132,15 @@ impl ElectionBoardReader for PgDatabase {
     /// aguardando o consumidor. Desconectar o consumidor descarta a transação.
     /// Em falha posterior, envia erro e não termina o objeto JSON: um prefixo
     /// parcial nunca é apresentado como uma exportação completa bem-sucedida.
-    async fn stream_snapshot(&self, election_id: Uuid) -> Result<BoardSnapshotStream, BoardError> {
+    async fn stream_snapshot(
+        &self,
+        election_id: ElectionId,
+    ) -> Result<BoardSnapshotStream, BoardError> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             .execute(&mut *tx)
             .await?;
-        let board = load_board(&mut tx, election_id, false).await?;
+        let board = load_board(&mut tx, election_id.into_uuid(), false).await?;
         let (sender, receiver) = mpsc::channel(2);
         tokio::spawn(async move {
             if let Err(error) = stream_snapshot_transaction(tx, board, &sender).await {
@@ -149,15 +155,15 @@ impl ElectionBoardReader for PgDatabase {
     ///
     /// A resposta obtida do servidor ainda deve ser conservada em outro lugar
     /// para detectar truncamento/reescrita em exportações posteriores.
-    async fn read_checkpoint(&self, election_id: Uuid) -> Result<Value, BoardError> {
+    async fn read_checkpoint(&self, election_id: ElectionId) -> Result<Value, BoardError> {
         let row: Option<(i32, Value, Option<Value>)> = sqlx::query_as(
             "SELECT b.voter_count, b.manifest, e.signed_receipt
              FROM election_board b
-             LEFT JOIN election_board_entry e ON e.election_id = b.election_id
+             LEFT JOIN election_vote e ON e.election_id = b.election_id
                  AND e.entry_index = b.voter_count
              WHERE b.election_id = $1",
         )
-        .bind(election_id)
+        .bind(election_id.into_uuid())
         .fetch_optional(&self.pool)
         .await?;
         let (count, manifest, receipt) = row.ok_or(BoardError::NotFound)?;
@@ -168,336 +174,363 @@ impl ElectionBoardReader for PgDatabase {
         }
     }
 
-    async fn find_receipt(
-        &self,
-        election_id: Uuid,
-        authenticated_account_id: Uuid,
-    ) -> Result<Option<Value>, BoardError> {
-        let accepted =
-            read_accepted_vote(&self.pool, election_id, authenticated_account_id).await?;
-
-        Ok(accepted.map(|vote| vote.signed_receipt))
+    async fn find_receipt(&self, key: VoteKey) -> Result<Option<Value>, BoardError> {
+        Ok(sqlx::query_scalar(
+            "SELECT signed_receipt FROM election_vote
+             WHERE election_id = $1 AND account_id = $2",
+        )
+        .bind(key.election_id().into_uuid())
+        .bind(key.account_id().into_uuid())
+        .fetch_optional(&self.pool)
+        .await?)
     }
 }
 
-async fn read_accepted_vote(
-    pool: &PgPool,
-    election_id: Uuid,
-    authenticated_account_id: Uuid,
+async fn read_accepted_vote<'c>(
+    executor: impl sqlx::PgExecutor<'c>,
+    key: VoteKey,
 ) -> Result<Option<StoredVote>, BoardError> {
     let stored = sqlx::query_as(
-        "SELECT p.voter_id, p.submission_id, p.ballot_hash,
-                e.signed_ballot, e.signed_entry, e.signed_receipt
-         FROM election_participation p
-         JOIN election_board_entry e USING (election_id, voter_id)
-         WHERE p.election_id = $1 AND p.account_id = $2",
+        "SELECT ballot_hash, signed_entry, signed_receipt
+         FROM election_vote WHERE election_id = $1 AND account_id = $2",
     )
-    .bind(election_id)
-    .bind(authenticated_account_id)
-    .fetch_optional(pool)
+    .bind(key.election_id().into_uuid())
+    .bind(key.account_id().into_uuid())
+    .fetch_optional(executor)
     .await?;
 
     Ok(stored)
 }
 
 #[async_trait::async_trait]
-impl ElectionBoard for PgElectionBoard {
-    async fn open(&self, input: FrozenBoard) -> Result<BoardSnapshot, BoardError> {
-        let server_key = self.signer.public_key_base64()?;
-        let manifest = verify_manifest(&input.manifest, &server_key)?;
-        let calendar = verify_calendar_origin(&input.calendar_origin, &manifest, &server_key)?;
-        let starts_at = timestamp(&calendar["payload"]["startsAt"])?;
-        let ends_at = timestamp(&calendar["payload"]["endsAt"])?;
-        let schedule_hash = object_digest(&calendar["payload"])?;
-        let accumulator = empty_accumulator(manifest.option_ids.len())
-            .map_err(|_| BoardError::InvalidArtifact("opções do manifesto"))?;
-        let accumulator = encode_ciphertexts(&manifest.option_ids, &accumulator);
+impl ElectionBoardRepository for PgElectionBoardRepository {
+    type Transaction = PgBoardClosureTransaction;
+
+    async fn publish(&self, board: BoardPublication) -> Result<BoardSnapshot, BoardError> {
+        let election_id = board.election_id.into_uuid();
         let mut tx = self.pool.begin().await?;
-        // A chave primária também serializa duas publicações simultâneas.
         sqlx::query(
-            "INSERT INTO election_board
-             (election_id, manifest, calendar_origin, manifest_hash, schedule_hash,
-              starts_at, ends_at, head_hash, accumulator, requires_voter_registration)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$4,$8,$9)
-             ON CONFLICT (election_id) DO NOTHING",
+            "INSERT INTO election
+                 (election_id, academic_center_id, starts_at, ends_at, requires_voter_registration)
+             VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
         )
-        .bind(manifest.election_id)
-        .bind(&manifest.envelope)
-        .bind(&calendar)
-        .bind(&manifest.manifest_hash)
-        .bind(&schedule_hash)
-        .bind(starts_at)
-        .bind(ends_at)
-        .bind(accumulator)
-        .bind(input.requires_voter_registration)
+        .bind(election_id)
+        .bind(board.academic_center_id.into_uuid())
+        .bind(board.starts_at)
+        .bind(board.ends_at)
+        .bind(board.requires_registration)
         .execute(&mut *tx)
         .await?;
-        let board = load_board(&mut tx, manifest.election_id, true).await?;
-        // A assinatura PSS pode variar numa repetição; os payloads são a origem.
-        if board.manifest["payload"] != manifest.envelope["payload"]
-            || board.calendar_origin["payload"] != calendar["payload"]
-            || board.requires_voter_registration != input.requires_voter_registration
+        lock_election(&mut tx, election_id).await?;
+        let config: (Uuid, DateTime<Utc>, DateTime<Utc>, bool) = sqlx::query_as(
+            "SELECT academic_center_id, starts_at, ends_at, requires_voter_registration
+             FROM election WHERE election_id = $1",
+        )
+        .bind(election_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if config
+            != (
+                board.academic_center_id.into_uuid(),
+                board.starts_at,
+                board.ends_at,
+                board.requires_registration,
+            )
         {
             return Err(BoardError::AlreadyExists);
         }
-        let snapshot = snapshot_in_transaction(&mut tx, board).await?;
+        if insert_publication(&mut tx, &board).await? {
+            mark_published(&mut tx, election_id).await?;
+        }
+        let existing = load_board(&mut tx, election_id, true).await?;
+        if existing.manifest_hash != board.manifest_hash {
+            return Err(BoardError::AlreadyExists);
+        }
+        let snapshot = snapshot_in_transaction(&mut tx, existing).await?;
         tx.commit().await?;
         Ok(snapshot)
     }
 
-    async fn record(
-        &self,
-        election_id: Uuid,
-        voter: VoterIdentity,
-        raw: &[u8],
-    ) -> Result<RecordedBallot, BoardError> {
-        let envelope = parse_strict_json(raw)?;
-        if voter.account_id.is_nil() {
-            return Err(BoardError::NotEligible);
-        }
-        // A verificação RSA e as exponenciações da cédula não dependem da
-        // cabeça mutável. Fazê-las antes do lock evita serializar esse custo
-        // para todos os eleitores. Origem e participação são relidas abaixo.
-        let origin: BoardRow = sqlx::query_as("SELECT * FROM election_board WHERE election_id=$1")
-            .bind(election_id)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or(BoardError::NotFound)?;
-        let option_ids = option_ids(&origin.manifest)?;
-        let previous: Option<(Uuid, Value)> = sqlx::query_as(
-            "SELECT p.voter_id,e.signed_ballot FROM election_participation p
-             JOIN election_board_entry e USING (election_id,voter_id)
-             WHERE p.election_id=$1 AND p.account_id=$2",
-        )
-        .bind(election_id)
-        .bind(voter.account_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        // A repetição preserva a identidade pública e a chave do voto já aceito.
-        let (verified_voter, verified_key) = match previous.as_ref() {
-            Some((id, ballot)) => (*id, Some(text(&ballot["payload"]["publicKey"])?.to_owned())),
-            None => (voter.account_id, None),
-        };
-        let verified = verify_ballot(
-            raw,
-            &BallotContext {
-                election_id,
-                manifest_hash: origin.manifest_hash.clone(),
-                voter_id: verified_voter,
-                expected_public_key: verified_key,
-                option_ids: option_ids.clone(),
-            },
-        )?;
-        let ciphertexts = EncryptedBallot::new(verified.ciphertexts.clone())
-            .map_err(|_| BoardError::InvalidArtifact("cifras da cédula"))?;
-        let mut tx = self.pool.begin().await?;
-        let board = load_board(&mut tx, election_id, true).await?;
-        if board.manifest != origin.manifest
-            || board.manifest_hash != origin.manifest_hash
-            || board.calendar_origin != origin.calendar_origin
-            || board.schedule_hash != origin.schedule_hash
-            || board.starts_at != origin.starts_at
-            || board.ends_at != origin.ends_at
-            || board.requires_voter_registration != origin.requires_voter_registration
-        {
-            return Err(BoardError::InvalidArtifact(
-                "origem modificada durante o aceite",
-            ));
-        }
-        let stored = sqlx::query_as::<_, StoredVote>(
-            "SELECT p.voter_id, p.submission_id, p.ballot_hash,
-                    e.signed_ballot, e.signed_entry, e.signed_receipt
-             FROM election_participation p
-             JOIN election_board_entry e USING (election_id, voter_id)
-             WHERE p.election_id = $1 AND p.account_id = $2",
-        )
-        .bind(election_id)
-        .bind(voter.account_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        if let Some(stored) = stored {
-            // Uma nova assinatura PSS válida do mesmo payload recupera o
-            // registro original. Assinatura adulterada nunca recupera aceite.
-            if uuid(&envelope["payload"]["voterId"])? != stored.voter_id {
-                return Err(BoardError::VoterMismatch);
-            }
-            if uuid(&envelope["payload"]["submissionId"])? != stored.submission_id {
-                return Err(BoardError::AlreadyParticipated);
-            }
-            if verified.ballot_hash != stored.ballot_hash
-                || envelope["payload"] != stored.signed_ballot["payload"]
-            {
-                return Err(BoardError::SubmissionConflict);
-            }
-            tx.commit().await?;
-            return Ok(stored.into_record(true));
-        }
-        if previous.is_some() {
-            return Err(BoardError::InvalidArtifact(
-                "participação removida durante o aceite",
-            ));
-        }
-
-        let eligible_until = eligibility_deadline(&mut tx, election_id, voter).await?;
-        let now = database_now(&mut tx).await?;
-        if board.status != "open" {
-            return Err(BoardError::Closed);
-        }
-        if now < board.starts_at {
-            return Err(BoardError::VotingNotStarted);
-        }
-        if now >= board.ends_at {
-            return Err(BoardError::VotingEnded);
-        }
-        if eligible_until.is_none_or(|end| now >= end) {
-            return Err(BoardError::NotEligible);
-        }
-        if board.requires_voter_registration {
-            let registered_key: Option<Vec<u8>> = sqlx::query_scalar(
-                "SELECT public_key FROM election_voter_registration
-                 WHERE election_id = $1 AND account_id = $2",
-            )
-            .bind(election_id)
-            .bind(voter.account_id)
-            .fetch_optional(&mut *tx)
-            .await?;
-            let ballot_key = decode_base64_url(text(&verified.envelope["payload"]["publicKey"])?)
-                .map_err(|error| BoardError::InvalidEvidence(Box::new(error)))?;
-            validate_registered_key(registered_key.as_deref(), &ballot_key)?;
-        }
-        validate_signing_origin(&board, &self.signer)?;
-        if board.voter_count >= MAX_VOTER_COUNT as i32 {
-            return Err(BoardError::LimitExceeded);
-        }
-        let used_voter: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM election_participation
-                           WHERE election_id=$1 AND voter_id=$2)",
-        )
-        .bind(election_id)
-        .bind(verified_voter)
-        .fetch_one(&mut *tx)
-        .await?;
-        if used_voter {
-            return Err(BoardError::VoterMismatch);
-        }
-        let submission_id = uuid(&verified.envelope["payload"]["submissionId"])?;
-        let accumulator = decode_ciphertexts(&board.accumulator, &option_ids)?;
-        let accumulated = accumulate_ballot(accumulator, &ciphertexts)
-            .map_err(|_| BoardError::InvalidArtifact("acumulador"))?;
-        let next_index = board.voter_count + 1;
-        let signed = self
-            .signer
-            .issue_record(&verified, next_index as u32, &board.head_hash)?;
-        sqlx::query(
-            "INSERT INTO election_participation
-             (election_id,account_id,voter_id,submission_id,ballot_hash,accepted_at)
-             VALUES ($1,$2,$3,$4,$5,$6)",
-        )
-        .bind(election_id)
-        .bind(voter.account_id)
-        .bind(verified_voter)
-        .bind(submission_id)
-        .bind(&verified.ballot_hash)
-        .bind(now)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query(
-            "INSERT INTO election_board_entry
-             (election_id,entry_index,voter_id,previous_hash,entry_hash,
-              signed_ballot,signed_entry,signed_receipt)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-        )
-        .bind(election_id)
-        .bind(next_index)
-        .bind(verified_voter)
-        .bind(&board.head_hash)
-        .bind(&signed.entry_hash)
-        .bind(&verified.envelope)
-        .bind(&signed.board_entry)
-        .bind(&signed.receipt)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query(
-            "UPDATE election_board SET head_hash=$2,voter_count=$3,accumulator=$4
-             WHERE election_id=$1",
-        )
-        .bind(election_id)
-        .bind(&signed.entry_hash)
-        .bind(next_index)
-        .bind(encode_ciphertexts(&option_ids, &accumulated))
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(RecordedBallot {
-            entry: signed.board_entry,
-            receipt: signed.receipt,
-            recovered: false,
-        })
-    }
-
-    async fn recover(
-        &self,
-        election_id: Uuid,
-        authenticated_account_id: Uuid,
-    ) -> Result<Option<RecordedBallot>, BoardError> {
-        let accepted =
-            read_accepted_vote(&self.pool, election_id, authenticated_account_id).await?;
-
-        Ok(accepted.map(|vote| vote.into_record(true)))
-    }
-
-    async fn snapshot(&self, election_id: Uuid) -> Result<BoardSnapshot, BoardError> {
+    async fn snapshot(&self, election_id: ElectionId) -> Result<BoardSnapshot, BoardError> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             .execute(&mut *tx)
             .await?;
-        let board = load_board(&mut tx, election_id, false).await?;
+        let board = load_board(&mut tx, election_id.into_uuid(), false).await?;
         let snapshot = snapshot_in_transaction(&mut tx, board).await?;
         tx.commit().await?;
         Ok(snapshot)
     }
 
-    async fn close(&self, election_id: Uuid) -> Result<BoardSnapshot, BoardError> {
-        let mut tx = self.pool.begin().await?;
-        let mut board = load_board(&mut tx, election_id, true).await?;
-        if board.status == "closed" {
-            let snapshot = snapshot_in_transaction(&mut tx, board).await?;
-            tx.commit().await?;
-            return Ok(snapshot);
-        }
-        let now = database_now(&mut tx).await?;
-        if now < board.ends_at {
-            return Err(BoardError::NotYetEnded);
-        }
-        validate_signing_origin(&board, &self.signer)?;
-        decode_ciphertexts(&board.accumulator, &option_ids(&board.manifest)?)?;
-        let closure = self.signer.sign_payload(&json!({
-            "version":1,"kind":"closure","electionId":election_id,
-            "manifestHash":board.manifest_hash,"scheduleHash":board.schedule_hash,
-            "headHash":board.head_hash,"voterCount":board.voter_count,
-            "closedAt":now.to_rfc3339_opts(SecondsFormat::Secs,true),
-        }))?;
-        let aggregate = self.signer.sign_payload(&json!({
-            "version":1,"kind":"aggregate","electionId":election_id,
-            "manifestHash":board.manifest_hash,
-            "closureHash":object_digest(&closure["payload"])?,
-            "ciphertexts":board.accumulator,
-        }))?;
-        sqlx::query(
-            "UPDATE election_board SET status='closed',closure=$2,aggregate=$3
-             WHERE election_id=$1",
+    async fn due_for_closure(&self) -> Result<Vec<ElectionId>, BoardError> {
+        let ids: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT election_id FROM election
+             WHERE status = 'published' AND ends_at <= statement_timestamp()
+             ORDER BY ends_at, election_id",
         )
-        .bind(election_id)
-        .bind(&closure)
-        .bind(&aggregate)
-        .execute(&mut *tx)
+        .fetch_all(&self.pool)
         .await?;
-        board.closure = Some(closure);
-        board.aggregate = Some(aggregate);
-        let snapshot = snapshot_in_transaction(&mut tx, board).await?;
-        tx.commit().await?;
+        ids.into_iter()
+            .map(|id| {
+                ElectionId::try_from_uuid(id)
+                    .map_err(|_| BoardError::InvalidArtifact("identificador da eleição"))
+            })
+            .collect()
+    }
+
+    async fn lock_closure(
+        &self,
+        election_id: ElectionId,
+    ) -> Result<(Option<BoardClosing>, Self::Transaction), BoardError> {
+        let mut transaction = self.pool.begin().await?;
+        let board = load_board(&mut transaction, election_id.into_uuid(), true).await?;
+        if board.status == "cancelled" {
+            return Err(BoardError::Cancelled);
+        }
+        let closing = if board.status == "closed" {
+            None
+        } else {
+            Some(BoardClosing {
+                election_id,
+                ends_at: board.ends_at,
+                now: database_now(&mut transaction).await?,
+                server_key: board.server_signing_key.clone(),
+                manifest_hash: board.manifest_hash.clone(),
+                head_hash: board.head_hash.clone(),
+                voter_count: board.voter_count,
+                option_ids: board.option_ids.clone(),
+                accumulator: decode_accumulator(&board.accumulator, board.option_ids.len())?,
+            })
+        };
+
+        Ok((closing, PgBoardClosureTransaction { transaction, board }))
+    }
+}
+
+/// Transação que conserva o quadro estável até publicar o encerramento.
+pub struct PgBoardClosureTransaction {
+    transaction: Transaction<'static, Postgres>,
+    board: BoardRow,
+}
+
+#[async_trait::async_trait]
+impl BoardClosureTransaction for PgBoardClosureTransaction {
+    async fn finish(mut self, evidence: Option<BoardClosure>) -> Result<BoardSnapshot, BoardError> {
+        if let Some(evidence) = evidence {
+            sqlx::query(
+                "UPDATE election_board SET closure = $2, aggregate = $3
+                 WHERE election_id = $1",
+            )
+            .bind(self.board.election_id)
+            .bind(&evidence.closure)
+            .bind(&evidence.aggregate)
+            .execute(&mut *self.transaction)
+            .await?;
+
+            sqlx::query("UPDATE election SET status = 'closed' WHERE election_id = $1")
+                .bind(self.board.election_id)
+                .execute(&mut *self.transaction)
+                .await?;
+            self.board.closure = Some(evidence.closure);
+            self.board.aggregate = Some(evidence.aggregate);
+        }
+
+        let snapshot = snapshot_in_transaction(&mut self.transaction, self.board).await?;
+        self.transaction.commit().await?;
         Ok(snapshot)
     }
+}
+
+/// Estado mutável necessário ao aceite, consultado sob o bloqueio da eleição.
+#[derive(sqlx::FromRow)]
+struct VoteBoardRow {
+    closed: bool,
+    cancelled: bool,
+    starts_at: DateTime<Utc>,
+    ends_at: DateTime<Utc>,
+    server_signing_key: String,
+    requires_voter_registration: bool,
+    head_hash: String,
+    voter_count: i32,
+    choice_count: i32,
+    accumulator: Vec<u8>,
+}
+
+/// Transação PostgreSQL que conserva o bloqueio até a gravação do aceite.
+pub struct PgVoteTransaction {
+    transaction: Transaction<'static, Postgres>,
+    key: VoteKey,
+}
+
+#[async_trait::async_trait]
+impl VoteRepository for PgElectionBoardRepository {
+    type Transaction = PgVoteTransaction;
+
+    async fn ballot_context(
+        &self,
+        election_id: ElectionId,
+    ) -> Result<BallotVerificationContext, BoardError> {
+        let (manifest_hash, option_ids): (String, Vec<Uuid>) = sqlx::query_as(
+            "SELECT manifest_hash, option_ids FROM election_board WHERE election_id = $1",
+        )
+        .bind(election_id.into_uuid())
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(BoardError::NotFound)?;
+
+        Ok(BallotVerificationContext {
+            manifest_hash: decode_fingerprint(&manifest_hash)
+                .map_err(|_| BoardError::InvalidArtifact("hash do manifesto"))?,
+            option_ids,
+        })
+    }
+
+    async fn lock_vote(
+        &self,
+        election_id: ElectionId,
+        voter: VoterIdentity,
+    ) -> Result<(VoteState, Self::Transaction), BoardError> {
+        let mut transaction = self.pool.begin().await?;
+        let key = VoteKey::new(election_id, voter.account_id);
+
+        // A leitura do quadro começa depois do bloqueio para ver o último aceite confirmado.
+        lock_election(&mut transaction, election_id.into_uuid()).await?;
+        let board: VoteBoardRow = sqlx::query_as(
+            "SELECT e.status = 'closed' AS closed, e.status = 'cancelled' AS cancelled,
+                    e.starts_at, e.ends_at, b.server_signing_key, e.requires_voter_registration,
+                    b.head_hash, b.voter_count, b.accumulator, cardinality(b.option_ids) AS choice_count
+             FROM election e JOIN election_board b USING (election_id) WHERE e.election_id = $1",
+        )
+        .bind(election_id.into_uuid())
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(BoardError::NotFound)?;
+
+        // A leitura ocorre depois de adquirir o lock, inclusive após esperar por
+        // um aceite concorrente da mesma conta.
+        let state = if let Some(stored) = read_accepted_vote(&mut *transaction, key).await? {
+            let ballot_hash = stored
+                .ballot_hash
+                .as_slice()
+                .try_into()
+                .map_err(|_| BoardError::InvalidArtifact("hash do voto aceito"))?;
+            VoteState::Accepted(AcceptedVote {
+                ballot_hash,
+                record: stored.into_record(true),
+            })
+        } else {
+            let eligible_until = eligibility_deadline(&mut transaction, election_id, voter).await?;
+            let (now, registered_key): (DateTime<Utc>, Option<Vec<u8>>) = sqlx::query_as(
+                "SELECT clock_timestamp(), (
+                     SELECT public_key FROM election_voter_registration
+                     WHERE election_id = $1 AND account_id = $2 AND $3
+                 )",
+            )
+            .bind(election_id.into_uuid())
+            .bind(key.account_id().into_uuid())
+            .bind(board.requires_voter_registration)
+            .fetch_one(&mut *transaction)
+            .await?;
+
+            VoteState::Pending(VoteWindow {
+                closed: board.closed,
+                cancelled: board.cancelled,
+                starts_at: board.starts_at,
+                ends_at: board.ends_at,
+                eligible_until,
+                now,
+                server_key: board.server_signing_key,
+                requires_registration: board.requires_voter_registration,
+                registered_key,
+                head_hash: board.head_hash,
+                voter_count: board.voter_count as u32,
+                accumulator: decode_accumulator(&board.accumulator, board.choice_count as usize)?,
+            })
+        };
+
+        Ok((state, PgVoteTransaction { transaction, key }))
+    }
+}
+
+#[async_trait::async_trait]
+impl VoteTransaction for PgVoteTransaction {
+    async fn save(mut self, vote: NewVote) -> Result<RecordedBallot, BoardError> {
+        sqlx::query(
+            "WITH accepted AS (
+                 INSERT INTO election_vote
+                     (election_id, account_id, ballot_hash, public_key, accepted_at,
+                      entry_index, entry_hash, signed_entry, signed_receipt)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 RETURNING election_id, entry_index, entry_hash
+             )
+             UPDATE election_board b SET head_hash = v.entry_hash, voter_count = v.entry_index, accumulator = $10
+             FROM accepted v WHERE b.election_id = v.election_id",
+        )
+        .bind(self.key.election_id().into_uuid())
+        .bind(self.key.account_id().into_uuid())
+        .bind(vote.ballot_hash.as_slice())
+        .bind(&vote.public_key)
+        .bind(vote.accepted_at)
+        .bind(vote.index as i32)
+        .bind(&vote.entry_hash)
+        .bind(&vote.record.entry)
+        .bind(&vote.record.receipt)
+        .bind(encode_accumulator(&vote.accumulator))
+        .execute(&mut *self.transaction)
+        .await?;
+
+        self.transaction.commit().await?;
+        Ok(vote.record)
+    }
+}
+
+pub(super) async fn insert_publication(
+    tx: &mut Transaction<'_, Postgres>,
+    board: &BoardPublication,
+) -> Result<bool, BoardError> {
+    let election_id = board.election_id.into_uuid();
+    let accumulator = empty_accumulator(board.option_ids.len())
+        .map_err(|_| BoardError::InvalidArtifact("opções do manifesto"))?;
+
+    // A eleição já está bloqueada. A chave primária garante um único quadro.
+    let result = sqlx::query(
+        "INSERT INTO election_board (election_id, manifest, manifest_hash, head_hash, accumulator)
+         SELECT $1, $2, $3, $3, $4
+         WHERE NOT EXISTS (SELECT 1 FROM election_board WHERE election_id = $1)",
+    )
+    .bind(election_id)
+    .bind(&board.manifest)
+    .bind(&board.manifest_hash)
+    .bind(encode_accumulator(&accumulator))
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(result.rows_affected() == 1)
+}
+
+pub(super) async fn mark_published(
+    tx: &mut Transaction<'_, Postgres>,
+    election_id: Uuid,
+) -> Result<(), BoardError> {
+    sqlx::query("UPDATE election SET status = 'published' WHERE election_id = $1")
+        .bind(election_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn lock_election(
+    tx: &mut Transaction<'_, Postgres>,
+    election_id: Uuid,
+) -> Result<(), BoardError> {
+    sqlx::query_scalar::<_, Uuid>(
+        "SELECT election_id FROM election WHERE election_id = $1 FOR UPDATE",
+    )
+    .bind(election_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(BoardError::NotFound)?;
+    Ok(())
 }
 
 async fn load_board(
@@ -505,16 +538,17 @@ async fn load_board(
     election_id: Uuid,
     locked: bool,
 ) -> Result<BoardRow, BoardError> {
-    let sql = if locked {
-        "SELECT * FROM election_board WHERE election_id=$1 FOR UPDATE"
-    } else {
-        "SELECT * FROM election_board WHERE election_id=$1"
-    };
-    sqlx::query_as(sql)
-        .bind(election_id)
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or(BoardError::NotFound)
+    if locked {
+        lock_election(tx, election_id).await?;
+    }
+    sqlx::query_as(
+        "SELECT b.*, e.starts_at, e.ends_at, e.status, e.cancelled_at, e.cancelled_by, e.cancellation_reason
+         FROM election_board b JOIN election e USING (election_id) WHERE b.election_id = $1",
+    )
+    .bind(election_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(BoardError::NotFound)
 }
 
 async fn snapshot_in_transaction(
@@ -523,7 +557,7 @@ async fn snapshot_in_transaction(
 ) -> Result<BoardSnapshot, BoardError> {
     let rows: Vec<JournalEntry> = sqlx::query_as(
         "SELECT entry_index,previous_hash,entry_hash,signed_entry
-         FROM election_board_entry WHERE election_id=$1 ORDER BY entry_index",
+         FROM election_vote WHERE election_id=$1 ORDER BY entry_index",
     )
     .bind(board.election_id)
     .fetch_all(&mut **tx)
@@ -538,9 +572,12 @@ async fn snapshot_in_transaction(
     }
     validate_final_head(&board, rows.len() as i32, &expected_head)?;
     let checkpoint = load_checkpoint(tx, &board).await?;
+    let cancellation = board.cancellation();
     Ok(BoardSnapshot {
         manifest: board.manifest,
-        calendar_origin: board.calendar_origin,
+        starts_at: board.starts_at,
+        ends_at: board.ends_at,
+        cancellation,
         entries: rows.into_iter().map(|row| row.signed_entry).collect(),
         checkpoint,
         closure: board.closure,
@@ -585,7 +622,7 @@ async fn load_checkpoint(
     } else {
         Some(
             sqlx::query_scalar(
-                "SELECT signed_receipt FROM election_board_entry
+                "SELECT signed_receipt FROM election_vote
              WHERE election_id=$1 AND entry_index=$2",
             )
             .bind(board.election_id)
@@ -615,8 +652,14 @@ async fn stream_snapshot_transaction(
 ) -> Result<(), BoardError> {
     let mut prefix = b"{\"manifest\":".to_vec();
     append_json(&mut prefix, &board.manifest)?;
-    prefix.extend_from_slice(b",\"calendarOrigin\":");
-    append_json(&mut prefix, &board.calendar_origin)?;
+    prefix.extend_from_slice(b",\"startsAt\":");
+    append_json(&mut prefix, &board.starts_at)?;
+    prefix.extend_from_slice(b",\"endsAt\":");
+    append_json(&mut prefix, &board.ends_at)?;
+    if let Some(cancellation) = board.cancellation() {
+        prefix.extend_from_slice(b",\"cancellation\":");
+        append_json(&mut prefix, &cancellation)?;
+    }
     prefix.extend_from_slice(b",\"entries\":[");
     if sender.send(Ok(prefix)).await.is_err() {
         return Ok(());
@@ -629,7 +672,7 @@ async fn stream_snapshot_transaction(
         }
         let page: Vec<JournalEntry> = sqlx::query_as(
             "SELECT entry_index,previous_hash,entry_hash,signed_entry
-             FROM election_board_entry WHERE election_id=$1 AND entry_index>$2
+             FROM election_vote WHERE election_id=$1 AND entry_index>$2
              ORDER BY entry_index LIMIT $3",
         )
         .bind(board.election_id)
@@ -683,92 +726,44 @@ fn uuid(value: &Value) -> Result<Uuid, BoardError> {
     Uuid::parse_str(text(value)?).map_err(|_| BoardError::InvalidArtifact("UUID"))
 }
 
-fn timestamp(value: &Value) -> Result<DateTime<Utc>, BoardError> {
-    DateTime::parse_from_rfc3339(text(value)?)
-        .map(|value| value.with_timezone(&Utc))
-        .map_err(|_| BoardError::InvalidArtifact("instante do calendário"))
+/// Concatena os pares `(a, b)` em big-endian, seguindo a ordem do manifesto.
+fn encode_accumulator(ciphertexts: &[ElGamalCiphertext]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(ciphertexts.len() * CIPHERTEXT_BYTES);
+
+    for cipher in ciphertexts {
+        bytes.extend_from_slice(&cipher.a.to_be_bytes());
+        bytes.extend_from_slice(&cipher.b.to_be_bytes());
+    }
+
+    bytes
 }
 
-fn option_ids(manifest: &Value) -> Result<Vec<Uuid>, BoardError> {
-    manifest["payload"]["options"]
-        .as_array()
-        .ok_or(BoardError::InvalidArtifact("opções do manifesto"))?
-        .iter()
-        .map(|option| uuid(&option["id"]))
-        .collect()
-}
-
-fn encode_ciphertexts(options: &[Uuid], ciphertexts: &[ElGamalCiphertext]) -> Value {
-    Value::Array(options.iter().zip(ciphertexts).map(|(option, cipher)| {
-        json!({
-            "optionId":option,
-            "a":rsa::BigUint::from_bytes_be(cipher.a.to_be_bytes().as_slice()).to_str_radix(10),
-            "b":rsa::BigUint::from_bytes_be(cipher.b.to_be_bytes().as_slice()).to_str_radix(10),
-        })
-    }).collect())
-}
-
-fn decode_ciphertexts(
-    value: &Value,
-    options: &[Uuid],
+/// Reconstitui uma cifra por posição do manifesto e valida os elementos do grupo.
+/// O produto de cifras pode conter a identidade `1`, inclusive no quadro vazio.
+fn decode_accumulator(
+    bytes: &[u8],
+    choice_count: usize,
 ) -> Result<Vec<ElGamalCiphertext>, BoardError> {
-    let values = value
-        .as_array()
-        .ok_or(BoardError::InvalidArtifact("acumulador"))?;
-    if values.len() != options.len() {
+    let (pairs, remainder) = bytes.as_chunks::<CIPHERTEXT_BYTES>();
+    if !remainder.is_empty() || pairs.len() != choice_count {
         return Err(BoardError::InvalidArtifact("dimensão do acumulador"));
     }
-    values
+
+    pairs
         .iter()
-        .zip(options)
-        .map(|(value, option)| {
-            if uuid(&value["optionId"])? != *option {
-                return Err(BoardError::InvalidArtifact("ordem do acumulador"));
-            }
-            let parse = |value: &Value| -> Result<U2048, BoardError> {
-                let decimal = text(value)?;
-                if decimal.is_empty()
-                    || (decimal.len() > 1 && decimal.starts_with('0'))
-                    || !decimal.bytes().all(|byte| byte.is_ascii_digit())
-                {
-                    return Err(BoardError::InvalidArtifact("inteiro do acumulador"));
-                }
-                let number = U2048::from_str_radix_vartime(decimal, 10)
-                    .map_err(|_| BoardError::InvalidArtifact("inteiro do acumulador"))?;
-                if number != U2048::ONE {
-                    validate_public_key(GROUP_ID, &number)
+        .map(|pair| {
+            let (a, b) = pair.split_at(COMPONENT_BYTES);
+            let a = U2048::from_be_slice(a);
+            let b = U2048::from_be_slice(b);
+
+            for component in [&a, &b] {
+                if *component != U2048::ONE {
+                    validate_public_key(GROUP_ID, component)
                         .map_err(|_| BoardError::InvalidArtifact("elemento do acumulador"))?;
                 }
-                Ok(number)
-            };
-            Ok(ElGamalCiphertext {
-                a: parse(&value["a"])?,
-                b: parse(&value["b"])?,
-            })
+            }
+
+            Ok(ElGamalCiphertext { a, b })
         })
         .collect()
-}
-
-fn validate_signing_origin(board: &BoardRow, signer: &ServerSigner) -> Result<(), BoardError> {
-    let key = signer.public_key_base64()?;
-    let manifest = &board.manifest["payload"];
-    let calendar = &board.calendar_origin["payload"];
-    if text(&manifest["serverSigningKey"])? != key
-        || uuid(&manifest["electionId"])? != board.election_id
-        || uuid(&calendar["electionId"])? != board.election_id
-        || object_digest(manifest)? != board.manifest_hash
-        || object_digest(calendar)? != board.schedule_hash
-        || text(&manifest["calendarOriginHash"])? != board.schedule_hash
-        || timestamp(&calendar["startsAt"])? != board.starts_at
-        || timestamp(&calendar["endsAt"])? != board.ends_at
-    {
-        return Err(BoardError::InvalidArtifact(
-            "origem ou chave de assinatura divergente",
-        ));
-    }
-    verify_signed_object(&board.manifest, &key)
-        .map_err(|_| BoardError::InvalidArtifact("assinatura do manifesto armazenado"))?;
-    verify_signed_object(&board.calendar_origin, &key)
-        .map_err(|_| BoardError::InvalidArtifact("assinatura do calendário armazenado"))?;
-    Ok(())
 }

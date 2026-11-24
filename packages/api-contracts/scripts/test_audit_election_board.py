@@ -31,8 +31,7 @@ class BoardAuditTests(unittest.TestCase):
     def snapshot(self, count=2, closed=False, scope="valid"):
         return {
             "manifest": self.envelope(f"{scope}/manifest"),
-            "calendarOrigin": self.envelope(f"{scope}/calendar-origin"),
-            "scheduleChanges": [self.envelope(f"{scope}/{kind}") for kind in ("delay", "extension")],
+            **self.corpus["periods"][scope],
             "entries": [self.envelope(f"{scope}/entry-{i}") for i in range(count)],
             "checkpoint": self.envelope(f"{scope}/receipt-{count - 1}") if count else None,
             "closure": self.envelope(f"{scope}/closure") if closed else None,
@@ -140,14 +139,16 @@ class BoardAuditTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             self.auditor.audit(self.snapshot(2), receipt=receipt)
 
-    def test_calendar_history_can_grow_but_not_disappear(self):
-        earlier = self.snapshot(0)
-        earlier["scheduleChanges"] = earlier["scheduleChanges"][:1]
-        _, anchor = self.auditor.audit(earlier)
-        report, anchor = self.auditor.audit(self.snapshot(1), anchor)
-        self.assertEqual(report["continuity"], "verified")
-        with self.assertRaisesRegex(ContractError, "calendário truncado"):
-            self.auditor.audit(earlier, anchor)
+    def test_period_must_be_consistent_with_the_export(self):
+        inverted = self.snapshot()
+        inverted["endsAt"] = inverted["startsAt"]
+        with self.assertRaisesRegex(ContractError, "Período"):
+            self.auditor.audit(inverted)
+
+        closed = self.snapshot(closed=True)
+        closed["endsAt"] = "2026-12-31T12:00:00Z"
+        with self.assertRaisesRegex(ContractError, "Fechamento anterior ao fim informado"):
+            self.auditor.audit(closed)
 
     def test_cli_keeps_anchor_unchanged_after_failure_and_other_scope(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -271,10 +272,8 @@ class SignedForkTests(unittest.TestCase):
         )
         return {"payload": payload, "signature": base64.urlsafe_b64encode(signature).rstrip(b"=").decode()}
 
-    def signed_snapshot(self, reverse=False, closed=False, same_submission=False, same_voter=False):
+    def signed_snapshot(self, reverse=False, closed=False, same_voter=False):
         result = self.snapshot(2)
-        result.pop("scheduleChanges")
-        result["calendarOrigin"] = self.sign(result["calendarOrigin"]["payload"])
         manifest = result["manifest"]["payload"]
         manifest["serverSigningKey"] = self.new_key
         result["manifest"] = self.sign(manifest)
@@ -288,10 +287,8 @@ class SignedForkTests(unittest.TestCase):
             entry.update(manifestHash=manifest_hash, previousHash=head, index=position)
             ballot = entry["ballot"]["payload"]
             ballot.update(manifestHash=manifest_hash, publicKey=self.voter_key)
-            if same_submission:
-                ballot["submissionId"] = first_ballot["submissionId"]
             if same_voter:
-                ballot["voterId"] = first_ballot["voterId"]
+                ballot["accountId"] = first_ballot["accountId"]
             entry["ballot"] = self.sign(ballot, self.voter_private)
             result["entries"][position - 1] = self.sign(entry)
             head = self.auditor.hash(entry)
@@ -301,8 +298,7 @@ class SignedForkTests(unittest.TestCase):
         result["checkpoint"] = self.sign(receipt)
         if closed:
             closure = self.envelope("valid/closure")["payload"]
-            closure.update(manifestHash=manifest_hash, headHash=head,
-                           scheduleHash=self.auditor.hash(result["calendarOrigin"]["payload"]))
+            closure.update(manifestHash=manifest_hash, headHash=head)
             result["closure"] = self.sign(closure)
             aggregate = self.envelope("valid/aggregate")["payload"]
             aggregate.update(manifestHash=manifest_hash, closureHash=self.auditor.hash(closure))
@@ -318,14 +314,9 @@ class SignedForkTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             self.fork_auditor.audit(rewritten, anchor)
 
-    def test_current_store_shape_without_schedule_changes(self):
+    def test_current_store_shape_with_unsigned_period(self):
         report, _ = self.fork_auditor.audit(self.signed_snapshot(closed=True))
         self.assertTrue(report["matchesPublishedClosure"])
-
-    def test_submission_id_is_scoped_to_each_voter(self):
-        report, _ = self.fork_auditor.audit(self.signed_snapshot(same_submission=True))
-        self.assertEqual(report["integrity"], "valid")
-        self.assertEqual(report["entryCount"], 2)
 
     def test_signed_duplicate_voter_is_rejected(self):
         with self.assertRaisesRegex(ContractError, "Eleitor repetido"):

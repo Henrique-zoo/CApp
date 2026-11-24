@@ -21,15 +21,35 @@ class ElectionBallotEndpointTests(unittest.TestCase):
             location = pointer([*path, *parts, "content", "application/json", "schema"])
             return validate_instance(value, {"$ref": f"{SPEC_PATH.as_uri()}#{location}"}, registry)
 
-        ballot = envelopes["valid/ballot-0"]
+        evidence = envelopes["valid/ballot-0"]
+        ballot = {
+            "payload": {
+                field: evidence["payload"][field]
+                for field in ("manifestHash", "publicKey", "ciphertexts")
+            },
+            "signature": evidence["signature"],
+        }
         self.assertFalse(errors(ballot, "requestBody"))
-        self.assertTrue(errors({**ballot, "choice": "Aurora"}, "requestBody"))
+        self.assertTrue(errors(evidence, "requestBody"))
+        for field in ("accountId", "electionId"):
+            with self.subTest(field=field):
+                self.assertTrue(errors(
+                    {**ballot, "payload": {**ballot["payload"], field: evidence["payload"][field]}},
+                    "requestBody",
+                ))
+        self.assertTrue(
+            errors(
+                {**ballot, "payload": {**ballot["payload"], "submissionId": "removed"}},
+                "requestBody",
+            )
+        )
         entry = envelopes["valid/entry-0"]
         receipt = envelopes["valid/receipt-0"]
         for status, recovered in (("201", False), ("200", True)):
             result = {"entry": entry, "receipt": receipt, "recovered": recovered}
             self.assertFalse(errors(result, "responses", status))
             self.assertTrue(errors({**result, "receipt": entry}, "responses", status))
+            self.assertTrue(errors({**result, "recovered": not recovered}, "responses", status))
 
 
 class ValidateInstanceTests(unittest.TestCase):

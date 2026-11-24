@@ -29,7 +29,7 @@ library;
 
 import 'dart:async';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../modules/elections/elections_widgets.dart';
@@ -103,29 +103,106 @@ class _AppRootState extends State<AppRoot> {
   void didUpdateWidget(covariant AppRoot oldWidget) {
     super.didUpdateWidget(oldWidget);
 
+    if (oldWidget.electionId != widget.electionId ||
+        oldWidget.manifestHash != widget.manifestHash) {
+      _localManifestHash = null;
+    }
     if (!identical(oldWidget.dependencies, widget.dependencies)) {
       unawaited(_disposeDependencies(oldWidget.dependencies));
     }
   }
 
-  Widget _electionHome() {
+  String? _localManifestHash;
+
+  Future<void> _enterManifestHash(BuildContext context) async {
+    final reference = TextEditingController();
+    final hash = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Referência do manifesto'),
+        content: TextField(
+          controller: reference,
+          decoration: const InputDecoration(
+            labelText: 'Hash recebido da comissão',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, reference.text.trim()),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+    reference.dispose();
+    if (!mounted || !context.mounted || hash == null) return;
+    if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(hash)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Informe 64 dígitos hexadecimais minúsculos.'),
+        ),
+      );
+      return;
+    }
+    setState(() => _localManifestHash = hash);
+  }
+
+  Widget _buildElectionHome(BuildContext context) {
     if (widget.electionId.isEmpty && widget.manifestHash.isEmpty) {
       return const Center(child: Text('Nenhuma eleição disponível.'));
     }
-    if (!Uuid.isValidUUIDFormat(fromString: widget.electionId) ||
-        !RegExp(r'^[0-9a-f]{64}$').hasMatch(widget.manifestHash)) {
-      return const Center(
-        child: Text('A configuração da eleição está incompleta ou inválida.'),
-      );
+    if (!Uuid.isValidUUIDFormat(fromString: widget.electionId)) {
+      return const Center(child: Text('Eleição não configurada.'));
     }
     final election = UuidValue.withFormatValidation(
       widget.electionId.toLowerCase(),
     );
     final dependencies = widget.dependencies;
-    final hash = widget.manifestHash;
+    final hash = _localManifestHash ?? widget.manifestHash;
+    void openAuthority() {
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => ElectionAuthorityPage(
+            session: dependencies.secretVoting.authority(election),
+            manifestHash: hash,
+          ),
+        ),
+      );
+    }
+
+    if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(hash)) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FilledButton(
+              onPressed: () => _enterManifestHash(context),
+              child: const Text('Informar hash do manifesto'),
+            ),
+            TextButton(
+              onPressed: openAuthority,
+              child: const Text('Autoridades da eleição'),
+            ),
+          ],
+        ),
+      );
+    }
     return ElectionHome(
       key: ValueKey((election, hash)),
       classifyFailure: dependencies.classifyVotingFailure,
+      openAuthority: openAuthority,
+      audit: (download, {bundleJson, anchorJson}) =>
+          dependencies.secretVoting.audit(
+            election,
+            trustedManifestHash: hash,
+            download: download,
+            bundleJson: bundleJson,
+            anchorJson: anchorJson,
+          ),
       inspect: () => dependencies.secretVoting.inspect(
         election,
         trustedManifestHash: hash,
@@ -148,7 +225,7 @@ class _AppRootState extends State<AppRoot> {
       key: ObjectKey(widget.dependencies),
       controller: widget.dependencies.sessionController,
       child: CApp(
-        electionHome: _electionHome(),
+        electionHome: Builder(builder: _buildElectionHome),
         sessionController: widget.dependencies.sessionController,
         backendReadinessController:
             widget.dependencies.backendReadinessController,

@@ -3,5 +3,8 @@
 //! Consultas usadas pelo aplicativo também pertencem a este módulo, onde
 //! recebem as dependências de leitura e aplicam as regras de acesso do caso de uso.
 
+pub mod administration;
 pub mod board;
+pub mod preparation;
+pub mod tally;
 pub mod voter_registration;

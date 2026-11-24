@@ -26,7 +26,7 @@
         "Firebase Auth",
         "curso da evidência institucional vigente igual ao curso vinculado ao CA da eleição no momento do novo voto",
         "prova de posse cadastrada antes da abertura quando a comissão exigir cadastro prévio",
-        "UUID da conta CApp autenticada conferido com o voterId assinado"
+        "UUID da conta CApp autenticada conferido com o accountId assinado"
       ],
       "premises": [
         "Backend confiável; curso obtido exclusivamente do Graph."
@@ -49,7 +49,7 @@
         "idempotência do mesmo envio"
       ],
       "premises": [
-        "Backend resolve o userId pela autenticação e exige o mesmo UUID no voterId da cédula."
+        "Backend resolve o accountId pela autenticação e o incorpora ao conteúdo assinado da cédula."
       ],
       "limits": [
         "Trocar chave ou dispositivo não muda a identidade da conta."
@@ -86,7 +86,7 @@
       "name": "Justiça temporal",
       "mechanisms": [
         "intervalo [startsAt,endsAt)",
-        "prorrogação versionada",
+        "regras de adiamento e prorrogação na entidade de eleição",
         "proibição de encerramento antecipado",
         "contribuições somente após encerramento"
       ],
@@ -97,9 +97,7 @@
         "Cancelamento não autoriza obter contagens antecipadas."
       ],
       "tests": [
-        "test_schedule_rejects_unchanged_or_earlier_end",
-        "test_schedule_preserves_occurred_start",
-        "test_closure_rejects_early_end"
+        "test_closure_uses_canonical_time"
       ],
       "implementationIssues": [
         132,

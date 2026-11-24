@@ -14,7 +14,7 @@ use crate::modules::elections::domain::{
     Fingerprint,
     cryptography::elgamal::{ElGamalCiphertext, EncryptedBallot},
     error::InvalidBallot,
-    identifiers::{AccountId, ElectionId, SubmissionId},
+    identifiers::{AccountId, ElectionId},
     profile::{MAX_OPTIONS, MIN_OPTIONS},
 };
 
@@ -72,10 +72,15 @@ impl BallotCiphertexts {
         let encrypted =
             EncryptedBallot::new(components).map_err(|_| InvalidBallot::InvalidCiphertext)?;
 
-        Ok(Self {
+        Ok(Self::from_verified_parts(option_ids, encrypted))
+    }
+
+    /// Associa cifras validadas à ordem de opções já conferida pelo verificador.
+    pub(crate) fn from_verified_parts(option_ids: Vec<Uuid>, encrypted: EncryptedBallot) -> Self {
+        Self {
             option_ids,
             encrypted,
-        })
+        }
     }
 
     /// IDs das opções na mesma ordem das cifras.
@@ -103,7 +108,7 @@ pub enum BallotContent {
     },
 }
 
-/// Cédula com o UUID da conta CApp, a operação e a chave pública de assinatura.
+/// Cédula que vincula a eleição e a conta CApp à chave pública de assinatura.
 ///
 /// Na modalidade confidencial, o quadro público identifica a participação
 /// pela conta e publica a escolha somente cifrada.
@@ -111,9 +116,8 @@ pub enum BallotContent {
 pub struct SignedBallot {
     election_id: ElectionId,
     account_id: AccountId,
-    submission_id: SubmissionId,
-    public_key: Vec<u8>,
-    signature: Vec<u8>,
+    public_key: Box<[u8]>,
+    signature: Box<[u8]>,
     content: BallotContent,
 }
 
@@ -127,7 +131,6 @@ impl SignedBallot {
     pub fn new(
         election_id: ElectionId,
         account_id: AccountId,
-        submission_id: SubmissionId,
         public_key: Vec<u8>,
         signature: Vec<u8>,
         content: BallotContent,
@@ -135,31 +138,29 @@ impl SignedBallot {
         Self {
             election_id,
             account_id,
-            submission_id,
-            public_key,
-            signature,
+            public_key: public_key.into_boxed_slice(),
+            signature: signature.into_boxed_slice(),
             content,
         }
     }
+
     /// Identificador da eleição assinada.
     pub const fn election_id(&self) -> ElectionId {
         self.election_id
     }
-    /// UUID da conta CApp gravado no campo `voterId` do contrato assinado.
+    /// UUID da conta CApp incluído no contexto criptográfico assinado.
     pub const fn account_id(&self) -> AccountId {
         self.account_id
     }
-    /// Identificador idempotente do pacote preparado no dispositivo.
-    pub const fn submission_id(&self) -> SubmissionId {
-        self.submission_id
-    }
-    /// Chave pública do par de assinatura gerado para esta eleição.
+
+    /// Bytes SPKI em DER da chave pública de assinatura desta eleição.
     pub const fn public_key(&self) -> &[u8] {
-        self.public_key.as_slice()
+        &self.public_key
     }
+
     /// Assinatura do payload completo, a verificar pelo codec.
     pub const fn signature(&self) -> &[u8] {
-        self.signature.as_slice()
+        &self.signature
     }
     /// Conteúdo assinado, sem acesso mutável.
     pub const fn content(&self) -> &BallotContent {
@@ -220,8 +221,9 @@ fn validate_ciphertexts(ciphertexts: &[Ciphertext]) -> Result<(), InvalidBallot>
 
 /// Cédula cuja assinatura, codificação e cifras foram verificadas pelas portas.
 ///
-/// O digest calculado pelo codec cobre o payload inteiro, inclusive a chave
-/// pública e o identificador de envio. A verificação autentica esse conteúdo.
+/// O digest inclui o domínio criptográfico da operação, a identidade
+/// autenticada da conta e da eleição, a chave pública e o conteúdo.
+/// A assinatura probabilística RSA-PSS não integra esse digest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedBallot {
     ballot: SignedBallot,
@@ -265,14 +267,14 @@ mod tests {
     fn ballot_cannot_cross_modalities_or_choose_an_unknown_slate() {
         let identified = opened(ElectionModality::Identified);
         assert!(
-            ballot(ElectionModality::Confidential, 60, 'e')
+            ballot(ElectionModality::Confidential, 'e')
                 .ballot()
                 .validate_for(&identified)
                 .is_err()
         );
         let confidential = opened(ElectionModality::Confidential);
         assert!(
-            ballot(ElectionModality::Identified, 60, 'e')
+            ballot(ElectionModality::Identified, 'e')
                 .ballot()
                 .validate_for(&confidential)
                 .is_err()
@@ -280,7 +282,6 @@ mod tests {
         let unknown = SignedBallot::new(
             eid(),
             account(50),
-            SubmissionId::try_from_uuid(Uuid::from_u128(60)).unwrap(),
             decoded("YQ"),
             decoded("Yg"),
             BallotContent::Identified(option(999)),
@@ -296,7 +297,6 @@ mod tests {
             Ok(SignedBallot::new(
                 eid(),
                 account(50),
-                SubmissionId::try_from_uuid(Uuid::from_u128(60)).unwrap(),
                 decoded("YQ"),
                 decoded("Yg"),
                 BallotContent::Confidential {
@@ -351,7 +351,6 @@ mod tests {
         let ballot = SignedBallot::new(
             eid(),
             account(50),
-            SubmissionId::try_from_uuid(Uuid::from_u128(60)).unwrap(),
             decoded("YQ"),
             decoded("Yg"),
             BallotContent::Identified(option(0)),

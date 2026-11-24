@@ -17,7 +17,7 @@ use super::domain::{
         election::{Election, ElectionModality, ElectionPeriod, ElectionTransition},
         manifest::{Manifest, VerifiedManifest},
     },
-    identifiers::{AcademicCenterId, AccountId, AuthorityId, ElectionId, SlateId, SubmissionId},
+    identifiers::{AcademicCenterId, AccountId, AuthorityId, ElectionId, SlateId},
 };
 use chrono::{DateTime, TimeZone, Utc};
 use crypto_bigint::U2048;
@@ -165,12 +165,11 @@ fn content(mode: ElectionModality) -> BallotContent {
     }
 }
 
-pub(super) fn ballot(mode: ElectionModality, submission: u128, hash: char) -> VerifiedBallot {
+pub(super) fn ballot(mode: ElectionModality, hash: char) -> VerifiedBallot {
     VerifiedBallot::from_verified_parts(
         SignedBallot::new(
             eid(),
             account(50),
-            SubmissionId::try_from_uuid(Uuid::from_u128(submission)).unwrap(),
             decoded("YQ"),
             decoded("Yg"),
             content(mode),

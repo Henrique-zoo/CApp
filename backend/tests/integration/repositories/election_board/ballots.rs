@@ -1,7 +1,7 @@
 //! Do cadastro ao recibo pela API pública do CApp, com PostgreSQL real.
 
 use super::{
-    fixtures::{Origin, Voter, server, vector},
+    fixtures::{Origin, Voter, account_id, ballot_submission, server, vector},
     public_evidence,
     session::SessionApi,
 };
@@ -11,9 +11,9 @@ use axum::{
     http::{Request, StatusCode},
 };
 use backend::modules::elections::{
-    application::board::ElectionBoard,
+    application::services::board as board_service,
     crypto_wire::{BallotContext, object_digest, verify_record},
-    infrastructure::PgElectionBoard,
+    infrastructure::PgElectionBoardRepository,
 };
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
@@ -30,13 +30,15 @@ fn ballot_request(uri: &str, envelope: &[u8]) -> Request<Body> {
 async fn authenticated_vote_is_recorded_once_and_included_in_the_public_board() {
     let db = TestDatabase::new().await;
     let signer = server();
-    let store = PgElectionBoard::new(db.pool.clone(), signer.clone());
+    let store = PgElectionBoardRepository::new(db.pool.clone());
     let api = SessionApi::with_signer(&db.pool, Some(signer.clone())).await;
     let mut voter = Voter::new(&db.pool, "valid/ballot-0").await;
     let starts_at = Utc::now() + Duration::seconds(15);
     let origin = Origin::scheduled(&signer, starts_at, starts_at + Duration::hours(1));
     let id = origin.election;
-    store.open(origin.frozen(true)).await.unwrap();
+    board_service::publish(&store, &*signer, origin.frozen(true))
+        .await
+        .unwrap();
 
     // O vínculo nasce na rota do eleitor antes da abertura.
     let uri = format!("/elections/{id}/registration/me");
@@ -48,8 +50,9 @@ async fn authenticated_vote_is_recorded_once_and_included_in_the_public_board() 
     assert_eq!(status, StatusCode::OK, "{registration}");
     assert_eq!(registration["participated"], false);
     let voter_id: Uuid = serde_json::from_value(registration["voterId"].clone()).unwrap();
-    voter.payload["voterId"] = json!(voter_id);
-    let raw = voter.sign(&origin, voter.payload.clone());
+    voter.payload["accountId"] = json!(voter_id);
+    let signed = voter.sign(&origin, voter.payload.clone());
+    let raw = ballot_submission(&signed);
     let uri = format!("/elections/{id}/ballots");
     let (status, error) = api.send(voter.account, ballot_request(&uri, &raw)).await;
     assert_eq!(status, StatusCode::CONFLICT, "{error}");
@@ -70,9 +73,9 @@ async fn authenticated_vote_is_recorded_once_and_included_in_the_public_board() 
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{error}");
     assert_eq!(error["error"]["code"], "voter_not_eligible");
-    let signed: Value = serde_json::from_slice(&raw).unwrap();
-    let mut invalid = signed.clone();
-    invalid["payload"]["submissionId"] = json!(Uuid::new_v4());
+    let signed: Value = serde_json::from_slice(&signed).unwrap();
+    let mut invalid: Value = serde_json::from_slice(&raw).unwrap();
+    invalid["payload"]["ciphertexts"] = vector("valid/ballot-1")["ciphertexts"].clone();
     let (status, error) = api
         .send(
             voter.account,
@@ -100,12 +103,11 @@ async fn authenticated_vote_is_recorded_once_and_included_in_the_public_board() 
 
     // Um outro voto assinado com a mesma chave não substitui o original.
     let mut changed = voter.payload.clone();
-    changed["submissionId"] = json!(Uuid::new_v4());
     changed["ciphertexts"] = vector("valid/ballot-1")["ciphertexts"].clone();
     let (status, error) = api
         .send(
             voter.account,
-            ballot_request(&uri, &voter.sign(&origin, changed)),
+            ballot_request(&uri, &ballot_submission(&voter.sign(&origin, changed))),
         )
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "{error}");
@@ -126,7 +128,7 @@ async fn authenticated_vote_is_recorded_once_and_included_in_the_public_board() 
     assert_eq!(board["entries"][0]["payload"]["ballot"], signed);
     assert_eq!(board["checkpoint"], receipt);
     assert_eq!(
-        board["entries"][0]["payload"]["ballot"]["payload"]["voterId"],
+        board["entries"][0]["payload"]["ballot"]["payload"]["accountId"],
         json!(voter.account)
     );
     let manifest = &origin.manifest["payload"];
@@ -134,7 +136,7 @@ async fn authenticated_vote_is_recorded_once_and_included_in_the_public_board() 
     let context = BallotContext {
         election_id: id,
         manifest_hash: manifest_hash.clone(),
-        voter_id,
+        account_id: account_id(voter_id),
         expected_public_key: Some(registration["publicKey"].as_str().unwrap().to_owned()),
         option_ids: manifest["options"]
             .as_array()

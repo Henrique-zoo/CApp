@@ -2,3 +2,5 @@
 library;
 
 export 'presentation/election_home.dart' show ElectionHome;
+
+export 'presentation/election_authority_page.dart';

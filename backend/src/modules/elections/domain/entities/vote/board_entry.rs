@@ -104,13 +104,10 @@ impl<'a> BoardEntry<'a> {
 mod tests {
     use super::*;
     use crate::modules::elections::{
-        domain::{
-            entities::{
-                ballot::SignedBallot,
-                election::ElectionModality,
-                vote::{Vote, VoteKey},
-            },
-            identifiers::SubmissionId,
+        domain::entities::{
+            ballot::SignedBallot,
+            election::ElectionModality,
+            vote::{Vote, VoteKey},
         },
         test_support::{account, at, ballot, decoded, eid, fp, opened},
     };
@@ -122,7 +119,7 @@ mod tests {
         let vote = Vote::try_accept(
             &election,
             VoteKey::new(eid(), account(50)),
-            ballot(ElectionModality::Confidential, 60, 'e'),
+            ballot(ElectionModality::Confidential, 'e'),
             at(20, 11),
         )
         .unwrap();
@@ -140,7 +137,7 @@ mod tests {
 
     #[test]
     fn board_indices_obey_the_same_profile_limit_as_receipts() {
-        let accepted = ballot(ElectionModality::Confidential, 60, 'e');
+        let accepted = ballot(ElectionModality::Confidential, 'e');
         for index in [0, 100001, u32::MAX] {
             assert_eq!(
                 BoardEntry::try_new(&accepted, index, fp('b')),
@@ -149,14 +146,14 @@ mod tests {
         }
         assert!(BoardEntry::try_new(&accepted, 100000, fp('c')).is_ok());
         assert_eq!(
-            BoardEntry::try_new(&ballot(ElectionModality::Identified, 60, 'e'), 1, fp('b')),
+            BoardEntry::try_new(&ballot(ElectionModality::Identified, 'e'), 1, fp('b')),
             Err(InvalidBoardEntry::IdentifiedBallot)
         );
     }
 
     #[test]
     fn consecutive_entries_require_the_same_context_and_previous_digest() {
-        let accepted = ballot(ElectionModality::Confidential, 60, 'e');
+        let accepted = ballot(ElectionModality::Confidential, 'e');
         let first = BoardEntry::try_new(&accepted, 1, fp('b')).unwrap();
         let first_hash = fp('c');
         let second = BoardEntry::try_new(&accepted, 2, first_hash).unwrap();
@@ -181,7 +178,6 @@ mod tests {
             let other = SignedBallot::new(
                 election_id,
                 account(50),
-                SubmissionId::try_from_uuid(Uuid::from_u128(61)).unwrap(),
                 decoded("YQ"),
                 decoded("Yg"),
                 BallotContent::Confidential {

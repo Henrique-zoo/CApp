@@ -1,5 +1,7 @@
 //! Roteador real com um provedor de chaves local para tokens Firebase e App Check.
 
+use std::sync::Arc;
+
 use axum::{
     body::{Body, to_bytes},
     http::{HeaderValue, Request, StatusCode},
@@ -15,7 +17,6 @@ use chrono::Utc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde_json::{Value, json};
 use sqlx::PgPool;
-use std::sync::Arc;
 use tower::ServiceExt;
 use uuid::Uuid;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
@@ -113,8 +114,12 @@ impl SessionApi {
             .insert("x-firebase-appcheck", self.attestation.clone());
         let response = self.app.clone().oneshot(request).await.unwrap();
         let status = response.status();
-        let json: Value =
-            serde_json::from_slice(&to_bytes(response.into_body(), 16384).await.unwrap()).unwrap();
+        let json: Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), 2 * 1024 * 1024)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         (status, json)
     }
 }

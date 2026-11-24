@@ -17,7 +17,7 @@ import java.math.BigInteger
 internal object VoterKeys : MethodChannel.MethodCallHandler {
     private const val STORE = "AndroidKeyStore"
     private const val UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-    private val aliasPattern = Regex("capp\\.elections\\.v1\\.$UUID\\.$UUID")
+    private val aliasPattern = Regex("capp\\.elections\\.v1\\.$UUID\\.$UUID|capp\\.authority\\.v1\\.$UUID\\.$UUID\\.$UUID")
 
     @Synchronized
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {

@@ -17,7 +17,7 @@ fn first_acceptance_binds_key_without_prior_registration_in_both_modalities() {
         let vote = Vote::try_accept(
             &election,
             VoteKey::new(eid(), account(50)),
-            ballot(mode, 60, 'e'),
+            ballot(mode, 'e'),
             at(20, 11),
         )
         .unwrap();
@@ -34,7 +34,7 @@ fn identified_participation_preserves_the_elector_choice_association() {
     let vote = Vote::try_accept(
         &election,
         VoteKey::new(eid(), account(50)),
-        ballot(ElectionModality::Identified, 60, 'e'),
+        ballot(ElectionModality::Identified, 'e'),
         at(20, 11),
     )
     .unwrap();
@@ -46,23 +46,19 @@ fn identified_participation_preserves_the_elector_choice_association() {
 }
 
 #[test]
-fn switching_key_or_submission_does_not_change_account_election_uniqueness() {
+fn changed_content_does_not_create_a_second_vote() {
     let mode = ElectionModality::Identified;
     let election = opened(mode);
     let vote = Vote::try_accept(
         &election,
         VoteKey::new(eid(), account(50)),
-        ballot(mode, 60, 'e'),
+        ballot(mode, 'e'),
         at(20, 11),
     )
     .unwrap();
     assert_eq!(
-        vote.retry(vote.key(), &ballot(mode, 61, 'a')),
+        vote.retry(vote.key(), &ballot(mode, 'a')),
         Err(VoteError::AlreadyParticipated)
-    );
-    assert_eq!(
-        vote.retry(vote.key(), &ballot(mode, 60, 'a')),
-        Err(VoteError::SubmissionConflict)
     );
     assert_ne!(vote.key(), VoteKey::new(eid(), account(51)));
     assert_ne!(
@@ -78,7 +74,7 @@ fn switching_key_or_submission_does_not_change_account_election_uniqueness() {
 fn retry_and_historical_reconstitution_work_after_closure_or_cancellation() {
     for mode in [ElectionModality::Identified, ElectionModality::Confidential] {
         let mut election = opened(mode);
-        let original = ballot(mode, 60, 'e');
+        let original = ballot(mode, 'e');
         let vote = Vote::try_accept(
             &election,
             VoteKey::new(eid(), account(50)),
@@ -137,7 +133,7 @@ fn retry_and_historical_reconstitution_work_after_closure_or_cancellation() {
 fn retry_uses_payload_hash_rather_than_randomized_pss_signature() {
     let mode = ElectionModality::Identified;
     let election = opened(mode);
-    let original = ballot(mode, 60, 'e');
+    let original = ballot(mode, 'e');
     let vote = Vote::try_accept(
         &election,
         VoteKey::new(eid(), account(50)),
@@ -150,7 +146,6 @@ fn retry_uses_payload_hash_rather_than_randomized_pss_signature() {
     let resigned = SignedBallot::new(
         original.election_id(),
         original.account_id(),
-        original.submission_id(),
         original.public_key().to_vec(),
         decoded("Yw"),
         original.content().clone(),
@@ -163,7 +158,7 @@ fn retry_uses_payload_hash_rather_than_randomized_pss_signature() {
 fn accepts_and_recovers_only_the_vote_for_the_authenticated_account_and_election() {
     let mode = ElectionModality::Identified;
     let election = opened(mode);
-    let original = ballot(mode, 60, 'e');
+    let original = ballot(mode, 'e');
     let vote = Vote::try_accept(
         &election,
         VoteKey::new(eid(), account(50)),
@@ -191,7 +186,6 @@ fn accepts_and_recovers_only_the_vote_for_the_authenticated_account_and_election
         let other = SignedBallot::new(
             election_id,
             account_id,
-            signed.submission_id(),
             signed.public_key().to_vec(),
             signed.signature().to_vec(),
             signed.content().clone(),
@@ -222,7 +216,7 @@ fn new_acceptance_respects_actual_opening_and_half_open_interval() {
                 Vote::try_accept(
                     &election,
                     VoteKey::new(eid(), account(50)),
-                    ballot(mode, 60, 'e'),
+                    ballot(mode, 'e'),
                     time
                 ),
                 Err(VoteError::InvalidAcceptanceTime)
@@ -233,7 +227,7 @@ fn new_acceptance_respects_actual_opening_and_half_open_interval() {
                 Vote::try_accept(
                     &election,
                     VoteKey::new(eid(), account(50)),
-                    ballot(mode, 60, 'e'),
+                    ballot(mode, 'e'),
                     time,
                 )
                 .is_ok()
@@ -257,7 +251,7 @@ fn historical_acceptance_cannot_be_added_after_cancellation() {
         Vote::try_reconstitute(
             &election,
             VoteKey::new(eid(), account(50)),
-            ballot(mode, 60, 'e'),
+            ballot(mode, 'e'),
             at(20, 13)
         ),
         Err(VoteError::InvalidAcceptanceTime)

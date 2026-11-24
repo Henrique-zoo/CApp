@@ -31,13 +31,9 @@ void main() {
     vector('manifest')['payload']['electionId'],
   );
   final voter = vector('ballot-0')['payload'];
-  final account = UuidValue.withFormatValidation(voter['voterId'] as String);
-  final opening = DateTime.parse(
-    vector('calendar-origin')['payload']['startsAt'],
-  );
-  final closing = DateTime.parse(
-    vector('calendar-origin')['payload']['endsAt'],
-  );
+  final account = UuidValue.withFormatValidation(voter['accountId'] as String);
+  final opening = DateTime.utc(2026, 11, 20, 12);
+  final closing = DateTime.utc(2026, 11, 22, 12);
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   late DateTime now;
@@ -65,7 +61,8 @@ void main() {
         case 'board':
           return jsonTestResponse({
             'manifest': envelope('manifest'),
-            'calendarOrigin': envelope('calendar-origin'),
+            'startsAt': '2026-11-20T12:00:00Z',
+            'endsAt': '2026-11-22T12:00:00Z',
             'entries': [if (includeEntry) envelope('entry-0')],
           });
         case 'me':
@@ -74,7 +71,7 @@ void main() {
           }
           return jsonTestResponse({
             'requiresRegistration': requiresRegistration,
-            'voterId': registered ? voter['voterId'] : null,
+            'voterId': registered ? voter['accountId'] : null,
             'publicKey': registered ? voter['publicKey'] : null,
             'participated': participated,
           });
@@ -253,7 +250,7 @@ void main() {
     'reenvio aceito mostra o recibo e permite conferir a inclusão novamente',
     (tester) async {
       final alias = DeviceVoterKeys.aliasFor(account, electionId);
-      preferences.values['$alias.signed-ballot'] = jsonEncode(
+      preferences.values['$alias.signed-ballot-v4'] = jsonEncode(
         envelope('ballot-0'),
       );
       acceptReplay = true;

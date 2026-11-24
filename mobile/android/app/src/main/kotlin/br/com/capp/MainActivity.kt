@@ -13,5 +13,10 @@ class MainActivity : FlutterActivity() {
             messenger, "br.com.capp/elections/voter-keys",
             StandardMethodCodec.INSTANCE, messenger.makeBackgroundTaskQueue()
         ).setMethodCallHandler(VoterKeys)
+        MethodChannel(
+            messenger, "br.com.capp/elections/authority-secrets",
+            StandardMethodCodec.INSTANCE, messenger.makeBackgroundTaskQueue()
+        ).setMethodCallHandler(AuthoritySecrets(applicationContext))
+
     }
 }

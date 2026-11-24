@@ -21,6 +21,7 @@ final class ElectionInspection {
     required this.localKeyMatches,
     required this.hasSavedReceipt,
     required this.session,
+    this.cancellationReason,
     required this._closed,
     required this._clock,
   }) : options = List.unmodifiable(options);
@@ -36,17 +37,21 @@ final class ElectionInspection {
   /// Existe um recibo neste aparelho, independente do estado remoto.
   final bool hasSavedReceipt;
   final BallotSession? session;
+  final String? cancellationReason;
   final bool _closed;
   final DateTime Function() _clock;
 
   /// Indica que o app pode preparar uma nova cédula para esta conta.
   bool get canPrepareVote =>
+      cancellationReason == null &&
       !participated &&
       (!requiresRegistration || (registered && localKeyMatches));
 
   ElectionPhase get phase {
     final now = _clock();
-    if (_closed || !now.isBefore(endsAt)) return ElectionPhase.closed;
+    if (cancellationReason != null || _closed || !now.isBefore(endsAt)) {
+      return ElectionPhase.closed;
+    }
     return now.isBefore(startsAt)
         ? ElectionPhase.preparation
         : ElectionPhase.voting;
@@ -54,7 +59,9 @@ final class ElectionInspection {
 
   Duration? get timeUntilNextPhase {
     final now = _clock();
-    if (_closed || !now.isBefore(endsAt)) return null;
+    if (cancellationReason != null || _closed || !now.isBefore(endsAt)) {
+      return null;
+    }
     return (now.isBefore(startsAt) ? startsAt : endsAt).difference(now);
   }
 }

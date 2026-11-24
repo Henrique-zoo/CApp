@@ -1,7 +1,7 @@
 //! Três contas votam sem cadastro prévio e conferem os recibos no quadro.
 
 use super::{
-    fixtures::{Origin, Voter, server},
+    fixtures::{Origin, Voter, account_id, ballot_submission, server},
     public_evidence,
     session::SessionApi,
 };
@@ -11,9 +11,9 @@ use axum::{
     http::{Request, StatusCode},
 };
 use backend::modules::elections::{
-    application::board::ElectionBoard,
+    application::services::board as board_service,
     crypto_wire::{BallotContext, object_digest, verify_record},
-    infrastructure::PgElectionBoard,
+    infrastructure::PgElectionBoardRepository,
 };
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
@@ -40,8 +40,10 @@ async fn three_distinct_voters_can_verify_their_receipts_in_submission_order() {
         .iter()
         .map(|o| serde_json::from_value(o["id"].clone()).unwrap())
         .collect();
-    let store = PgElectionBoard::new(db.pool.clone(), signer.clone());
-    store.open(origin.frozen(false)).await.unwrap();
+    let store = PgElectionBoardRepository::new(db.pool.clone());
+    board_service::publish(&store, &*signer, origin.frozen(false))
+        .await
+        .unwrap();
 
     let mut keys = HashSet::new();
     let mut voter_ids = HashSet::new();
@@ -62,13 +64,12 @@ async fn three_distinct_voters_can_verify_their_receipts_in_submission_order() {
         assert!(keys.insert(key.clone()));
         assert!(voter_ids.insert(voter_id));
         let mut payload = voter.payload.clone();
-        payload["voterId"] = json!(voter_id);
-        payload["submissionId"] = json!(Uuid::new_v4());
+        payload["accountId"] = json!(voter_id);
         ballots.push(voter.sign(&origin, payload));
         contexts.push(BallotContext {
             election_id: id,
             manifest_hash: manifest_hash.clone(),
-            voter_id,
+            account_id: account_id(voter_id),
             expected_public_key: Some(key),
             option_ids: options.clone(),
         });
@@ -80,7 +81,7 @@ async fn three_distinct_voters_can_verify_their_receipts_in_submission_order() {
     for i in order {
         let request = Request::post(format!("/elections/{id}/ballots"))
             .header("content-type", "application/json")
-            .body(Body::from(ballots[i].clone()))
+            .body(Body::from(ballot_submission(&ballots[i])))
             .unwrap();
         let (status, record) = api.send(voters[i].account, request).await;
         assert_eq!(status, StatusCode::CREATED, "{record}");
@@ -90,7 +91,7 @@ async fn three_distinct_voters_can_verify_their_receipts_in_submission_order() {
     let entries = board["entries"].as_array().unwrap();
     assert_eq!(entries.len(), order.len());
     let accepted_accounts = sqlx::query_scalar::<_, Uuid>(
-        "SELECT account_id FROM election_participation WHERE election_id=$1 ORDER BY accepted_at",
+        "SELECT account_id FROM election_vote WHERE election_id=$1 ORDER BY accepted_at",
     )
     .bind(id)
     .fetch_all(&db.pool)
@@ -108,7 +109,7 @@ async fn three_distinct_voters_can_verify_their_receipts_in_submission_order() {
         assert_eq!(entries[index], records[index]["entry"]);
         let ballot: Value = serde_json::from_slice(&ballots[i]).unwrap();
         assert_eq!(entries[index]["payload"]["ballot"], ballot);
-        assert_eq!(ballot["payload"]["voterId"], json!(voters[i].account));
+        assert_eq!(ballot["payload"]["accountId"], json!(voters[i].account));
         // O verificador exige exatamente os campos públicos de cédula, entrada e
         // recibo. Incluir a escolha ou o horário individual invalida o registro.
         let record = verify_record(

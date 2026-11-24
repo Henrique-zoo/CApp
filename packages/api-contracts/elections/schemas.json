@@ -251,8 +251,7 @@
         "options",
         "authorities",
         "combinedPublicKey",
-        "serverSigningKey",
-        "calendarOriginHash"
+        "serverSigningKey"
       ],
       "properties": {
         "version": {
@@ -303,9 +302,39 @@
         },
         "serverSigningKey": {
           "$ref": "#/$defs/Base64Url"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SignedBallotSubmission": {
+      "type": "object",
+      "required": [
+        "payload",
+        "signature"
+      ],
+      "properties": {
+        "payload": {
+          "type": "object",
+          "required": [
+            "manifestHash",
+            "publicKey",
+            "ciphertexts"
+          ],
+          "properties": {
+            "manifestHash": {
+              "$ref": "#/$defs/Hash"
+            },
+            "publicKey": {
+              "$ref": "#/$defs/Base64Url"
+            },
+            "ciphertexts": {
+              "$ref": "#/$defs/Ciphertexts"
+            }
+          },
+          "additionalProperties": false
         },
-        "calendarOriginHash": {
-          "$ref": "#/$defs/Hash"
+        "signature": {
+          "$ref": "#/$defs/Base64Url"
         }
       },
       "additionalProperties": false
@@ -313,38 +342,26 @@
     "Ballot": {
       "type": "object",
       "required": [
-        "version",
-        "kind",
         "electionId",
+        "accountId",
         "manifestHash",
-        "voterId",
-        "submissionId",
         "publicKey",
         "ciphertexts"
       ],
       "properties": {
-        "version": {
-          "const": 1
-        },
-        "kind": {
-          "const": "ballot"
-        },
         "electionId": {
           "$ref": "#/$defs/Uuid"
+        },
+        "accountId": {
+          "$ref": "#/$defs/Uuid",
+          "description": "Identificador de conta autenticada, reconstruído fora da DTO HTTP e incluído na assinatura."
         },
         "manifestHash": {
           "$ref": "#/$defs/Hash"
         },
-        "voterId": {
-          "$ref": "#/$defs/Uuid",
-          "description": "UUID da conta CApp autenticada. O quadro público usa esse identificador para verificar uma participação por conta na eleição."
-        },
-        "submissionId": {
-          "$ref": "#/$defs/Uuid"
-        },
         "publicKey": {
           "$ref": "#/$defs/Base64Url",
-          "description": "Chave pública do par de assinatura gerado para esta eleição. Persiste junto da cédula aceita na participação identificada por eleição e conta."
+          "description": "Chave do eleitor, enviada na cédula com ou sem cadastro prévio."
         },
         "ciphertexts": {
           "$ref": "#/$defs/Ciphertexts"
@@ -444,67 +461,6 @@
       },
       "additionalProperties": false
     },
-    "ScheduleChange": {
-      "type": "object",
-      "required": [
-        "version",
-        "kind",
-        "electionId",
-        "manifestHash",
-        "revision",
-        "previousScheduleHash",
-        "startsAt",
-        "endsAt",
-        "changedBy",
-        "changedAt",
-        "reason"
-      ],
-      "properties": {
-        "version": {
-          "const": 1
-        },
-        "kind": {
-          "const": "schedule-change"
-        },
-        "electionId": {
-          "$ref": "#/$defs/Uuid"
-        },
-        "manifestHash": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Hash"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "revision": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 100000
-        },
-        "previousScheduleHash": {
-          "$ref": "#/$defs/Hash"
-        },
-        "startsAt": {
-          "$ref": "#/$defs/Time"
-        },
-        "endsAt": {
-          "$ref": "#/$defs/Time"
-        },
-        "changedBy": {
-          "$ref": "#/$defs/Uuid"
-        },
-        "changedAt": {
-          "$ref": "#/$defs/Time"
-        },
-        "reason": {
-          "$ref": "#/$defs/Reason"
-        }
-      },
-      "additionalProperties": false
-    },
     "Cancellation": {
       "type": "object",
       "required": [
@@ -512,7 +468,6 @@
         "kind",
         "electionId",
         "manifestHash",
-        "scheduleHash",
         "headHash",
         "voterCount",
         "requestedBy",
@@ -530,16 +485,6 @@
           "$ref": "#/$defs/Uuid"
         },
         "manifestHash": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Hash"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "scheduleHash": {
           "anyOf": [
             {
               "$ref": "#/$defs/Hash"
@@ -581,7 +526,6 @@
         "kind",
         "electionId",
         "manifestHash",
-        "scheduleHash",
         "headHash",
         "voterCount",
         "closedAt"
@@ -597,9 +541,6 @@
           "$ref": "#/$defs/Uuid"
         },
         "manifestHash": {
-          "$ref": "#/$defs/Hash"
-        },
-        "scheduleHash": {
           "$ref": "#/$defs/Hash"
         },
         "headHash": {
@@ -891,7 +832,11 @@
             "missingAuthorities": {
               "maxItems": 0
             }
-          }
+          },
+          "required": [
+            "status",
+            "reason"
+          ]
         },
         {
           "properties": {
@@ -945,7 +890,11 @@
                 "type": "null"
               }
             }
-          }
+          },
+          "required": [
+            "status",
+            "reason"
+          ]
         },
         {
           "properties": {
@@ -976,7 +925,11 @@
             "missingAuthorities": {
               "minItems": 1
             }
-          }
+          },
+          "required": [
+            "status",
+            "reason"
+          ]
         },
         {
           "properties": {
@@ -1001,7 +954,11 @@
             "missingAuthorities": {
               "maxItems": 0
             }
-          }
+          },
+          "required": [
+            "status",
+            "reason"
+          ]
         }
       ]
     },
@@ -1020,9 +977,6 @@
           "$ref": "#/$defs/Receipt"
         },
         {
-          "$ref": "#/$defs/ScheduleChange"
-        },
-        {
           "$ref": "#/$defs/Cancellation"
         },
         {
@@ -1036,39 +990,291 @@
         },
         {
           "$ref": "#/$defs/Result"
-        },
-        {
-          "$ref": "#/$defs/CalendarOrigin"
         }
       ]
     },
-    "CalendarOrigin": {
+    "VoterRegistration": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "version",
         "kind",
         "electionId",
-        "startsAt",
-        "endsAt"
+        "accountId",
+        "publicKey"
       ],
       "properties": {
         "version": {
+          "type": "integer",
           "const": 1
         },
         "kind": {
-          "const": "calendar-origin"
+          "type": "string",
+          "const": "voter-registration"
         },
         "electionId": {
           "$ref": "#/$defs/Uuid"
         },
-        "startsAt": {
-          "$ref": "#/$defs/Time"
+        "accountId": {
+          "$ref": "#/$defs/Uuid"
         },
-        "endsAt": {
-          "$ref": "#/$defs/Time"
+        "publicKey": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      }
+    },
+    "AuthorityRegistration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "kind",
+        "electionId",
+        "authority"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "kind": {
+          "type": "string",
+          "const": "authority-registration"
+        },
+        "electionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "authority": {
+          "$ref": "#/$defs/Authority"
+        }
+      }
+    },
+    "SignedVoterRegistration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload",
+        "signature"
+      ],
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/VoterRegistration"
+        },
+        "signature": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      }
+    },
+    "SignedAuthorityRegistration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload",
+        "signature"
+      ],
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/AuthorityRegistration"
+        },
+        "signature": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      }
+    },
+    "SignedManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload",
+        "signature"
+      ],
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/Manifest"
+        },
+        "signature": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      }
+    },
+    "SignedBoardEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload",
+        "signature"
+      ],
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/BoardEntry"
+        },
+        "signature": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      }
+    },
+    "SignedReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload",
+        "signature"
+      ],
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/Receipt"
+        },
+        "signature": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      }
+    },
+    "SignedClosure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload",
+        "signature"
+      ],
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/Closure"
+        },
+        "signature": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      }
+    },
+    "SignedAggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload",
+        "signature"
+      ],
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/Aggregate"
+        },
+        "signature": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      }
+    },
+    "SignedDecryptionShare": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload",
+        "signature"
+      ],
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/DecryptionShare"
+        },
+        "signature": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      }
+    },
+    "SignedResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload",
+        "signature"
+      ],
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/Result"
+        },
+        "signature": {
+          "$ref": "#/$defs/Base64Url"
+        }
+      }
+    },
+    "RecordedBallot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry",
+        "receipt",
+        "recovered"
+      ],
+      "properties": {
+        "entry": {
+          "$ref": "#/$defs/SignedBoardEntry"
+        },
+        "receipt": {
+          "$ref": "#/$defs/SignedReceipt"
+        },
+        "recovered": {
+          "type": "boolean"
+        }
+      }
+    },
+    "VoterRegistrationStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requiresRegistration",
+        "voterId",
+        "publicKey",
+        "participated"
+      ],
+      "properties": {
+        "requiresRegistration": {
+          "type": "boolean"
+        },
+        "voterId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publicKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Base64Url"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "participated": {
+          "type": "boolean"
         }
       },
-      "additionalProperties": false
+      "oneOf": [
+        {
+          "properties": {
+            "voterId": {
+              "type": "null"
+            },
+            "publicKey": {
+              "type": "null"
+            },
+            "participated": {
+              "const": false
+            }
+          }
+        },
+        {
+          "properties": {
+            "voterId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "publicKey": {
+              "$ref": "#/$defs/Base64Url"
+            }
+          }
+        }
+      ]
     }
   }
 }

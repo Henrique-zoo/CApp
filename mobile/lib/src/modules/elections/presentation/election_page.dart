@@ -180,6 +180,9 @@ class _ElectionPageState extends State<ElectionPage> {
     if (election.hasSavedReceipt || election.participated) {
       return _screen(title: 'Consultando recibo…');
     }
+    if (election.cancellationReason case final reason?) {
+      return _back('Eleição cancelada', reason);
+    }
     if (election.phase == ElectionPhase.closed) {
       return _back(
         'Votação encerrada',

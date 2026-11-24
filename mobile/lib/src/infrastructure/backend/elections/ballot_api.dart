@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
 
+import '../serialization/election_json.dart';
+import 'ballot_dto.dart';
+
 /// A decodificação JSON do Dio valida a sintaxe, mas sua conversão para Map
 /// perderia nomes repetidos. Confira os nomes no texto original antes disso.
 String _decodeEvidence(
@@ -12,39 +15,7 @@ String _decodeEvidence(
 ) {
   final text = utf8.decode(bytes);
   if (response.statusCode < 200 || response.statusCode >= 300) return text;
-  final names = <Set<String>>[];
-  for (var i = 0; i < text.length; i++) {
-    switch (text.codeUnitAt(i)) {
-      case 0x7b: // {
-        names.add(<String>{});
-      case 0x7d: // }
-        if (names.isEmpty) throw const FormatException('Objeto JSON inválido');
-        names.removeLast();
-      case 0x22: // "
-        final start = i;
-        i++;
-        while (i < text.length && text.codeUnitAt(i) != 0x22) {
-          if (text.codeUnitAt(i) == 0x5c) i++; // Pula o caractere escapado.
-          i++;
-        }
-        if (i >= text.length) {
-          throw const FormatException('String JSON incompleta');
-        }
-        var next = i + 1;
-        while (next < text.length && text.codeUnitAt(next) <= 0x20) {
-          next++;
-        }
-        if (next < text.length && text.codeUnitAt(next) == 0x3a) {
-          final name = jsonDecode(text.substring(start, i + 1)) as String;
-          if (names.isEmpty || !names.last.add(name)) {
-            throw const FormatException(
-              'Nome de campo inválido ou repetido na evidência',
-            );
-          }
-        }
-    }
-  }
-  return text;
+  return checkElectionJson(text);
 }
 
 /// O quadro é público. O voto e o recibo pessoal usam a sessão autenticada.
@@ -70,23 +41,35 @@ final class BallotApi {
     return response.data ?? (throw const FormatException('Quadro vazio'));
   }
 
-  Future<Map<String, dynamic>> submit(
+  /// Lê as contribuições públicas e o resultado confirmado da eleição.
+  Future<Map<String, dynamic>> tally(UuidValue id) async {
+    _requireHttps();
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/elections/${id.uuid}/tally',
+      options: Options(
+        followRedirects: false,
+        responseDecoder: _decodeEvidence,
+      ),
+    );
+    return response.data ?? (throw const FormatException('Apuração ausente'));
+  }
+
+  Future<RecordedBallotDto> submit(
     UuidValue id,
-    String envelope,
+    BallotSubmissionDto envelope,
     void Function() guard,
   ) async {
     _requireHttps();
     guard();
     final response = await _dio.post<Map<String, dynamic>>(
       '/elections/${id.uuid}/ballots',
-      data: envelope,
+      data: jsonEncode(envelope.toJson()),
       options: _authenticated(guard),
     );
     guard();
-    final data = response.data;
-    if (data == null ||
-        (response.statusCode != 201 && response.statusCode != 200) ||
-        data['recovered'] != (response.statusCode == 200)) {
+    final data = RecordedBallotDto.fromJson(response.data);
+    if ((response.statusCode != 201 && response.statusCode != 200) ||
+        data.recovered != (response.statusCode == 200)) {
       throw const FormatException('Confirmação de voto inválida');
     }
     return data;
@@ -104,6 +87,98 @@ final class BallotApi {
     );
     guard();
     return response.data ?? (throw const FormatException('Recibo vazio'));
+  }
+
+  /// Consulta a designação de autoridade da conta autenticada.
+  Future<Map<String, dynamic>> authority(
+    UuidValue id,
+    void Function() guard,
+  ) async {
+    _requireHttps();
+    guard();
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/elections/${id.uuid}/authority/me',
+      options: _authenticated(guard),
+    );
+    guard();
+    return response.data ?? (throw const FormatException('Designação ausente'));
+  }
+
+  /// Cadastra a credencial criptográfica da autoridade designada.
+  Future<Map<String, dynamic>> registerAuthority(
+    UuidValue id,
+    String envelope,
+    void Function() guard,
+  ) => _submitAuthority('/elections/${id.uuid}/authority/me', envelope, guard);
+
+  /// Publica o manifesto a pedido da comissão desta eleição.
+  Future<Map<String, dynamic>> publishManifest(
+    UuidValue id,
+    void Function() guard,
+  ) => _submitAuthority('/elections/${id.uuid}/manifest', null, guard);
+
+  /// Atualiza o período vigente pela conta que representa a comissão.
+  Future<void> reschedule(
+    UuidValue id,
+    DateTime startsAt,
+    DateTime endsAt,
+    String reason,
+    void Function() guard,
+  ) async {
+    await _submitAuthority(
+      '/elections/${id.uuid}/period',
+      jsonEncode({
+        'startsAt': startsAt.toUtc().toIso8601String().replaceFirst(
+          '.000Z',
+          'Z',
+        ),
+        'endsAt': endsAt.toUtc().toIso8601String().replaceFirst('.000Z', 'Z'),
+        'reason': reason,
+      }),
+      guard,
+    );
+  }
+
+  /// Registra o motivo do cancelamento pela comissão.
+  Future<void> cancel(
+    UuidValue id,
+    String reason,
+    void Function() guard,
+  ) async {
+    await _submitAuthority(
+      '/elections/${id.uuid}/cancellation',
+      jsonEncode({'reason': reason}),
+      guard,
+    );
+  }
+
+  /// Entrega a contribuição assinada para o termo de encerramento.
+  Future<Map<String, dynamic>> contribute(
+    UuidValue id,
+    UuidValue authority,
+    String envelope,
+    void Function() guard,
+  ) => _submitAuthority(
+    '/elections/${id.uuid}/tally/shares/${authority.uuid}',
+    envelope,
+    guard,
+  );
+
+  Future<Map<String, dynamic>> _submitAuthority(
+    String path,
+    String? envelope,
+    void Function() guard,
+  ) async {
+    _requireHttps();
+    guard();
+    final response = await _dio.put<Map<String, dynamic>>(
+      path,
+      data: envelope,
+      options: _authenticated(guard),
+    );
+    guard();
+    return response.data ??
+        (throw const FormatException('Confirmação de autoridade ausente'));
   }
 
   Options _authenticated(void Function() guard) => Options(

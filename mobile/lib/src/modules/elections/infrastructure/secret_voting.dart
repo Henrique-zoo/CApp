@@ -1,55 +1,23 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../infrastructure/backend/elections/ballot_api.dart';
+import '../../../infrastructure/backend/elections/ballot_dto.dart';
+import '../../../infrastructure/backend/serialization/election_json.dart';
 import '../application/cryptography/elgamal.dart';
+import '../application/election_audit.dart';
+import '../application/election_authority.dart';
 import '../application/secret_voting.dart';
 import '../application/ports/voter_registration_gateway.dart';
 import '../application/voter_registration.dart';
+import 'authority_session.dart';
+import 'cryptography/election_auditor.dart';
+import 'cryptography/election_wire.dart';
 import 'device_voter_keys.dart';
 
 export '../application/secret_voting.dart';
-
-// O protocolo v1 usa objetos, arrays, strings, nulos e inteiros pequenos.
-// RFC 8785 ordena os nomes por unidades UTF-16 e preserva a ordem dos arrays.
-Object? _ordered(Object? value) => switch (value) {
-  Map<String, dynamic> map => {
-    for (final k in map.keys.toList()..sort()) k: _ordered(map[k]),
-  },
-  List list => list.map(_ordered).toList(),
-  null || String() || int() || bool() => value,
-  _ => throw const FormatException('Valor fora do protocolo eleitoral v1'),
-};
-
-Uint8List _bytes(Map<String, dynamic> payload) =>
-    utf8.encode('CAPP-ELECTIONS/1\n${jsonEncode(_ordered(payload))}');
-String _hash(Map<String, dynamic> payload) =>
-    sha256.convert(_bytes(payload)).toString();
-
-Future<Map<String, dynamic>> _verified(
-  Object? envelope,
-  String key,
-  String kind,
-  UuidValue election,
-) async {
-  if (envelope is Map<String, dynamic> && envelope.length == 2) {
-    final payload = envelope['payload'];
-    final signature = envelope['signature'];
-    if (payload is Map<String, dynamic> &&
-        signature is String &&
-        payload['kind'] == kind &&
-        payload['version'] == 1 &&
-        payload['electionId'] == election.uuid &&
-        await DeviceVoterKeys().verify(key, _bytes(payload), signature)) {
-      return payload;
-    }
-  }
-  throw FormatException('Assinatura ou contexto inválido: $kind');
-}
 
 ElectionOption _readOption(Object? value) {
   if (value case {'id': String id, 'name': String name, 'kind': String kind}) {
@@ -96,6 +64,84 @@ final class SecretVotingClient {
   final DateTime Function() _clock;
   final _preparing = <String>{};
 
+  /// Cria o fluxo privado da autoridade, se a conta estiver designada.
+  AuthoritySession authority(UuidValue election) =>
+      DeviceAuthoritySession(_api, _storage, _account, election);
+
+  /// Carrega as evidências públicas ou revalida uma cópia existente sem rede.
+  /// O recibo persistido antes da consulta ancora a posição do voto da conta.
+  Future<ElectionAudit> audit(
+    UuidValue election, {
+    required String trustedManifestHash,
+    required bool download,
+    String? bundleJson,
+    String? anchorJson,
+  }) async {
+    final account = _account();
+    final cacheKey =
+        'capp.elections.audit.${election.uuid}.$trustedManifestHash';
+    final Map<String, dynamic> board;
+    final Map<String, dynamic> tally;
+    if (download) {
+      board = await _api.board(election);
+      if (board['closure'] == null && !board.containsKey('cancellation')) {
+        throw const FormatException('A votação ainda não foi encerrada');
+      }
+      tally = board.containsKey('cancellation')
+          ? {'shares': [], 'result': null}
+          : await _api.tally(election);
+    } else {
+      final cached = bundleJson ?? await _storage.getString(cacheKey);
+      if (cached == null) throw StateError('Nenhuma cópia local da apuração');
+      final package = jsonDecode(checkElectionJson(cached));
+      if (package is! Map<String, dynamic> ||
+          package['board'] is! Map<String, dynamic> ||
+          package['tally'] is! Map<String, dynamic>) {
+        throw const FormatException('Pacote deve conter quadro e apuração');
+      }
+      board = package['board'] as Map<String, dynamic>;
+      tally = package['tally'] as Map<String, dynamic>;
+    }
+    final rawReceipt = account == null
+        ? null
+        : await _storage.getString(
+            _BallotSession._receiptKey(
+              DeviceVoterKeys.aliasFor(account, election),
+            ),
+          );
+    Object? externalClosure;
+    Object? externalReceipt = rawReceipt == null
+        ? null
+        : jsonDecode(rawReceipt);
+    if (anchorJson != null) {
+      final anchor = jsonDecode(checkElectionJson(anchorJson));
+      if (anchor case {'payload': {'kind': 'closure'}}) {
+        externalClosure = anchor;
+      } else if (anchor case {'payload': {'kind': 'receipt'}}) {
+        externalReceipt = anchor;
+      } else {
+        throw const FormatException(
+          'A âncora deve ser um recibo ou termo assinado',
+        );
+      }
+    }
+    final report = await auditElection(
+      board: board,
+      tally: tally,
+      election: election,
+      trustedManifestHash: trustedManifestHash,
+      externalReceipt: externalReceipt,
+      externalClosure: externalClosure,
+    );
+    if (download) {
+      await _storage.setString(
+        cacheKey,
+        jsonEncode({'board': board, 'tally': tally}),
+      );
+    }
+    return report;
+  }
+
   Future<BallotSession> open(
     UuidValue election, {
     required String trustedManifestHash,
@@ -126,38 +172,29 @@ final class SecretVotingClient {
       throw const FormatException('Manifesto ausente');
     }
     final payload = envelope['payload'] as Map<String, dynamic>;
-    if (_hash(payload) != trustedManifestHash) {
+    if (electionDigest(payload) != trustedManifestHash) {
       throw const FormatException('O manifesto diverge do hash da comissão');
     }
     final serverKey = payload['serverSigningKey'] as String;
-    await _verified(envelope, serverKey, 'manifest', election);
-    final calendar = await _verified(
-      board['calendarOrigin'],
-      serverKey,
-      'calendar-origin',
-      election,
-    );
-    final calendarHash = _hash(calendar);
-    if (calendarHash != payload['calendarOriginHash']) {
-      throw const FormatException('Calendário divergente do manifesto');
-    }
-    final startsAt = _utcTime(calendar['startsAt']);
-    final endsAt = _utcTime(calendar['endsAt']);
+    await verifyElectionEnvelope(envelope, serverKey, 'manifest', election);
+    final startsAt = _utcTime(board['startsAt']);
+    final endsAt = _utcTime(board['endsAt']);
     if (!startsAt.isBefore(endsAt)) {
       throw const FormatException('Período de votação inválido');
     }
+    final cancellation = board['cancellation'];
     final closed = board['closure'] != null;
     if (closed) {
-      final closure = await _verified(
+      final closure = await verifyElectionEnvelope(
         board['closure'],
         serverKey,
         'closure',
         election,
       );
       if (closure['manifestHash'] != trustedManifestHash ||
-          closure['scheduleHash'] != calendarHash) {
+          _utcTime(closure['closedAt']).isBefore(endsAt)) {
         throw const FormatException(
-          'Encerramento divergente do manifesto ou calendário',
+          'Encerramento divergente do manifesto ou período de votação',
         );
       }
     }
@@ -174,6 +211,10 @@ final class SecretVotingClient {
       groupId: payload['groupId'] as String,
     );
     final status = await _registration.read(election, guard);
+    if (status.voterId != null && status.voterId != account) {
+      throw const FormatException('Cadastro eleitoral de outra conta');
+    }
+
     final alias = DeviceVoterKeys.aliasFor(account, election);
     final hasSavedReceipt =
         await _storage.getString(_BallotSession._receiptKey(alias)) != null;
@@ -208,6 +249,9 @@ final class SecretVotingClient {
       localKeyMatches: localKeyMatches,
       hasSavedReceipt: hasSavedReceipt,
       session: session,
+      cancellationReason: cancellation == null
+          ? null
+          : (cancellation as Map<String, dynamic>)['reason'] as String,
       closed: closed,
       clock: _clock,
     );
@@ -238,8 +282,8 @@ final class _BallotSession implements BallotSession {
   @override
   final List<UuidValue> optionIds;
   final VoterRegistration _registration;
-  String get _draftKey => '$_alias.signed-ballot';
-  static String _receiptKey(String alias) => '$alias.signed-receipt';
+  String get _draftKey => '$_alias.signed-ballot-v4';
+  static String _receiptKey(String alias) => '$alias.signed-receipt-v2';
 
   /// Reabre o pacote cifrado da própria conta após reiniciar o aplicativo.
   @override
@@ -285,12 +329,9 @@ final class _BallotSession implements BallotSession {
         selectedChoiceId: choice,
       );
       final payload = {
-        'version': 1,
-        'kind': 'ballot',
         'electionId': _election.uuid,
         'manifestHash': _manifestHash,
-        'voterId': _account.uuid,
-        'submissionId': const Uuid().v4(),
+        'accountId': _account.uuid,
         'publicKey': key,
         'ciphertexts': [
           for (var i = 0; i < pairs.length; i++)
@@ -302,7 +343,11 @@ final class _BallotSession implements BallotSession {
         ],
       };
       _guard();
-      final signature = await keys.sign(_account, _election, _bytes(payload));
+      final signature = await keys.sign(
+        _account,
+        _election,
+        ballotSigningBytes(payload),
+      );
       final vote = SignedVote(
         jsonEncode({'payload': payload, 'signature': signature}),
       );
@@ -329,10 +374,14 @@ final class _BallotSession implements BallotSession {
         'Cadastro e chave local indisponíveis para conferir o recibo guardado',
       );
     }
-    final payload = await _verified(envelope, key, 'ballot', _election);
-    final voter = _registration.voterId ?? _account;
+    final payload = await verifyBallotEnvelope(
+      envelope,
+      key,
+      _election,
+      _account.uuid,
+    );
     if (payload['manifestHash'] != _manifestHash ||
-        payload['voterId'] != voter.uuid ||
+        payload['accountId'] != _account.uuid ||
         payload['publicKey'] != key) {
       throw const FormatException('Cédula de outro eleitor ou manifesto');
     }
@@ -353,15 +402,22 @@ final class _BallotSession implements BallotSession {
       );
     }
     final ballot = await _checkVote(vote);
-    final response = await _client._api.submit(_election, vote.json, _guard);
-    final accepted = await _readReceipt(
-      response['receipt'],
-      recovered: response['recovered'] as bool,
+    final envelope = jsonDecode(vote.json) as Map<String, dynamic>;
+    final request = BallotSubmissionDto(
+      manifestHash: ballot['manifestHash'] as String,
+      publicKey: ballot['publicKey'] as String,
+      ciphertexts: (ballot['ciphertexts'] as List).cast<Map<String, dynamic>>(),
+      signature: envelope['signature'] as String,
     );
-    if (accepted.ballotHash != _hash(ballot)) {
+    final response = await _client._api.submit(_election, request, _guard);
+    final accepted = await _readReceipt(
+      response.receipt,
+      recovered: response.recovered,
+    );
+    if (accepted.ballotHash != ballotDigest(ballot)) {
       throw const FormatException('Recibo de outra submissão');
     }
-    await _bindEntry(response['entry'], accepted);
+    await _bindEntry(response.entry, accepted);
     await _retain(accepted);
     return accepted;
   }
@@ -370,7 +426,12 @@ final class _BallotSession implements BallotSession {
     Object? envelope, {
     required bool recovered,
   }) async {
-    final receipt = await _verified(envelope, _serverKey, 'receipt', _election);
+    final receipt = await verifyElectionEnvelope(
+      envelope,
+      _serverKey,
+      'receipt',
+      _election,
+    );
     final index = receipt['index'];
     final entryHash = receipt['entryHash'];
     final ballotHash = receipt['ballotHash'];
@@ -395,7 +456,7 @@ final class _BallotSession implements BallotSession {
   }
 
   Future<void> _bindEntry(Object? envelope, AcceptedVote vote) async {
-    final entry = await _verified(
+    final entry = await verifyElectionEnvelope(
       envelope,
       _serverKey,
       'board-entry',
@@ -405,8 +466,8 @@ final class _BallotSession implements BallotSession {
     if (entry['manifestHash'] != _manifestHash ||
         entry['index'] != vote.index ||
         (vote.index == 1 && entry['previousHash'] != _manifestHash) ||
-        _hash(entry) != vote.entryHash ||
-        _hash(ballot) != vote.ballotHash) {
+        electionDigest(entry) != vote.entryHash ||
+        ballotDigest(ballot) != vote.ballotHash) {
       throw const FormatException(
         'O recibo ou registro não corresponde à cédula',
       );
@@ -453,7 +514,7 @@ final class _BallotSession implements BallotSession {
     final draft = await _client._storage.getString(_draftKey);
     if (draft != null) {
       final ballot = await _checkVote(SignedVote(draft));
-      if (_hash(ballot) != accepted.ballotHash) {
+      if (ballotDigest(ballot) != accepted.ballotHash) {
         throw const FormatException('Recibo de outra cédula');
       }
     } else {
@@ -472,13 +533,13 @@ final class _BallotSession implements BallotSession {
   Future<List<dynamic>> _boardEntries() async {
     _guard();
     final board = await _client._api.board(_election);
-    final manifest = await _verified(
+    final manifest = await verifyElectionEnvelope(
       board['manifest'],
       _serverKey,
       'manifest',
       _election,
     );
-    if (_hash(manifest) != _manifestHash) {
+    if (electionDigest(manifest) != _manifestHash) {
       throw const FormatException('Manifesto do quadro alterado');
     }
     _guard();
@@ -503,7 +564,7 @@ final class _BallotSession implements BallotSession {
     var previous = _manifestHash;
     Object? recordedBallot;
     for (var i = 0; i < vote.index; i++) {
-      final entry = await _verified(
+      final entry = await verifyElectionEnvelope(
         entries[i],
         _serverKey,
         'board-entry',
@@ -514,12 +575,12 @@ final class _BallotSession implements BallotSession {
           entry['previousHash'] != previous) {
         return false;
       }
-      previous = _hash(entry);
+      previous = electionDigest(entry);
       recordedBallot = entry['ballot'];
     }
     if (previous != vote.entryHash) return false;
     final ballot = await _checkEnvelope(recordedBallot);
     _guard();
-    return _hash(ballot) == signed.ballotHash;
+    return ballotDigest(ballot) == signed.ballotHash;
   }
 }

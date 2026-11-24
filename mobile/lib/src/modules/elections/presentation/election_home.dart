@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../application/election_audit.dart';
 import '../application/election_failure.dart';
 import '../application/secret_voting.dart';
+import 'election_audit_page.dart';
 import 'election_flow.dart';
 import 'election_page.dart';
 
@@ -14,11 +16,15 @@ class ElectionHome extends StatefulWidget {
     required this.inspect,
     required this.register,
     required this.classifyFailure,
+    this.audit,
+    this.openAuthority,
   });
 
   final Future<ElectionInspection> Function() inspect;
   final Future<void> Function() register;
   final ElectionFailure Function(Object) classifyFailure;
+  final RunElectionAudit? audit;
+  final VoidCallback? openAuthority;
 
   @override
   State<ElectionHome> createState() => _ElectionHomeState();
@@ -71,6 +77,7 @@ class _ElectionHomeState extends State<ElectionHome>
     if (_flow.receipt != null) return 'Voto registrado';
     if (election.hasSavedReceipt) return 'Recibo disponível neste aparelho';
     if (election.participated) return 'Participação registrada';
+    if (election.cancellationReason != null) return 'Eleição cancelada';
     if (_flow.step == ElectionStep.pending) return 'Envio sem confirmação';
     return switch (election.phase) {
       ElectionPhase.preparation =>
@@ -131,6 +138,20 @@ class _ElectionHomeState extends State<ElectionHome>
                   Text(electionTitle, style: theme.textTheme.titleLarge),
                   const SizedBox(height: 16),
                   FilledButton(onPressed: _open, child: Text(_action())),
+                  if (widget.audit case final audit?)
+                    TextButton(
+                      onPressed: () => Navigator.of(context).push<void>(
+                        MaterialPageRoute(
+                          builder: (_) => ElectionAuditPage(audit: audit),
+                        ),
+                      ),
+                      child: const Text('Auditar apuração'),
+                    ),
+                  if (widget.openAuthority case final openAuthority?)
+                    TextButton(
+                      onPressed: openAuthority,
+                      child: const Text('Autoridades da eleição'),
+                    ),
                 ],
               ),
             ),

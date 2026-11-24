@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:capp/src/infrastructure/backend/backend_api.dart';
+import 'package:capp/src/infrastructure/backend/elections/ballot_dto.dart';
+import 'package:capp/src/modules/elections/infrastructure/cryptography/election_signing_input.dart';
 import 'package:capp/src/modules/elections/infrastructure/secret_voting.dart';
 import 'package:capp/src/modules/elections/infrastructure/backend/voter_registration_gateway.dart';
 import 'package:capp/src/modules/elections/infrastructure/device_voter_keys.dart';
@@ -13,6 +15,18 @@ import 'package:uuid/uuid.dart';
 import '../../../support/http_fakes.dart';
 import '../../../support/preferences_fake.dart';
 
+String submissionFor(String signed) {
+  final envelope = jsonDecode(signed) as Map;
+  final payload = envelope['payload'] as Map;
+  return jsonEncode({
+    'payload': {
+      for (final field in ['manifestHash', 'publicKey', 'ciphertexts'])
+        field: payload[field],
+    },
+    'signature': envelope['signature'],
+  });
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final messenger =
@@ -20,6 +34,20 @@ void main() {
   final vectors = jsonDecode(
     File('../packages/api-contracts/elections/vectors.json').readAsStringSync(),
   );
+  final domains =
+      (jsonDecode(
+            File('../packages/api-contracts/elections/profile.json')
+                .readAsStringSync(),
+          ) as Map)['domainsHex']
+          as Map<String, dynamic>;
+  List<int> prefix(String kind) {
+    final hex = domains[kind] as String;
+    return [
+      for (var i = 0; i < hex.length; i += 2)
+        int.parse(hex.substring(i, i + 2), radix: 16),
+    ];
+  }
+
   Map<String, dynamic> vector(String name) =>
       (vectors['cases'] as List).firstWhere((v) => v['name'] == 'valid/$name');
   Map<String, dynamic> envelope(String name) => {
@@ -31,7 +59,7 @@ void main() {
   final ballot = vector('ballot-0');
   final trustedHash = manifest['sha256'] as String;
   final account = UuidValue.withFormatValidation(
-    ballot['payload']['voterId'] as String,
+    ballot['payload']['accountId'] as String,
   );
   final election = UuidValue.withFormatValidation(
     manifest['payload']['electionId'] as String,
@@ -40,7 +68,7 @@ void main() {
   final serverKey = manifest['payload']['serverSigningKey'] as String;
   late Map<String, dynamic> state;
   final alias = DeviceVoterKeys.aliasFor(account, election);
-  final draftKey = '$alias.signed-ballot';
+  final draftKey = '$alias.signed-ballot-v4';
   String encoded(List<int> bytes) =>
       base64Url.encode(bytes).replaceAll('=', '');
 
@@ -80,7 +108,7 @@ void main() {
   setUp(() {
     state = {
       'publicKey': voterKey,
-      'voterId': ballot['payload']['voterId'],
+      'voterId': ballot['payload']['accountId'],
       'participated': false,
     };
     active = account;
@@ -91,7 +119,8 @@ void main() {
     ownReceipt = envelope('receipt-0');
     board = {
       'manifest': envelope('manifest'),
-      'calendarOrigin': envelope('calendar-origin'),
+      'startsAt': '2026-11-20T12:00:00Z',
+      'endsAt': '2026-11-22T12:00:00Z',
       'entries': [envelope('entry-0')],
     };
     record = {
@@ -127,7 +156,7 @@ void main() {
     messenger.setMockMethodCallHandler(DeviceVoterKeys.channel, (call) async {
       final args = call.arguments as Map;
       if (call.method == 'publicKey') {
-        expect(args['alias'], alias);
+        expect(args['alias'], DeviceVoterKeys.aliasFor(active!, election));
         if (args['create'] == true && localKey == null) {
           keyCreations++;
           localKey = voterKey;
@@ -150,7 +179,6 @@ void main() {
       }
       for (final item in [
         'manifest',
-        'calendar-origin',
         'ballot-0',
         'ballot-1',
         'entry-0',
@@ -164,7 +192,8 @@ void main() {
                     ? v['payload']['publicKey']
                     : serverKey) &&
             sig == v['signature'] &&
-            text == 'CAPP-ELECTIONS/1\n${v['canonical']}') {
+            text ==
+                '${utf8.decode(prefix((v['payload']['kind'] ?? 'ballot') as String))}${v['canonical']}') {
           return true;
         }
       }
@@ -174,6 +203,44 @@ void main() {
   tearDown(
     () => messenger.setMockMethodCallHandler(DeviceVoterKeys.channel, null),
   );
+
+  test('usa os domínios fixos e os hashes dos vetores compartilhados', () {
+    for (final kind in domains.keys) {
+      final payload = {'version': 1, 'kind': kind};
+      expect(
+        electionSigningBytes(payload).take(prefix(kind).length),
+        prefix(kind),
+      );
+    }
+    for (final vector in vectors['cases'] as List) {
+      expect(
+        vector['payload']['kind'] == null
+            ? ballotDigest(vector['payload'] as Map<String, dynamic>)
+            : electionDigest(vector['payload'] as Map<String, dynamic>),
+        vector['sha256'],
+      );
+    }
+    expect(
+      () => electionSigningBytes({'version': 1, 'kind': 'unknown'}),
+      throwsFormatException,
+    );
+  });
+
+  test('converte a cédula assinada no corpo HTTP do exemplo compartilhado', () {
+    final public = envelope('ballot-0');
+    final ballot = public['payload'] as Map<String, dynamic>;
+    final dto = BallotSubmissionDto(
+      manifestHash: ballot['manifestHash'] as String,
+      publicKey: ballot['publicKey'] as String,
+      ciphertexts: (ballot['ciphertexts'] as List).cast<Map<String, dynamic>>(),
+      signature: public['signature'] as String,
+    );
+    final example = jsonDecode(
+      File('../packages/api-contracts/examples/election-ballot-submission.json')
+          .readAsStringSync(),
+    );
+    expect(dto.toJson(), example);
+  });
 
   test('cria a chave somente no primeiro voto sem cadastro prévio', () async {
     state = {
@@ -190,14 +257,14 @@ void main() {
     final session = election.session!;
     final draft = await session.prepare(session.optionIds.first);
     expect(keyCreations, 1);
-    expect(jsonDecode(draft.json)['payload']['voterId'], account.uuid);
+    expect(jsonDecode(draft.json)['payload']['accountId'], account.uuid);
 
     postStatus = 503;
     await expectLater(session.submit(draft), throwsA(isA<DioException>()));
     final reopened = await open();
     expect((await reopened.savedVote())!.json, draft.json);
     await expectLater(reopened.submit(draft), throwsA(isA<DioException>()));
-    expect(posted, [draft.json, draft.json]);
+    expect(posted, [submissionFor(draft.json), submissionFor(draft.json)]);
     expect(keyCreations, 1);
   });
 
@@ -232,20 +299,17 @@ void main() {
     },
   );
 
-  test('não exibe período ou encerramento adulterado', () async {
-    board['calendarOrigin'] = {
-      ...envelope('calendar-origin'),
-      'payload': {
-        ...vector('calendar-origin')['payload'],
-        'endsAt': '2026-11-29T12:00:00Z',
-      },
-    };
-    await expectLater(inspect(), throwsFormatException);
-    board['calendarOrigin'] = envelope('calendar-origin');
-    board['closure'] = envelope('receipt-0');
-    await expectLater(inspect(), throwsFormatException);
-    expect(transport.requests.every((r) => r.path.endsWith('/board')), true);
-  });
+  test(
+    'recusa período inválido e encerramento com assinatura inválida',
+    () async {
+      board['endsAt'] = board['startsAt'];
+      await expectLater(inspect(), throwsFormatException);
+      board['endsAt'] = '2026-11-22T12:00:00Z';
+      board['closure'] = envelope('receipt-0');
+      await expectLater(inspect(), throwsFormatException);
+      expect(transport.requests.every((r) => r.path.endsWith('/board')), true);
+    },
+  );
 
   test(
     'recupera e vincula o recibo em outro aparelho após o encerramento',
@@ -262,7 +326,7 @@ void main() {
       final receipt = await result.session!.recoverReceipt();
       expect(receipt.recovered, true);
       expect(jsonDecode(receipt.receiptJson), envelope('receipt-0'));
-      expect(prefs.values['$alias.signed-receipt'], receipt.receiptJson);
+      expect(prefs.values['$alias.signed-receipt-v2'], receipt.receiptJson);
       expect(await result.session!.isIncluded(receipt), true);
       expect(posted, isEmpty);
       expect(signedByDevice, isEmpty);
@@ -315,10 +379,10 @@ void main() {
         throwsStateError,
       );
       await expectLater(session.submit(draft), throwsStateError);
-      expect(posted, [draft.json]);
+      expect(posted, [submissionFor(draft.json)]);
       localKey = null;
       await expectLater(session.recoverReceipt(), throwsStateError);
-      expect(prefs.values['$alias.signed-receipt'], receipt.receiptJson);
+      expect(prefs.values['$alias.signed-receipt-v2'], receipt.receiptJson);
     },
   );
 
@@ -331,12 +395,9 @@ void main() {
       expect(payload.keys.toSet(), {
         'ciphertexts',
         'electionId',
-        'kind',
         'manifestHash',
         'publicKey',
-        'submissionId',
-        'version',
-        'voterId',
+        'accountId',
       });
       final encrypted = payload['ciphertexts'] as List;
       expect(
@@ -355,7 +416,7 @@ void main() {
       final saved = await reopened.savedVote();
       expect(saved!.json, signed.json);
       await expectLater(reopened.submit(saved), throwsA(isA<DioException>()));
-      expect(posted, [signed.json, signed.json]);
+      expect(posted, [submissionFor(signed.json), submissionFor(signed.json)]);
       await expectLater(
         reopened.prepare(reopened.optionIds.last),
         throwsStateError,
@@ -373,7 +434,7 @@ void main() {
       final accepted = await session.submit(draft);
       expect(jsonDecode(accepted.receiptJson), envelope('receipt-0'));
       expect(accepted.recovered, false);
-      expect(prefs.values['$alias.signed-receipt'], accepted.receiptJson);
+      expect(prefs.values['$alias.signed-receipt-v2'], accepted.receiptJson);
       expect(await session.isIncluded(accepted), true);
       board['entries'] = [];
       final recovered = await (await open()).recoverReceipt();
@@ -436,12 +497,22 @@ void main() {
 
   test('um registro assinado no índice do recibo não basta se o predecessor foi substituído', () async {
     final second = vector('ballot-1')['payload'];
+    final secondAccount = UuidValue.withFormatValidation(
+      second['accountId'] as String,
+    );
     state = {
-      'voterId': second['voterId'],
+      'voterId': second['accountId'],
       'publicKey': second['publicKey'],
       'participated': true,
     };
-    prefs.values[draftKey] = jsonEncode(envelope('ballot-1'));
+    await expectLater(open(), throwsFormatException);
+
+    active = secondAccount;
+    localKey = second['publicKey'] as String;
+    final secondAlias = DeviceVoterKeys.aliasFor(secondAccount, election);
+    prefs.values['$secondAlias.signed-ballot-v4'] = jsonEncode(
+      envelope('ballot-1'),
+    );
     record = {
       'recovered': true,
       'entry': envelope('entry-1'),

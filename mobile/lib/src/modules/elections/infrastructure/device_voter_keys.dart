@@ -33,8 +33,14 @@ final class DeviceVoterKeys implements VoterKeyStore {
     UuidValue electionId,
     String publicKey,
   ) async {
-    final payload = voterRegistrationPayload(accountId, electionId, publicKey);
-    final message = utf8.encode('CAPP-ELECTIONS/1\n${jsonEncode(payload)}');
+    final payload = voterRegistrationSigningPayload(
+      accountId,
+      electionId,
+      publicKey,
+    );
+    final message = utf8.encode(
+      '$voterRegistrationSignatureDomain${jsonEncode(payload)}',
+    );
     final signature = await sign(accountId, electionId, message);
 
     return VoterRegistrationProof(
@@ -53,6 +59,25 @@ final class DeviceVoterKeys implements VoterKeyStore {
   ) async {
     final signature = await _invoke('sign', {
       'alias': aliasFor(accountId, electionId),
+      'message': message,
+    });
+    if (signature == null) throw VoterRegistrationFailure.keyUnavailable;
+    return _base64Url(signature);
+  }
+
+  /// Retorna a chave RSA que pertence ao papel de autoridade.
+  Future<String?> authorityPublicKey(
+    String alias, {
+    required bool create,
+  }) async {
+    final der = await _invoke('publicKey', {'alias': alias, 'create': create});
+    return der == null ? null : _base64Url(der);
+  }
+
+  /// Assina um envelope no papel de autoridade usando a chave desse papel.
+  Future<String> signAsAuthority(String alias, Uint8List message) async {
+    final signature = await _invoke('sign', {
+      'alias': alias,
       'message': message,
     });
     if (signature == null) throw VoterRegistrationFailure.keyUnavailable;

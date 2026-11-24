@@ -10,7 +10,10 @@ use axum::{Router, extract::State, middleware, routing::get};
 use reqwest::StatusCode;
 use tokio::time::timeout;
 
-use crate::api::state::AppState;
+use crate::{
+    api::{app_check::require_app_check, state::AppState},
+    modules::{elections::api as elections_api, identity::api as identity_api},
+};
 
 /// Monta as rotas globais e de identidade, ainda dependentes de [`AppState`].
 ///
@@ -81,10 +84,8 @@ use crate::api::state::AppState;
 /// ```
 pub fn create_router(state: AppState) -> Router {
     Router::new()
-        .merge(crate::modules::identity::api::router())
-        .merge(crate::modules::elections::api::protected_receipt_routes())
-        .merge(crate::modules::elections::api::protected_registration_routes())
-        .merge(crate::modules::elections::api::protected_ballot_routes())
+        .merge(identity_api::router())
+        .merge(elections_api::protected_json_routes())
         .route("/health", get(|| async { "O servidor está saudável." }))
         .route(
             "/ready",
@@ -110,8 +111,8 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
-            super::app_check::require_app_check,
+            require_app_check,
         ))
-        .merge(crate::modules::elections::api::public_board_routes())
+        .merge(elections_api::public_board_routes())
         .with_state(state)
 }
