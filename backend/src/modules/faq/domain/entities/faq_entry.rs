@@ -240,6 +240,41 @@ impl FaqEntry {
     pub fn updated_at(&self) -> DateTime<Utc> {
         self.updated_at
     }
+
+    /// Atualiza o conteúdo da pergunta, resposta e categoria da entrada de FAQ.
+    ///
+    /// Espaços periféricos são removidos da pergunta, resposta e categoria.
+    /// Valida as regras estruturais e garante que `updated_at >= created_at`.
+    ///
+    /// # Erros
+    ///
+    /// Retorna [`FaqError`] se qualquer parâmetro violar as regras estruturais
+    /// ou a consistência temporal dos timestamps.
+    pub fn update_content(
+        &mut self,
+        question: String,
+        answer: String,
+        category: Option<String>,
+        updated_by: Uuid,
+        updated_at: DateTime<Utc>,
+    ) -> Result<(), FaqError> {
+        let trimmed_question = question.trim();
+        validate_question(trimmed_question)?;
+
+        let trimmed_answer = answer.trim();
+        validate_answer(trimmed_answer)?;
+
+        let sanitized_category = validate_category(category.as_deref())?;
+        validate_timestamps(self.created_at, updated_at)?;
+
+        self.question = trimmed_question.to_string();
+        self.answer = trimmed_answer.to_string();
+        self.category = sanitized_category;
+        self.updated_by = updated_by;
+        self.updated_at = updated_at;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -462,6 +497,283 @@ mod tests {
             FaqError::InconsistentTimestamps {
                 created_at,
                 updated_at
+            }
+        );
+    }
+
+    #[test]
+    fn should_update_content_successfully() {
+        let created_at = Utc::now();
+        let mut entry = FaqEntry::new(
+            Uuid::new_v4(),
+            CA_ID,
+            "Pergunta original?".to_string(),
+            "Resposta original.".to_string(),
+            Some("Original".to_string()),
+            AUTHOR_ID,
+            created_at,
+        )
+        .expect("deve criar");
+
+        let updated_at = created_at + chrono::Duration::minutes(5);
+        let editor_id = Uuid::new_v4();
+
+        entry
+            .update_content(
+                "Pergunta atualizada?".to_string(),
+                "Resposta atualizada.".to_string(),
+                Some("Atualizada".to_string()),
+                editor_id,
+                updated_at,
+            )
+            .expect("deve atualizar com sucesso");
+
+        assert_eq!(entry.question(), "Pergunta atualizada?");
+        assert_eq!(entry.answer(), "Resposta atualizada.");
+        assert_eq!(entry.category(), Some("Atualizada"));
+        assert_eq!(entry.created_by(), AUTHOR_ID);
+        assert_eq!(entry.updated_by(), editor_id);
+        assert_eq!(entry.created_at(), created_at);
+        assert_eq!(entry.updated_at(), updated_at);
+    }
+
+    #[test]
+    fn should_trim_whitespace_on_update() {
+        let created_at = Utc::now();
+        let mut entry = FaqEntry::new(
+            Uuid::new_v4(),
+            CA_ID,
+            "Pergunta?".to_string(),
+            "Resposta.".to_string(),
+            None,
+            AUTHOR_ID,
+            created_at,
+        )
+        .expect("deve criar");
+
+        let updated_at = created_at + chrono::Duration::minutes(1);
+        entry
+            .update_content(
+                "   Pergunta aparada?   ".to_string(),
+                "   Resposta aparada.   ".to_string(),
+                Some("   Categoria aparada   ".to_string()),
+                AUTHOR_ID,
+                updated_at,
+            )
+            .expect("deve atualizar com trim");
+
+        assert_eq!(entry.question(), "Pergunta aparada?");
+        assert_eq!(entry.answer(), "Resposta aparada.");
+        assert_eq!(entry.category(), Some("Categoria aparada"));
+    }
+
+    #[test]
+    fn should_reject_empty_question_on_update() {
+        let created_at = Utc::now();
+        let mut entry = FaqEntry::new(
+            Uuid::new_v4(),
+            CA_ID,
+            "Pergunta?".to_string(),
+            "Resposta.".to_string(),
+            None,
+            AUTHOR_ID,
+            created_at,
+        )
+        .expect("deve criar");
+
+        let err = entry
+            .update_content(
+                "   ".to_string(),
+                "Nova resposta.".to_string(),
+                None,
+                AUTHOR_ID,
+                created_at,
+            )
+            .unwrap_err();
+
+        assert_eq!(err, FaqError::EmptyQuestion);
+    }
+
+    #[test]
+    fn should_reject_question_too_long_on_update() {
+        let created_at = Utc::now();
+        let mut entry = FaqEntry::new(
+            Uuid::new_v4(),
+            CA_ID,
+            "Pergunta?".to_string(),
+            "Resposta.".to_string(),
+            None,
+            AUTHOR_ID,
+            created_at,
+        )
+        .expect("deve criar");
+
+        let err = entry
+            .update_content(
+                "A".repeat(MAX_QUESTION_LENGTH + 1),
+                "Nova resposta.".to_string(),
+                None,
+                AUTHOR_ID,
+                created_at,
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            err,
+            FaqError::QuestionTooLong {
+                max: MAX_QUESTION_LENGTH
+            }
+        );
+    }
+
+    #[test]
+    fn should_reject_empty_answer_on_update() {
+        let created_at = Utc::now();
+        let mut entry = FaqEntry::new(
+            Uuid::new_v4(),
+            CA_ID,
+            "Pergunta?".to_string(),
+            "Resposta.".to_string(),
+            None,
+            AUTHOR_ID,
+            created_at,
+        )
+        .expect("deve criar");
+
+        let err = entry
+            .update_content(
+                "Nova pergunta?".to_string(),
+                "   ".to_string(),
+                None,
+                AUTHOR_ID,
+                created_at,
+            )
+            .unwrap_err();
+
+        assert_eq!(err, FaqError::EmptyAnswer);
+    }
+
+    #[test]
+    fn should_reject_answer_too_long_on_update() {
+        let created_at = Utc::now();
+        let mut entry = FaqEntry::new(
+            Uuid::new_v4(),
+            CA_ID,
+            "Pergunta?".to_string(),
+            "Resposta.".to_string(),
+            None,
+            AUTHOR_ID,
+            created_at,
+        )
+        .expect("deve criar");
+
+        let err = entry
+            .update_content(
+                "Nova pergunta?".to_string(),
+                "B".repeat(MAX_ANSWER_LENGTH + 1),
+                None,
+                AUTHOR_ID,
+                created_at,
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            err,
+            FaqError::AnswerTooLong {
+                max: MAX_ANSWER_LENGTH
+            }
+        );
+    }
+
+    #[test]
+    fn should_reject_empty_category_on_update() {
+        let created_at = Utc::now();
+        let mut entry = FaqEntry::new(
+            Uuid::new_v4(),
+            CA_ID,
+            "Pergunta?".to_string(),
+            "Resposta.".to_string(),
+            None,
+            AUTHOR_ID,
+            created_at,
+        )
+        .expect("deve criar");
+
+        let err = entry
+            .update_content(
+                "Nova pergunta?".to_string(),
+                "Nova resposta.".to_string(),
+                Some("   ".to_string()),
+                AUTHOR_ID,
+                created_at,
+            )
+            .unwrap_err();
+
+        assert_eq!(err, FaqError::EmptyCategory);
+    }
+
+    #[test]
+    fn should_reject_category_too_long_on_update() {
+        let created_at = Utc::now();
+        let mut entry = FaqEntry::new(
+            Uuid::new_v4(),
+            CA_ID,
+            "Pergunta?".to_string(),
+            "Resposta.".to_string(),
+            None,
+            AUTHOR_ID,
+            created_at,
+        )
+        .expect("deve criar");
+
+        let err = entry
+            .update_content(
+                "Nova pergunta?".to_string(),
+                "Nova resposta.".to_string(),
+                Some("C".repeat(MAX_CATEGORY_LENGTH + 1)),
+                AUTHOR_ID,
+                created_at,
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            err,
+            FaqError::CategoryTooLong {
+                max: MAX_CATEGORY_LENGTH
+            }
+        );
+    }
+
+    #[test]
+    fn should_reject_update_when_updated_at_is_before_created_at() {
+        let created_at = Utc::now();
+        let mut entry = FaqEntry::new(
+            Uuid::new_v4(),
+            CA_ID,
+            "Pergunta?".to_string(),
+            "Resposta.".to_string(),
+            None,
+            AUTHOR_ID,
+            created_at,
+        )
+        .expect("deve criar");
+
+        let earlier = created_at - chrono::Duration::seconds(5);
+        let err = entry
+            .update_content(
+                "Nova pergunta?".to_string(),
+                "Nova resposta.".to_string(),
+                None,
+                AUTHOR_ID,
+                earlier,
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            err,
+            FaqError::InconsistentTimestamps {
+                created_at,
+                updated_at: earlier
             }
         );
     }

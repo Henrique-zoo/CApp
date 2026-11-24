@@ -179,6 +179,45 @@ impl FaqRepository for PostgresFaqRepository {
 
         Ok(CaManagementAccess::new(ca_exists, ca_active, is_ca_manager))
     }
+
+    async fn update(&self, entry: &FaqEntry) -> Result<(), FaqRepositoryError> {
+        let result = sqlx::query(
+            "UPDATE faq_entry \
+             SET question = $1, answer = $2, category = $3, updated_by = $4, updated_at = $5 \
+             WHERE id = $6",
+        )
+        .bind(entry.question())
+        .bind(entry.answer())
+        .bind(entry.category())
+        .bind(entry.updated_by())
+        .bind(entry.updated_at())
+        .bind(entry.id())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            tracing::error!(%e, "Falha ao atualizar entrada de FAQ no PostgreSQL");
+            FaqRepositoryError::Database(e.to_string())
+        })?;
+
+        if result.rows_affected() == 0 {
+            tracing::warn!(id = %entry.id(), "Nenhuma linha afetada ao atualizar entrada de FAQ");
+        }
+
+        Ok(())
+    }
+
+    async fn delete(&self, id: &Uuid) -> Result<bool, FaqRepositoryError> {
+        let result = sqlx::query("DELETE FROM faq_entry WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                tracing::error!(%e, "Falha ao remover entrada de FAQ no PostgreSQL");
+                FaqRepositoryError::Database(e.to_string())
+            })?;
+
+        Ok(result.rows_affected() > 0)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -279,5 +318,22 @@ impl FaqRepository for InMemoryFaqRepository {
             creator_id == Some(user_id) || managers_set.contains(&(academic_center_id, user_id));
 
         Ok(CaManagementAccess::new(true, active, is_ca_manager))
+    }
+
+    async fn update(&self, entry: &FaqEntry) -> Result<(), FaqRepositoryError> {
+        let mut map = self
+            .entries
+            .write()
+            .map_err(|e| FaqRepositoryError::Database(e.to_string()))?;
+        map.insert(entry.id(), entry.clone());
+        Ok(())
+    }
+
+    async fn delete(&self, id: &Uuid) -> Result<bool, FaqRepositoryError> {
+        let mut map = self
+            .entries
+            .write()
+            .map_err(|e| FaqRepositoryError::Database(e.to_string()))?;
+        Ok(map.remove(id).is_some())
     }
 }

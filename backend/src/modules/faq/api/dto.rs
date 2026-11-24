@@ -28,6 +28,23 @@ pub struct CreateFaqEntryRequest {
     pub author_id: Option<Uuid>,
 }
 
+/// Payload de requisição para atualização de uma pergunta e resposta de FAQ.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateFaqEntryRequest {
+    /// Novo texto opcional da pergunta frequente.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<String>,
+
+    /// Nova resposta opcional fornecida pelo Centro Acadêmico.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
+
+    /// Nova categoria temática opcional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+}
+
 /// Representação serializada pública de uma pergunta e resposta de FAQ.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

@@ -35,6 +35,9 @@ pub enum FaqApplicationError {
     /// O usuário não possui cargo ativo de gestão no Centro Acadêmico especificado.
     UserNotPermittedInCa,
 
+    /// A pergunta frequente especificada não foi encontrada ou não pertence ao Centro Acadêmico informado.
+    FaqEntryNotFound(Uuid),
+
     /// Violação de invariantes e validações da entidade de domínio.
     InvalidEntry(FaqError),
 
@@ -59,6 +62,9 @@ impl fmt::Display for FaqApplicationError {
                     f,
                     "usuário sem permissão para cadastrar FAQ neste Centro Acadêmico"
                 )
+            }
+            Self::FaqEntryNotFound(id) => {
+                write!(f, "pergunta frequente '{id}' não encontrada")
             }
             Self::InvalidEntry(err) => write!(f, "{err}"),
             Self::Repository(err) => write!(f, "{err}"),

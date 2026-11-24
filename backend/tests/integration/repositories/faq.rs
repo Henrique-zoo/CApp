@@ -263,3 +263,79 @@ async fn should_enforce_database_check_constraints() {
         "banco deve rejeitar updated_at < created_at"
     );
 }
+
+#[tokio::test]
+async fn should_update_and_delete_faq_entry_with_postgres_repository() {
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "UnB - Update Delete").await;
+    let user_id = create_test_user(&db.pool, "firebase-user-up-del").await;
+    let ca_id = create_test_academic_center(
+        &db.pool,
+        institution_id,
+        Some(user_id),
+        "CA de Computação",
+        "active",
+    )
+    .await;
+
+    let repo = PostgresFaqRepository::new(db.pool.clone());
+    let now = chrono::DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).unwrap();
+    let entry_id = Uuid::new_v4();
+
+    let mut entry = FaqEntry::new(
+        entry_id,
+        ca_id,
+        "Pergunta original?".to_string(),
+        "Resposta original.".to_string(),
+        Some("Geral".to_string()),
+        user_id,
+        now,
+    )
+    .expect("entidade de domínio válida");
+
+    repo.save(&entry).await.expect("deve salvar no PostgreSQL");
+
+    // 1. Atualizar entrada
+    let updated_at = now + chrono::Duration::minutes(10);
+    entry
+        .update_content(
+            "Pergunta atualizada?".to_string(),
+            "Resposta atualizada.".to_string(),
+            Some("Modificada".to_string()),
+            user_id,
+            updated_at,
+        )
+        .expect("atualização válida");
+
+    repo.update(&entry)
+        .await
+        .expect("deve atualizar no PostgreSQL");
+
+    let loaded = repo
+        .find_by_id(entry_id)
+        .await
+        .expect("busca sem erro")
+        .expect("deve encontrar registro");
+
+    assert_eq!(loaded.question(), "Pergunta atualizada?");
+    assert_eq!(loaded.answer(), "Resposta atualizada.");
+    assert_eq!(loaded.category(), Some("Modificada"));
+    assert_eq!(loaded.updated_at(), updated_at);
+
+    // 2. Remover entrada
+    let deleted = repo
+        .delete(&entry_id)
+        .await
+        .expect("deve remover no PostgreSQL");
+    assert!(deleted, "deve retornar true pois registro existia");
+
+    let after_delete = repo.find_by_id(entry_id).await.expect("busca sem erro");
+    assert!(after_delete.is_none(), "registro deve ter sido removido");
+
+    // 3. Tentar remover novamente retorna false
+    let deleted_again = repo.delete(&entry_id).await.expect("deve executar");
+    assert!(
+        !deleted_again,
+        "deve retornar false pois registro não existe mais"
+    );
+}

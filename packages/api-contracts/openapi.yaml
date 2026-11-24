@@ -2500,6 +2500,276 @@ paths:
         "503":
           $ref: "#/components/responses/AccountServiceUnavailable"
 
+  /api/v1/academic-centers/{academic_center_id}/faq/{faq_entry_id}:
+    patch:
+      operationId: updateFaqEntry
+      tags: [FAQ]
+      summary: Atualizar pergunta e resposta de FAQ do Centro Acadêmico
+      description: |
+        Atualiza uma pergunta e resposta existente na base de conhecimento do Centro Acadêmico.
+        Apenas membros com cargo de gestão ativo no Centro Acadêmico possuem autorização
+        para atualizar entradas de FAQ. A entrada deve pertencer ao Centro Acadêmico informado.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: academic_center_id
+          in: path
+          required: true
+          description: Identificador único (UUID) do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000001"
+        - name: faq_entry_id
+          in: path
+          required: true
+          description: Identificador único (UUID) da pergunta frequente.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000010"
+      requestBody:
+        required: true
+        description: Campos a serem atualizados na pergunta e resposta de FAQ.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFaqEntryRequest"
+            examples:
+              updateQuestionAndAnswer:
+                summary: Atualização de pergunta, resposta e categoria
+                value:
+                  question: Como solicito a carteirinha de estudante atualizada?
+                  answer: A solicitação agora é feita diretamente pelo sistema do CA ou pelo formulário online.
+                  category: Carteirinhas
+              updateOnlyAnswer:
+                summary: Atualização apenas da resposta
+                value:
+                  answer: O balcão de atendimento do CA agora funciona das 09h às 21h em dias úteis.
+      responses:
+        "200":
+          description: Pergunta e resposta de FAQ atualizada com sucesso.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FaqEntryResponse"
+              examples:
+                updatedFaqEntry:
+                  summary: Entrada de FAQ atualizada com sucesso
+                  value:
+                    id: "00000000-0000-0000-0000-000000000010"
+                    academicCenterId: "00000000-0000-0000-0000-000000000001"
+                    question: Como solicito a carteirinha de estudante atualizada?
+                    answer: A solicitação agora é feita diretamente pelo sistema do CA ou pelo formulário online.
+                    category: Carteirinhas
+                    createdBy: "00000000-0000-0000-0000-000000000020"
+                    updatedBy: "00000000-0000-0000-0000-000000000020"
+                    createdAt: "2026-11-22T13:00:00Z"
+                    updatedAt: "2026-11-22T14:30:00Z"
+        "400":
+          description: |
+            bad_request — JSON ausente, malformado, nenhum campo informado para atualização ou tipos incompatíveis.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: bad_request
+                  message: Requisição inválida
+                  details: null
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: |
+            user_not_permitted_in_ca — Usuário sem cargo de gestão ativo no Centro Acadêmico;
+            app_check_required ou app_check_invalid — Comprovação do aplicativo ausente ou recusada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                userNotPermitted:
+                  summary: Usuário sem permissão de gestão no Centro Acadêmico
+                  value:
+                    error:
+                      code: user_not_permitted_in_ca
+                      message: Usuário sem permissão para cadastrar FAQ neste Centro Acadêmico
+                      details: null
+        "404":
+          description: |
+            academic_center_not_found — Centro Acadêmico não encontrado;
+            faq_entry_not_found — Pergunta frequente não encontrada ou não pertencente a este Centro Acadêmico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                faqEntryNotFound:
+                  summary: Pergunta frequente não encontrada
+                  value:
+                    error:
+                      code: faq_entry_not_found
+                      message: Pergunta frequente '00000000-0000-0000-0000-000000000010' não encontrada
+                      details:
+                        faq_entry_id: "00000000-0000-0000-0000-000000000010"
+                academicCenterNotFound:
+                  summary: Centro Acadêmico não encontrado
+                  value:
+                    error:
+                      code: academic_center_not_found
+                      message: Centro Acadêmico '00000000-0000-0000-0000-000000000001' não encontrado
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "422":
+          description: |
+            academic_center_inactive — Centro Acadêmico inativo ou arquivado;
+            empty_question — Texto da pergunta vazio ou contendo apenas espaços em branco;
+            question_too_long — Texto da pergunta excede 500 caracteres;
+            empty_answer — Resposta vazia ou contendo apenas espaços em branco;
+            answer_too_long — Resposta excede 5000 caracteres;
+            empty_category — Categoria informada mas vazia após aparo;
+            category_too_long — Categoria excede 100 caracteres;
+            inconsistent_timestamps — Data de atualização anterior à criação.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                academicCenterInactive:
+                  summary: Centro Acadêmico inativo
+                  value:
+                    error:
+                      code: academic_center_inactive
+                      message: Centro Acadêmico '00000000-0000-0000-0000-000000000001' não está ativo
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+                emptyQuestion:
+                  summary: Pergunta vazia
+                  value:
+                    error:
+                      code: empty_question
+                      message: A pergunta de FAQ não pode ser vazia
+                      details: null
+                emptyAnswer:
+                  summary: Resposta vazia
+                  value:
+                    error:
+                      code: empty_answer
+                      message: A resposta de FAQ não pode ser vazia
+                      details: null
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+    delete:
+      operationId: deleteFaqEntry
+      tags: [FAQ]
+      summary: Remover pergunta e resposta de FAQ do Centro Acadêmico
+      description: |
+        Remove permanentemente uma pergunta e resposta do banco de conhecimento do Centro Acadêmico.
+        Apenas membros com cargo de gestão ativo no Centro Acadêmico possuem autorização
+        para remover entradas de FAQ. A entrada deve pertencer ao Centro Acadêmico informado.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: academic_center_id
+          in: path
+          required: true
+          description: Identificador único (UUID) do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000001"
+        - name: faq_entry_id
+          in: path
+          required: true
+          description: Identificador único (UUID) da pergunta frequente a ser removida.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000010"
+      responses:
+        "204":
+          description: Pergunta e resposta de FAQ removida com sucesso.
+        "400":
+          description: |
+            bad_request — Parâmetros de rota inválidos ou malformados.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: bad_request
+                  message: Requisição inválida
+                  details: null
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: |
+            user_not_permitted_in_ca — Usuário sem cargo de gestão ativo no Centro Acadêmico;
+            app_check_required ou app_check_invalid — Comprovação do aplicativo ausente ou recusada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                userNotPermitted:
+                  summary: Usuário sem permissão de gestão no Centro Acadêmico
+                  value:
+                    error:
+                      code: user_not_permitted_in_ca
+                      message: Usuário sem permissão para cadastrar FAQ neste Centro Acadêmico
+                      details: null
+        "404":
+          description: |
+            academic_center_not_found — Centro Acadêmico não encontrado;
+            faq_entry_not_found — Pergunta frequente não encontrada ou não pertencente a este Centro Acadêmico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                faqEntryNotFound:
+                  summary: Pergunta frequente não encontrada
+                  value:
+                    error:
+                      code: faq_entry_not_found
+                      message: Pergunta frequente '00000000-0000-0000-0000-000000000010' não encontrada
+                      details:
+                        faq_entry_id: "00000000-0000-0000-0000-000000000010"
+                academicCenterNotFound:
+                  summary: Centro Acadêmico não encontrado
+                  value:
+                    error:
+                      code: academic_center_not_found
+                      message: Centro Acadêmico '00000000-0000-0000-0000-000000000001' não encontrado
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "422":
+          description: |
+            academic_center_inactive — Centro Acadêmico inativo ou arquivado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                academicCenterInactive:
+                  summary: Centro Acadêmico inativo
+                  value:
+                    error:
+                      code: academic_center_inactive
+                      message: Centro Acadêmico '00000000-0000-0000-0000-000000000001' não está ativo
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
 components:
   parameters:
     ElectionId:
@@ -3350,3 +3620,23 @@ components:
           type: string
           format: date-time
           description: Instante UTC da última modificação da entrada de FAQ.
+    UpdateFaqEntryRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 500
+          pattern: '\S'
+          description: Novo texto opcional da pergunta frequente (1 a 500 caracteres).
+        answer:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          pattern: '\S'
+          description: Nova resposta opcional fornecida pelo Centro Acadêmico (1 a 5000 caracteres).
+        category:
+          type: [string, "null"]
+          maxLength: 100
+          description: Nova categoria temática opcional (máximo 100 caracteres).
