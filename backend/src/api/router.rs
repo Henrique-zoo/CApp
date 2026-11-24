@@ -97,6 +97,7 @@ pub fn create_router(state: AppState, app_check: AppCheckVerifier) -> Router {
         .merge(ca_api::router())
         .merge(elections_api::protected_json_routes())
         .merge(crate::modules::demands::api::router())
+        .merge(crate::modules::faq::api::router())
         .route("/health", get(|| async { "O servidor está saudável." }))
         .route(
             "/ready",
