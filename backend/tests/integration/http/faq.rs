@@ -824,3 +824,379 @@ async fn http_faq_creation_flows_and_authorization() {
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_eq!(body["error"]["code"], "faq_entry_not_found");
 }
+
+#[tokio::test]
+async fn http_faq_navigation_and_search_flows() {
+    let db = TestDatabase::new().await;
+    let (app, _jwks, graph) = setup_app(&db).await;
+
+    let tenant = Uuid::new_v4();
+    let group = Uuid::new_v4();
+    let institution_id = Uuid::new_v4();
+
+    sqlx::query(
+        "INSERT INTO institution (id, name, acronym, microsoft_tenant_id, microsoft_student_group_id, status) \
+         VALUES ($1, 'Universidade de Brasília', 'UnB', $2, $3, 'active')",
+    )
+    .bind(institution_id)
+    .bind(tenant)
+    .bind(group)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    // 1. Provisiona gestor oficial do CA via verificação institucional
+    let manager_object = Uuid::new_v4();
+    let manager_uid = "firebase-manager-uid-nav";
+    let manager_email = "241098765@aluno.unb.br";
+    let manager_user_id = provision_user_officially(
+        &app,
+        &graph,
+        tenant,
+        group,
+        manager_object,
+        manager_uid,
+        manager_email,
+        "Ciência da Computação",
+    )
+    .await;
+
+    // 2. Provisiona segundo estudante institucional sem cargo de gestão no CA
+    let student_object = Uuid::new_v4();
+    let student_uid = "firebase-student-uid-nav";
+    let student_email = "241098766@aluno.unb.br";
+    let _student_user_id = provision_user_officially(
+        &app,
+        &graph,
+        tenant,
+        group,
+        student_object,
+        student_uid,
+        student_email,
+        "Engenharia de Software",
+    )
+    .await;
+
+    let active_ca_id = Uuid::new_v4();
+    let math_ca_id = Uuid::new_v4();
+    let empty_ca_id = Uuid::new_v4();
+    let inactive_ca_id = Uuid::new_v4();
+
+    // CA ativo de Computação (gerenciado pelo gestor)
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, created_by_id, name, acronym, description, status) \
+         VALUES ($1, $2, $3, 'Centro Acadêmico de Computação', 'CACo', 'CA oficial de Computação', 'active')",
+    )
+    .bind(active_ca_id)
+    .bind(institution_id)
+    .bind(manager_user_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    // CA ativo de Matemática (gerenciado por outro usuário)
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, created_by_id, name, acronym, description, status) \
+         VALUES ($1, $2, NULL, 'Centro Acadêmico de Matemática', 'CAMat', 'CA oficial de Matemática', 'active')",
+    )
+    .bind(math_ca_id)
+    .bind(institution_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    // CA ativo vazio (sem perguntas)
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, created_by_id, name, acronym, description, status) \
+         VALUES ($1, $2, NULL, 'Centro Acadêmico de Física', 'CAFis', 'CA sem perguntas', 'active')",
+    )
+    .bind(empty_ca_id)
+    .bind(institution_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    // CA inativo
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, created_by_id, name, acronym, description, status) \
+         VALUES ($1, $2, NULL, 'Centro Acadêmico Inativo', 'CAInat', 'CA inativo para testes', 'archived')",
+    )
+    .bind(inactive_ca_id)
+    .bind(institution_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let manager_jwt = token(manager_uid, manager_object, manager_email);
+    let student_jwt = token(student_uid, student_object, student_email);
+
+    // Gestor cadastra pergunta 1 no CA de Computação
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq"),
+        Some(&manager_jwt),
+        Some(json!({
+            "question": "Como solicitar apoio acadêmico?",
+            "answer": "Entre em contato com a gestão do CA",
+            "category": "Apoio Acadêmico"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let faq_1_id = body["id"].as_str().unwrap().to_string();
+
+    // Gestor cadastra pergunta 2 no CA de Computação
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq"),
+        Some(&manager_jwt),
+        Some(json!({
+            "question": "Quais os prazos para matrícula em disciplinas?",
+            "answer": "Consulte o calendário oficial publicado no SIGAA",
+            "category": "Matrícula"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let _faq_2_id = body["id"].as_str().unwrap().to_string();
+
+    // Cadastra pergunta 3 no CA de Matemática diretamente no banco
+    let math_faq_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO faq_entry (id, academic_center_id, question, answer, category, created_by, updated_by) \
+         VALUES ($1, $2, 'Qual o horário da biblioteca?', 'A biblioteca funciona das 08h às 20h', 'Biblioteca', $3, $3)",
+    )
+    .bind(math_faq_id)
+    .bind(math_ca_id)
+    .bind(manager_user_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    // CENÁRIO 1: Estudante institucional (sem cargo de gestão) consulta FAQ do CA ativo
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let list = body.as_array().expect("array de faq");
+    assert_eq!(list.len(), 2);
+    let questions: Vec<&str> = list
+        .iter()
+        .map(|item| item["question"].as_str().unwrap())
+        .collect();
+    assert!(questions.contains(&"Como solicitar apoio acadêmico?"));
+    assert!(questions.contains(&"Quais os prazos para matrícula em disciplinas?"));
+    assert!(
+        !questions.contains(&"Qual o horário da biblioteca?"),
+        "não deve ver perguntas do CA de Matemática"
+    );
+
+    // CENÁRIO 1b: Consulta via rota alias sem /api/v1
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/academic-centers/{active_ca_id}/faq"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body.as_array().unwrap().len(), 2);
+
+    // CENÁRIO 2: Visualizar a resposta de uma pergunta frequente por id
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{faq_1_id}"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["id"], faq_1_id);
+    assert_eq!(body["question"], "Como solicitar apoio acadêmico?");
+    assert_eq!(body["answer"], "Entre em contato com a gestão do CA");
+
+    // CENÁRIO 3: Buscar perguntas frequentes por um termo (q = "matrícula")
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq?q=matr%C3%ADcula"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let list = body.as_array().expect("array de busca");
+    assert_eq!(list.len(), 1);
+    assert_eq!(
+        list[0]["question"],
+        "Quais os prazos para matrícula em disciplinas?"
+    );
+
+    // CENÁRIO 4: Buscar pelo alias "search"
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq?search=matr%C3%ADcula"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body.as_array().unwrap().len(), 1);
+
+    // CENÁRIO 5: Buscar termo presente apenas na resposta ("SIGAA")
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq?q=sigaa"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let list = body.as_array().expect("array de busca por resposta");
+    assert_eq!(list.len(), 1);
+    assert_eq!(
+        list[0]["question"],
+        "Quais os prazos para matrícula em disciplinas?"
+    );
+
+    // CENÁRIO 6: Buscar um termo sem correspondências
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/academic-centers/{active_ca_id}/faq?q=termo%20sem%20correspond%C3%AAncia"
+        ),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let list = body.as_array().expect("array vazio");
+    assert!(list.is_empty());
+
+    // CENÁRIO 7: Consultar um FAQ sem perguntas disponíveis
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/academic-centers/{empty_ca_id}/faq"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.as_array().unwrap().is_empty());
+
+    // CENÁRIO 8: Não exibir perguntas de outro CA na busca
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq?q=biblioteca"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body.as_array().unwrap().is_empty(),
+        "não deve exibir pergunta de outro CA"
+    );
+
+    // CENÁRIO 9: Filtrar por categoria
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq?category=Apoio%20Acad%C3%AAmico"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let list = body.as_array().expect("array de categoria");
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0]["question"], "Como solicitar apoio acadêmico?");
+
+    // CENÁRIO 10: Listar categorias do FAQ
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/categories"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let cats = body.as_array().expect("array de categorias");
+    assert_eq!(cats, &vec![json!("Apoio Acadêmico"), json!("Matrícula")]);
+
+    // CENÁRIO 10b: Listar categorias via alias
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/academic-centers/{active_ca_id}/faq/categories"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body.as_array().unwrap().len(), 2);
+
+    // CENÁRIO 11: Requisição não autenticada retorna 401
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert_eq!(body["error"]["code"], "unauthorized");
+
+    // CENÁRIO 12: CA inexistente retorna 404
+    let unknown_ca = Uuid::new_v4();
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/academic-centers/{unknown_ca}/faq"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"]["code"], "academic_center_not_found");
+
+    // CENÁRIO 13: CA inativo retorna 422
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/academic-centers/{inactive_ca_id}/faq"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "academic_center_inactive");
+
+    // CENÁRIO 14: Pergunta de outro CA em rota individual retorna 404
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/academic-centers/{active_ca_id}/faq/{math_faq_id}"),
+        Some(&student_jwt),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"]["code"], "faq_entry_not_found");
+}

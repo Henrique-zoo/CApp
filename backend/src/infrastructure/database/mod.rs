@@ -267,6 +267,32 @@ impl crate::modules::faq::application::ports::FaqRepository for PgDatabase {
         repo.find_by_academic_center_id(academic_center_id).await
     }
 
+    async fn find_by_academic_center_id_with_filter(
+        &self,
+        academic_center_id: uuid::Uuid,
+        filter: &crate::modules::faq::application::ports::FaqFilter,
+    ) -> Result<
+        Vec<crate::modules::faq::domain::entities::faq_entry::FaqEntry>,
+        crate::modules::faq::application::error::FaqRepositoryError,
+    > {
+        let repo = crate::modules::faq::infrastructure::repository::PostgresFaqRepository::new(
+            self.pool.clone(),
+        );
+        repo.find_by_academic_center_id_with_filter(academic_center_id, filter)
+            .await
+    }
+
+    async fn list_categories_by_academic_center_id(
+        &self,
+        academic_center_id: uuid::Uuid,
+    ) -> Result<Vec<String>, crate::modules::faq::application::error::FaqRepositoryError> {
+        let repo = crate::modules::faq::infrastructure::repository::PostgresFaqRepository::new(
+            self.pool.clone(),
+        );
+        repo.list_categories_by_academic_center_id(academic_center_id)
+            .await
+    }
+
     async fn check_ca_management_access(
         &self,
         academic_center_id: uuid::Uuid,
