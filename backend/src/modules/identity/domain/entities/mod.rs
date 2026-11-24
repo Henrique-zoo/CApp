@@ -9,13 +9,23 @@
 pub mod institution;
 pub mod institutional_verification;
 pub mod user;
-
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::DateTime;
+use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
-
 pub use crate::shared::retention::StudentRecord;
-
+pub use app_user::AppUser;
+pub use app_user::AppUserError;
+pub use app_user::AppUserStatus;
+pub use app_user::CALOURO_DIDACTIC_ID;
+pub use app_user::MAX_DISPLAY_NAME_LENGTH;
+pub use app_user::MAX_EMAIL_LENGTH;
+pub use app_user::PROHIBITED_MATRICULA;
+pub use app_user::VETERANO_1_DIDACTIC_ID;
+pub use app_user::VETERANO_2_DIDACTIC_ID;
+pub use user_preference::UserPreference;
+pub use user_preference::UserPreferenceError;
 /// Estado de ciclo de vida e retenção da identidade de um discente na plataforma.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IdentityRetentionStatus {
@@ -34,7 +44,6 @@ pub enum IdentityRetentionStatus {
         anonymized_at: DateTime<Utc>,
     },
 }
-
 /// Entidade de domínio que representa a identidade acadêmica discente no CApp.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StudentIdentity {
@@ -53,7 +62,6 @@ pub struct StudentIdentity {
     /// Status atual de retenção e ciclo de vida do registro.
     pub retention_status: IdentityRetentionStatus,
 }
-
 impl StudentIdentity {
     /// Constrói uma nova identidade discente ativa.
     pub fn new_active(
@@ -77,3 +85,5 @@ impl StudentIdentity {
         })
     }
 }
+pub mod app_user;
+pub mod user_preference;

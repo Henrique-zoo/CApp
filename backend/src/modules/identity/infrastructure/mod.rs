@@ -9,3 +9,8 @@
 pub mod firebase;
 pub mod microsoft;
 pub mod repository;
+
+pub use repository::{
+    InMemoryUserPreferenceRepository, PgUserPreferenceRepository, UserPreferenceRepository,
+    UserPreferenceRepositoryError,
+};

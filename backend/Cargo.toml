@@ -81,6 +81,10 @@ path = "tests/cucumber/step_registry.rs"
 name = "data_retention_policy_test"
 path = "tests/data_retention_policy_test.rs"
 
+[[test]]
+name = "user_preference_persistence"
+path = "tests/user_preference_persistence.rs"
+
 [lints.rust]
 missing_docs = "warn"
 
