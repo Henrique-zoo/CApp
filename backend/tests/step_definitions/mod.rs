@@ -8,6 +8,7 @@
 
 mod autenticacao_institucional;
 mod consulta_inscricao_eventos;
+mod controle_vagas_eventos;
 mod criacao_edicao_eventos;
 
 /// Sinaliza que uma step registrada ainda aguarda a implementação real.

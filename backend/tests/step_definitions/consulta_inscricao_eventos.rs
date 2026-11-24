@@ -38,23 +38,24 @@ const DEFAULT_AUTHENTICATED_STUDENT_ID: Uuid =
     Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0103);
 
 /// Identificador determinístico do autor institucional padrão dos eventos semeados nos cenários.
-const DEFAULT_EVENT_AUTHOR_ID: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0900);
+pub(super) const DEFAULT_EVENT_AUTHOR_ID: Uuid =
+    Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0900);
 
 /// Identificador determinístico padrão do CA inicial caso o cenário não declare outro explicitamente antes.
 const DEFAULT_CA_NAME: &str = "CA de Computação";
 
 /// Estado auxiliar do cenário persistido no banco isolado.
 #[derive(Debug, Clone, FromRow)]
-struct ViewerScenarioContext {
-    student_id: Uuid,
-    active_ca_id: Uuid,
-    active_ca_name: String,
-    last_event_id: Option<Uuid>,
-    snapshot_registration_count: i64,
+pub(super) struct ViewerScenarioContext {
+    pub(super) student_id: Uuid,
+    pub(super) active_ca_id: Uuid,
+    pub(super) active_ca_name: String,
+    pub(super) last_event_id: Option<Uuid>,
+    pub(super) snapshot_registration_count: i64,
 }
 
 /// Deriva um UUID determinístico e estável a partir do nome do Centro Acadêmico.
-fn ca_uuid_from_name(ca_name: &str) -> Uuid {
+pub(super) fn ca_uuid_from_name(ca_name: &str) -> Uuid {
     let mut acc: u128 = 0xcbf2_9ce4_8422_2325;
     for byte in ca_name.trim().as_bytes() {
         acc ^= u128::from(*byte);
@@ -66,7 +67,7 @@ fn ca_uuid_from_name(ca_name: &str) -> Uuid {
 }
 
 /// Garante a tabela auxiliar de contexto do cenário e retorna o estado atual.
-async fn ensure_viewer_context(pool: &PgPool) -> ViewerScenarioContext {
+pub(super) async fn ensure_viewer_context(pool: &PgPool) -> ViewerScenarioContext {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS bdd_viewer_scenario_context (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -119,7 +120,7 @@ async fn ensure_viewer_context(pool: &PgPool) -> ViewerScenarioContext {
 }
 
 /// Atualiza o CA ativo no contexto do cenário.
-async fn set_active_ca(pool: &PgPool, ca_name: &str) -> Uuid {
+pub(super) async fn set_active_ca(pool: &PgPool, ca_name: &str) -> Uuid {
     let _ = ensure_viewer_context(pool).await;
     let ca_id = ca_uuid_from_name(ca_name);
     sqlx::query(
@@ -137,7 +138,7 @@ async fn set_active_ca(pool: &PgPool, ca_name: &str) -> Uuid {
 }
 
 /// Registra o último evento referenciado pelos steps `Dado` para steps subsequentes como `nesse evento`.
-async fn set_last_referenced_event(pool: &PgPool, event_id: Uuid, title: &str) {
+pub(super) async fn set_last_referenced_event(pool: &PgPool, event_id: Uuid, title: &str) {
     let _ = ensure_viewer_context(pool).await;
     sqlx::query(
         "UPDATE bdd_viewer_scenario_context
@@ -153,7 +154,7 @@ async fn set_last_referenced_event(pool: &PgPool, event_id: Uuid, title: &str) {
 }
 
 /// Salva um retrato da quantidade de inscrições ativas no evento para verificações de inalterabilidade.
-async fn snapshot_event_registrations(pool: &PgPool, event_id: Uuid) {
+pub(super) async fn snapshot_event_registrations(pool: &PgPool, event_id: Uuid) {
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*)::BIGINT
          FROM event_registrations
@@ -176,7 +177,7 @@ async fn snapshot_event_registrations(pool: &PgPool, event_id: Uuid) {
 }
 
 /// Cria ou localiza um evento com o título e status informados no Centro Acadêmico especificado.
-async fn seed_event_in_ca(
+pub(super) async fn seed_event_in_ca(
     pool: &PgPool,
     ca_id: Uuid,
     title: &str,
@@ -250,7 +251,7 @@ async fn seed_event_in_ca(
 }
 
 /// Localiza um evento pelo título no CA ativo (ou em qualquer CA caso não esteja no ativo).
-async fn find_event_by_title(pool: &PgPool, active_ca_id: Uuid, title: &str) -> Event {
+pub(super) async fn find_event_by_title(pool: &PgPool, active_ca_id: Uuid, title: &str) -> Event {
     let id_in_active: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM events WHERE academic_center_id = $1 AND title = $2 LIMIT 1",
     )
@@ -277,7 +278,12 @@ async fn find_event_by_title(pool: &PgPool, active_ca_id: Uuid, title: &str) -> 
 }
 
 /// Envia uma requisição HTTP autenticada ao roteador real do backend e armazena a resposta em `world.last_response`.
-async fn send_authenticated_request(world: &mut AppWorld, method: &str, uri: &str, user_id: Uuid) {
+pub(super) async fn send_authenticated_request(
+    world: &mut AppWorld,
+    method: &str,
+    uri: &str,
+    user_id: Uuid,
+) {
     let pool = world.database_pool().clone();
     let app = create_router().with_state(AppState::new(pool));
     world.request_count += 1;
@@ -371,6 +377,7 @@ async fn given_published_event_exists_in_active_ca(world: &mut AppWorld, title: 
 
 /// Semeia um evento publicado em um Centro Acadêmico específico.
 #[given(expr = "existe o evento publicado {string} no CA {string}")]
+#[given(expr = "que existe o evento publicado {string} no CA {string}")]
 async fn given_published_event_exists_in_named_ca(
     world: &mut AppWorld,
     title: String,

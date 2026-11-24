@@ -6,7 +6,7 @@
 # Os cenários da fila não presumem uma ordenação ou prazo de confirmação
 # ainda não definido pelo projeto.
 
-@backend @mobile @pending_backend @pending_mobile
+@backend @mobile @pending_mobile
 Funcionalidade: Controle opcional de vagas em eventos
 
   Como proponente de um evento
@@ -72,6 +72,7 @@ Funcionalidade: Controle opcional de vagas em eventos
       E o evento fica com 3 participantes inscritos
       E a capacidade não é ultrapassada
 
+  @pending_backend
   Regra: A fila de espera atende interessados em eventos lotados
 
     @post_mvp
