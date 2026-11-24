@@ -1,9 +1,9 @@
 //! Estrutura do módulo de demandas.
 //!
-//! O escopo previsto abrange demandas institucionais e solicitações relacionadas ao espaço físico do CA.
+//! O escopo abrange demandas institucionais e solicitações relacionadas ao espaço físico do CA.
 //!
-//! As camadas [`api`], [`application`], [`domain`] e [`infrastructure`] ainda
-//! são espaços reservados; este módulo não implementa esses comportamentos.
+//! A camada [`domain`] define os modelos puros, fóruns, histórico e regras de transição.
+//! As camadas [`api`], [`application`] e [`infrastructure`] complementam os fluxos do módulo.
 
 pub mod api;
 pub mod application;
