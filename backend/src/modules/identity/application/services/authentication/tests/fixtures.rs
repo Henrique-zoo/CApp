@@ -44,32 +44,44 @@ pub fn valid_identity() -> VerifiedIdentity {
 }
 
 pub fn evidence(confirmed: bool, validity: Duration) -> InstitutionalVerification {
-    let checked_at = Utc::now();
+    let now = Utc::now();
+    let (checked_at, expires_at) = if validity < Duration::zero() {
+        (now + validity - Duration::days(120), now + validity)
+    } else {
+        (now, now + validity)
+    };
+    let course_name = if confirmed {
+        Some("Curso de Teste".to_string())
+    } else {
+        None
+    };
 
-    InstitutionalVerification {
-        user_id: Uuid::nil(),
-        profile_name: None,
-        course_name: None,
-        microsoft_object_id: microsoft_object_id(),
-        institution_id: institution_id(),
-        microsoft_tenant_id: tenant_id(),
-        microsoft_student_group_id: student_group_id(),
-        student_membership_confirmed: confirmed,
+    InstitutionalVerification::new(
+        Uuid::nil(),
+        None,
+        course_name,
+        institution_id(),
+        microsoft_object_id(),
+        tenant_id(),
+        student_group_id(),
+        confirmed,
         checked_at,
-        expires_at: checked_at + validity,
-    }
+        expires_at,
+    )
+    .unwrap()
 }
 
 /// Cria uma instituição fictícia com os identificadores usados pelos testes.
 pub fn institution() -> Institution {
-    Institution {
-        id: institution_id(),
-        name: "Intituição A".to_string(),
-        acronym: None,
-        microsoft_tenant_id: tenant_id(),
-        microsoft_student_group_id: student_group_id(),
-        status: CatalogStatus::default(),
-    }
+    Institution::new(
+        institution_id(),
+        "Intituição A".to_string(),
+        None,
+        tenant_id(),
+        student_group_id(),
+        CatalogStatus::default(),
+    )
+    .unwrap()
 }
 
 /// Cria um perfil fictício com o vínculo indicado e preserva o ID, mesmo se inválido.

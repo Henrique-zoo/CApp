@@ -1186,7 +1186,7 @@ components:
           type: string
           minLength: 1
           pattern: '\S'
-          description: Curso não vazio retornado pelo Graph para integrante do grupo estudantil; ainda sem associação ao catálogo interno de cursos.
+          description: Curso não vazio retornado pelo Graph para integrante do grupo estudantil; associado ao contexto acadêmico vigente do estudante para habilitação de funcionalidades discentes.
     NonStudentAffiliation:
       type: object
       additionalProperties: false

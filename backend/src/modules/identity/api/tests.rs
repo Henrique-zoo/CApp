@@ -217,14 +217,15 @@ fn verification_json_matches_shared_contract_examples() {
         let response =
             dto::InstitutionalVerificationResponse::from(InstitutionalVerificationResult {
                 profile,
-                institution: Institution {
-                    id: Uuid::from_u128(2),
-                    name: "Instituição Exemplo".into(),
+                institution: Institution::new(
+                    Uuid::from_u128(2),
+                    "Instituição Exemplo".into(),
                     acronym,
-                    microsoft_tenant_id: Uuid::new_v4(),
-                    microsoft_student_group_id: Uuid::new_v4(),
-                    status: CatalogStatus::Active,
-                },
+                    Uuid::new_v4(),
+                    Uuid::new_v4(),
+                    CatalogStatus::Active,
+                )
+                .unwrap(),
                 expires_at,
             });
 

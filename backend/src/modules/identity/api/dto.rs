@@ -188,9 +188,9 @@ pub struct InstitutionSummaryResponse {
 impl From<Institution> for InstitutionSummaryResponse {
     fn from(institution: Institution) -> Self {
         Self {
-            id: institution.id,
-            name: institution.name,
-            acronym: institution.acronym,
+            id: institution.id(),
+            name: institution.name().to_string(),
+            acronym: institution.acronym().map(ToString::to_string),
         }
     }
 }

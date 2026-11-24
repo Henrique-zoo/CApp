@@ -1,4 +1,12 @@
-//! Espaço reservado para regras do módulo de identidade institucional.
+//! Regras de validação e invariantes do módulo de identidade institucional.
 //!
-//! Ainda não define validações. As invariantes de negócio implementadas aqui
-//! deverão ser independentes dos mecanismos de transporte e persistência.
+//! Encapsula as regras de integridade e consistência de negócio de forma pura,
+//! livre de acoplamento com banco de dados, serialização externa ou frameworks.
+
+pub mod academic_data;
+pub mod institution;
+pub mod institutional_verification;
+
+pub use academic_data::*;
+pub use institution::*;
+pub use institutional_verification::*;

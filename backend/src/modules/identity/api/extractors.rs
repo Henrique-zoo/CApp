@@ -70,10 +70,18 @@ impl FromRequestParts<AppState> for AuthenticatedAccount {
 /// chaves públicas se seu cache precisar de atualização. A identidade extraída
 /// não concede permissões específicas como administração de CA.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct AuthenticatedInstitutionalIdentity(
     /// Identidade disponibilizada à operação protegida.
     pub(crate) AuthenticatedIdentity,
 );
+
+#[allow(dead_code)]
+impl AuthenticatedInstitutionalIdentity {
+    pub(crate) fn into_inner(self) -> AuthenticatedIdentity {
+        self.0
+    }
+}
 
 impl FromRequestParts<AppState> for AuthenticatedInstitutionalIdentity {
     /// Erro convertido pelo Axum antes da execução do handler.

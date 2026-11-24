@@ -21,12 +21,142 @@ use crate::{
             },
             ports::{InstitutionRepository, InstitutionalVerificationRepository, UserRepository},
         },
-        domain::entities::{
-            institution::Institution, institutional_verification::InstitutionalVerification,
-            user::User,
+        domain::{
+            CatalogStatus, UserStatus,
+            entities::{
+                institution::Institution, institutional_verification::InstitutionalVerification,
+                user::User,
+            },
         },
     },
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "catalog_status", rename_all = "lowercase")]
+enum PgCatalogStatus {
+    Active,
+    Inactive,
+}
+
+impl From<PgCatalogStatus> for CatalogStatus {
+    fn from(status: PgCatalogStatus) -> Self {
+        match status {
+            PgCatalogStatus::Active => CatalogStatus::Active,
+            PgCatalogStatus::Inactive => CatalogStatus::Inactive,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "user_status", rename_all = "lowercase")]
+enum PgUserStatus {
+    Incomplete,
+    Active,
+    Inactive,
+}
+
+impl From<PgUserStatus> for UserStatus {
+    fn from(status: PgUserStatus) -> Self {
+        match status {
+            PgUserStatus::Incomplete => UserStatus::Incomplete,
+            PgUserStatus::Active => UserStatus::Active,
+            PgUserStatus::Inactive => UserStatus::Inactive,
+        }
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct InstitutionRow {
+    id: Uuid,
+    name: String,
+    acronym: Option<String>,
+    microsoft_tenant_id: Uuid,
+    microsoft_student_group_id: Uuid,
+    status: PgCatalogStatus,
+}
+
+impl InstitutionRow {
+    fn into_entity(self) -> Result<Institution, InstitutionRepositoryError> {
+        Institution::reconstitute(
+            self.id,
+            self.name,
+            self.acronym,
+            self.microsoft_tenant_id,
+            self.microsoft_student_group_id,
+            self.status.into(),
+        )
+        .map_err(|_| InstitutionRepositoryError::InternalServer)
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct InstitutionalVerificationRow {
+    user_id: Uuid,
+    microsoft_object_id: Uuid,
+    institution_id: Uuid,
+    microsoft_tenant_id: Uuid,
+    microsoft_student_group_id: Uuid,
+    student_membership_confirmed: bool,
+    checked_at: chrono::DateTime<chrono::Utc>,
+    expires_at: chrono::DateTime<chrono::Utc>,
+    profile_name: Option<String>,
+    course_name: Option<String>,
+}
+
+impl InstitutionalVerificationRow {
+    fn into_entity(
+        self,
+    ) -> Result<InstitutionalVerification, InstitutionalVerificationRepositoryError> {
+        InstitutionalVerification::reconstitute(
+            self.user_id,
+            self.profile_name,
+            self.course_name,
+            self.institution_id,
+            self.microsoft_object_id,
+            self.microsoft_tenant_id,
+            self.microsoft_student_group_id,
+            self.student_membership_confirmed,
+            self.checked_at,
+            self.expires_at,
+        )
+        .map_err(|_| InstitutionalVerificationRepositoryError)
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct UserRow {
+    id: Uuid,
+    firebase_uid: String,
+    name: Option<String>,
+    nickname: Option<String>,
+    email: Option<String>,
+    current_semester: Option<i32>,
+    institution_entry_semester: Option<String>,
+    status: PgUserStatus,
+    profile_completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+    last_login_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl UserRow {
+    fn into_entity(self) -> Result<User, UserRepositoryError> {
+        Ok(User::reconstitute(
+            self.id,
+            self.firebase_uid,
+            self.name,
+            self.nickname,
+            self.email,
+            self.current_semester,
+            self.institution_entry_semester,
+            self.status.into(),
+            self.profile_completed_at,
+            self.created_at,
+            self.updated_at,
+            self.last_login_at,
+        ))
+    }
+}
 
 impl From<sqlx::Error> for InstitutionRepositoryError {
     /// Converte erro SQLx em falha técnica; a consulta registra o diagnóstico antes da conversão.
@@ -52,7 +182,7 @@ impl InstitutionRepository for PgDatabase {
         &self,
         tenant_id: Uuid,
     ) -> Result<Option<Institution>, InstitutionRepositoryError> {
-        Ok(sqlx::query_as(
+        let row = sqlx::query_as::<_, InstitutionRow>(
             "
             SELECT
                 id, name, acronym,
@@ -68,7 +198,9 @@ impl InstitutionRepository for PgDatabase {
         .await
         .inspect_err(|error| {
             tracing::error!(%error, "Falha ao consultar instituição pelo tenant");
-        })?)
+        })?;
+
+        row.map(InstitutionRow::into_entity).transpose()
     }
 }
 
@@ -100,7 +232,7 @@ impl InstitutionalVerificationRepository for PgDatabase {
         &self,
         firebase_uid: &str,
     ) -> Result<Option<InstitutionalVerification>, InstitutionalVerificationRepositoryError> {
-        Ok(sqlx::query_as::<_, InstitutionalVerification>(
+        let row = sqlx::query_as::<_, InstitutionalVerificationRow>(
             r#"
             SELECT v.*
             FROM institutional_verification AS v
@@ -121,7 +253,46 @@ impl InstitutionalVerificationRepository for PgDatabase {
                 %error,
                 "Falha ao consultar verificação institucional"
             );
-        })?)
+        })?;
+
+        row.map(InstitutionalVerificationRow::into_entity)
+            .transpose()
+    }
+
+    /// Seleciona evidência vigente e compatível com o cadastro por `user_id`.
+    ///
+    /// O filtro por `user_id` usa a PK de `institutional_verification` e `app_user`.
+    /// O prazo é comparado com `CURRENT_TIMESTAMP` do PostgreSQL. Tenant e grupo
+    /// devem coincidir com a configuração atual da instituição.
+    async fn find_valid_by_user_id(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<InstitutionalVerification>, InstitutionalVerificationRepositoryError> {
+        let row = sqlx::query_as::<_, InstitutionalVerificationRow>(
+            r#"
+            SELECT v.*
+            FROM institutional_verification AS v
+            JOIN institution AS i ON i.id = v.institution_id
+            JOIN app_user AS u ON u.id = v.user_id
+            WHERE u.id = $1
+              AND u.status <> 'inactive'
+              AND v.expires_at > CURRENT_TIMESTAMP
+              AND v.microsoft_tenant_id = i.microsoft_tenant_id
+              AND v.microsoft_student_group_id = i.microsoft_student_group_id
+            "#,
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .inspect_err(|error| {
+            tracing::error!(
+                %error,
+                "Falha ao consultar verificação institucional por user_id"
+            );
+        })?;
+
+        row.map(InstitutionalVerificationRow::into_entity)
+            .transpose()
     }
 
     /// Insere ou substitui atomicamente a evidência mais recente por usuário interno.
@@ -172,16 +343,16 @@ impl InstitutionalVerificationRepository for PgDatabase {
             WHERE EXCLUDED.checked_at > institutional_verification.checked_at
             "#,
         )
-        .bind(verification.user_id)
-        .bind(verification.microsoft_object_id)
-        .bind(verification.institution_id)
-        .bind(verification.microsoft_tenant_id)
-        .bind(verification.microsoft_student_group_id)
-        .bind(verification.student_membership_confirmed)
-        .bind(verification.checked_at)
-        .bind(verification.expires_at)
-        .bind(&verification.profile_name)
-        .bind(&verification.course_name)
+        .bind(verification.user_id())
+        .bind(verification.microsoft_object_id())
+        .bind(verification.institution_id())
+        .bind(verification.microsoft_tenant_id())
+        .bind(verification.microsoft_student_group_id())
+        .bind(verification.student_membership_confirmed())
+        .bind(verification.checked_at())
+        .bind(verification.expires_at())
+        .bind(verification.profile_name())
+        .bind(verification.course_name())
         .execute(&self.pool)
         .await
         .inspect_err(|error| {
@@ -251,7 +422,7 @@ impl UserRepository for PgDatabase {
     /// registradas e convertidas em [`UserRepositoryError::InternalServer`].
     /// Não inicia uma sessão Firebase nem cria credenciais.
     async fn provision(&self, firebase_uid: &str) -> Result<User, UserRepositoryError> {
-        sqlx::query_as(
+        let row = sqlx::query_as::<_, UserRow>(
             r#"
             INSERT INTO app_user (id, firebase_uid, last_login_at)
             VALUES ($1, $2, CURRENT_TIMESTAMP)
@@ -266,7 +437,9 @@ impl UserRepository for PgDatabase {
         .map_err(|error| {
             tracing::error!(%error, "Falha no provisionamento");
             UserRepositoryError::InternalServer
-        })
+        })?;
+
+        row.into_entity()
     }
 
     /// Lê a conta de um UID autenticado, incluindo seu estado atual.
@@ -280,13 +453,15 @@ impl UserRepository for PgDatabase {
         &self,
         firebase_uid: &str,
     ) -> Result<Option<User>, UserRepositoryError> {
-        sqlx::query_as("SELECT * FROM app_user WHERE firebase_uid = $1")
+        let row = sqlx::query_as::<_, UserRow>("SELECT * FROM app_user WHERE firebase_uid = $1")
             .bind(firebase_uid)
             .fetch_optional(&self.pool)
             .await
             .map_err(|error| {
                 tracing::error!(%error, "Falha na consulta do usuário");
                 UserRepositoryError::InternalServer
-            })
+            })?;
+
+        row.map(UserRow::into_entity).transpose()
     }
 }
