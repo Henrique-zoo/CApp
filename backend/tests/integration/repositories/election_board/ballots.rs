@@ -10,10 +10,10 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use backend::infrastructure::database::PgDatabase;
 use backend::modules::elections::{
     application::services::board as board_service,
     crypto_wire::{BallotContext, object_digest, verify_record},
-    infrastructure::PgElectionBoardRepository,
 };
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
@@ -30,7 +30,7 @@ fn ballot_request(uri: &str, envelope: &[u8]) -> Request<Body> {
 async fn authenticated_vote_is_recorded_once_and_included_in_the_public_board() {
     let db = TestDatabase::new().await;
     let signer = server();
-    let store = PgElectionBoardRepository::new(db.pool.clone());
+    let store = PgDatabase::new(db.pool.clone());
     let api = SessionApi::with_signer(&db.pool, Some(signer.clone())).await;
     let mut voter = Voter::new(&db.pool, "valid/ballot-0").await;
     let starts_at = Utc::now() + Duration::seconds(15);

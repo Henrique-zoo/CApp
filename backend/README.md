@@ -375,6 +375,10 @@ imutável e a ordem das chapas derivada dele. A comissão, as chapas e o servido
 têm uma única designação em `election_authority`. Cada contribuição referencia
 uma autoridade da mesma eleição, e o resultado definitivo fica imutável.
 
+O executável inicia o relógio eleitoral quando há uma chave de assinatura.
+A tarefa encerra pleitos vencidos e envia as contribuições pendentes do
+servidor usando o mesmo `PgDatabase` das requisições.
+
 O serviço de aceite valida a cédula e multiplica suas cifras pelo acumulador
 vigente na ordem do manifesto. Com a eleição bloqueada, a transação grava a
 cédula e o recibo em uma linha de `election_vote` e atualiza o acumulador, a
@@ -531,7 +535,10 @@ Contém recursos utilizados por múltiplos módulos.
 
 Responsável pelo acesso ao PostgreSQL.
 
-O módulo `src/infrastructure/database/` contém `MIGRATOR` e `PgDatabase`. Este último encapsula o pool; as implementações dos repositórios ficam na infraestrutura de cada módulo de negócio. Criar ou clonar o adaptador não abre um novo pool, não inicia transação e não aplica migrations.
+O módulo `src/infrastructure/database/` contém `MIGRATOR` e `PgDatabase`.
+O `AppState` guarda um único `PgDatabase`, que compartilha o pool entre os
+repositórios de identidade e eleições. As portas continuam separadas por
+operação e suas implementações ficam na infraestrutura de cada módulo.
 
 ---
 

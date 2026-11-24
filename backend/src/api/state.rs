@@ -10,16 +10,9 @@ use std::sync::Arc;
 use crate::{
     infrastructure::database::PgDatabase,
     modules::{
-        elections::{
-            crypto_wire::ServerSigner,
-            infrastructure::{
-                PgElectionBoardRepository, PgVoterRegistrationRepository, RsaPssBallotVerifier,
-                RsaPssVoterKeyProofVerifier,
-            },
-        },
+        elections::crypto_wire::ServerSigner,
         identity::infrastructure::{
-            firebase::{AppCheckVerifier, FirebaseTokenVerifier},
-            microsoft::MicrosoftGraphClient,
+            firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
         },
     },
 };
@@ -31,9 +24,6 @@ use crate::{
 /// podem ser construídos com clones de um único [`reqwest::Client`].
 #[derive(Clone)]
 pub struct Clients {
-    /// Verificador da origem do aplicativo, independente do Firebase UID.
-    pub app_check: AppCheckVerifier,
-
     /// Verificador de Firebase ID tokens para o projeto configurado.
     pub firebase: FirebaseTokenVerifier,
 
@@ -48,21 +38,15 @@ impl Clients {
     ///
     /// - `firebase`: verificador cuja audiência e emissor correspondem ao projeto.
     /// - `microsoft`: cliente do Graph; seu cliente HTTP deve recusar redirecionamentos.
-    /// - `app_check`: verificador do número do projeto e dos App IDs permitidos.
     ///
     /// # Retorno
     ///
     /// Contêiner que assume a posse dos adaptadores. A operação não confirma
     /// permissões, disponibilidade dos provedores ou existência do projeto.
-    pub fn new(
-        firebase: FirebaseTokenVerifier,
-        microsoft: MicrosoftGraphClient,
-        app_check: AppCheckVerifier,
-    ) -> Self {
+    pub fn new(firebase: FirebaseTokenVerifier, microsoft: MicrosoftGraphClient) -> Self {
         Self {
             firebase,
             microsoft,
-            app_check,
         }
     }
 }
@@ -75,7 +59,7 @@ impl Clients {
 /// As identidades autenticadas pertencem às requisições, não a este estado.
 #[derive(Clone)]
 pub struct AppState {
-    /// Adaptador PostgreSQL que implementa os contratos de repositório.
+    /// Adaptador PostgreSQL compartilhado pelos repositórios de identidade e eleições.
     ///
     /// Serviços recebem referências às traits implementadas por esse adaptador.
     /// Construir o estado não verifica a conectividade nem aplica migrations.
@@ -84,19 +68,7 @@ pub struct AppState {
     /// Clientes externos compartilhados, sem credenciais de usuários armazenadas.
     pub clients: Clients,
 
-    /// Adaptador do cadastro da chave eleitoral que reutiliza o pool de `pg_database`.
-    pub voter_registration_repository: PgVoterRegistrationRepository,
-
-    /// Verificador usado pelo serviço de aceite das cédulas.
-    pub(crate) ballot_verifier: RsaPssBallotVerifier,
-
-    /// Verificador tipado de prova de posse de chave para o cadastro eleitoral.
-    pub(crate) voter_key_proof_verifier: RsaPssVoterKeyProofVerifier,
-
-    /// Persistência dos votos, usando o pool compartilhado.
-    pub(crate) vote_repository: PgElectionBoardRepository,
-
-    /// A instalação fornece a chave para habilitar a assinatura de recibos.
+    /// Assinador fornecido pela instalação para as operações eleitorais que usam a chave do servidor.
     pub(crate) election_signer: Option<Arc<ServerSigner>>,
 }
 
@@ -140,11 +112,9 @@ impl AppState {
     ///     .build()?;
     /// let firebase = FirebaseTokenVerifier::new("capp-example".into(), http.clone())?;
     /// let microsoft = MicrosoftGraphClient::new(http);
-    /// let app_check = backend::modules::identity::infrastructure::firebase::AppCheckVerifier::new(
-    ///     "1234567890".into(), vec!["1:1234567890:android:capp".into()], reqwest::Client::new())?;
     /// let state = AppState::new(
     ///     PgDatabase::new(pool.clone()),
-    ///     Clients::new(firebase, microsoft, app_check),
+    ///     Clients::new(firebase, microsoft),
     /// );
     /// let _another_handle = state.clone();
     /// pool.close().await; // Fecha o pool compartilhado com os dois estados.
@@ -153,52 +123,16 @@ impl AppState {
     /// # }
     /// ```
     pub fn new(pg_database: PgDatabase, clients: Clients) -> Self {
-        let voter_registration_repository =
-            PgVoterRegistrationRepository::new(pg_database.pool.clone());
-
-        let vote_repository = PgElectionBoardRepository::new(pg_database.pool.clone());
-
         Self {
             pg_database,
             clients,
-            voter_registration_repository,
-            ballot_verifier: RsaPssBallotVerifier,
-            voter_key_proof_verifier: RsaPssVoterKeyProofVerifier,
-            vote_repository,
             election_signer: None,
         }
     }
 
-    /// Habilita o aceite transacional de cédulas usando a chave prevista no manifesto.
+    /// Habilita as operações eleitorais que usam a chave de assinatura do servidor.
     pub fn with_election_signer(mut self, signer: Arc<ServerSigner>) -> Self {
         self.election_signer = Some(signer);
         self
-    }
-
-    /// Inicia o relógio que encerra eleições publicadas quando o prazo vence.
-    /// O processo encerra a tarefa junto com o servidor.
-    pub fn start_election_clock(&self) -> Option<tokio::task::JoinHandle<()>> {
-        let signer = self.election_signer.clone()?;
-        let boards = self.vote_repository.clone();
-        Some(tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                interval.tick().await;
-                if let Err(error) =
-                    crate::modules::elections::application::services::board::close_due(
-                        &boards, &*signer,
-                    )
-                    .await
-                {
-                    tracing::error!(%error, "Falha ao consultar eleições a encerrar");
-                }
-                if let Err(error) = crate::modules::elections::application::services::tally::submit_pending_server_shares(
-                    &boards, &boards, &*signer,
-                ).await {
-                    tracing::error!(%error, "Falha ao consultar contribuições do servidor");
-                }
-            }
-        }))
     }
 }

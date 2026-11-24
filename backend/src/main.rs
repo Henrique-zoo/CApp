@@ -25,6 +25,7 @@
 use std::{
     env::{self, VarError},
     net::TcpListener,
+    sync::Arc,
     time::Duration,
 };
 
@@ -38,7 +39,7 @@ use backend::{
         database::{MIGRATOR, PgDatabase},
         tls,
     },
-    modules::elections::crypto_wire::ServerSigner,
+    modules::elections::{crypto_wire::ServerSigner, infrastructure::start_election_clock},
     modules::identity::infrastructure::{
         firebase::{AppCheckVerifier, FirebaseTokenVerifier},
         microsoft::MicrosoftGraphClient,
@@ -125,14 +126,10 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Migrations do banco de dados atualizadas");
 
-    let mut state = AppState::new(
+    let state = AppState::new(
         PgDatabase::new(pool),
-        Clients::new(firebase, MicrosoftGraphClient::new(http), app_check),
+        Clients::new(firebase, MicrosoftGraphClient::new(http)),
     );
-
-    if let Some(signer) = election_signer {
-        state = state.with_election_signer(signer.into());
-    }
 
     let listener = TcpListener::bind(HTTPS_ADDRESS)
         .with_context(|| format!("Não foi possível abrir o socket HTTPS em {HTTPS_ADDRESS}"))?;
@@ -140,12 +137,19 @@ async fn main() -> anyhow::Result<()> {
     let server = axum_server::from_tcp_rustls(listener, tls_config)
         .context("Não foi possível configurar a escuta HTTPS")?;
 
-    let election_clock = state.start_election_clock();
+    let (state, election_clock) = match election_signer {
+        Some(signer) => {
+            let signer = Arc::new(signer);
+            let clock = start_election_clock(state.pg_database.clone(), Arc::clone(&signer));
+            (state.with_election_signer(signer), Some(clock))
+        }
+        None => (state, None),
+    };
 
     tracing::info!(address = HTTPS_ADDRESS, "Backend HTTPS ouvindo");
 
     let result = server
-        .serve(api::router::create_router(state).into_make_service())
+        .serve(api::router::create_router(state, app_check).into_make_service())
         .await;
 
     if let Some(clock) = election_clock {

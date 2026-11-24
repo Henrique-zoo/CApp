@@ -1,8 +1,10 @@
 //! O router global exige atestado antes de consultar autenticação ou banco.
 
-use super::*;
 use crate::{
-    api::{router::create_router, state::Clients},
+    api::{
+        router::create_router,
+        state::{AppState, Clients},
+    },
     infrastructure::database::PgDatabase,
     modules::identity::infrastructure::{
         firebase::{AppCheckVerifier, FirebaseTokenVerifier},
@@ -54,11 +56,10 @@ async fn app() -> (axum::Router, MockServer) {
         Clients::new(
             FirebaseTokenVerifier::new("test-project".into(), http.clone()).unwrap(),
             MicrosoftGraphClient::new(http),
-            app_check,
         ),
     );
 
-    (create_router(state), server)
+    (create_router(state, app_check), server)
 }
 
 fn token() -> String {

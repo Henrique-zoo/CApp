@@ -45,6 +45,7 @@ use crate::{
                 entities::{election::ElectionPeriod, vote::VoteKey},
                 identifiers::{AccountId, AuthorityId, ElectionId},
             },
+            infrastructure::{RsaPssBallotVerifier, RsaPssVoterKeyProofVerifier},
         },
         identity::api::extractors::AuthenticatedAccount,
     },
@@ -98,7 +99,7 @@ pub(super) async fn read_own_registration(
     Path(election_id): Path<Uuid>,
 ) -> ApiResult<impl IntoResponse> {
     let result = voter_registration::status(
-        &state.voter_registration_repository,
+        &state.pg_database,
         route_election_id(election_id)?,
         authenticated_account_id(account.account_id)?,
     )
@@ -120,8 +121,8 @@ pub(super) async fn register_voter_key(
         )
     })?;
     let result = voter_registration::register(
-        &state.voter_registration_repository,
-        &state.voter_key_proof_verifier,
+        &state.pg_database,
+        &RsaPssVoterKeyProofVerifier,
         route_election_id(election_id)?,
         voter_identity(account)?,
         request.into_proof(),
@@ -154,8 +155,8 @@ pub(super) async fn submit_ballot(
         .map_err(|error| ballot_error(BoardError::InvalidEvidence(Box::new(error))))?;
 
     let recorded = board::record_ballot(
-        &state.ballot_verifier,
-        &state.vote_repository,
+        &RsaPssBallotVerifier,
+        &state.pg_database,
         signer,
         identity,
         ballot,
@@ -174,7 +175,7 @@ pub(super) async fn tally_result(
     State(state): State<AppState>,
     Path(election): Path<Uuid>,
 ) -> ApiResult<Json<TallyEvidence>> {
-    tally::read_result(&state.vote_repository, route_election_id(election)?)
+    tally::read_result(&state.pg_database, route_election_id(election)?)
         .await
         .map(Json)
         .map_err(tally_error)
@@ -205,8 +206,8 @@ pub(super) async fn submit_share(
     let account = authenticated_account_id(account.account_id)?;
 
     tally::submit_share(
-        &state.vote_repository,
-        &state.vote_repository,
+        &state.pg_database,
+        &state.pg_database,
         signer,
         election,
         authority,
@@ -224,7 +225,7 @@ pub(super) async fn own_authority(
     Path(election): Path<Uuid>,
 ) -> ApiResult<Json<AuthorityAssignment>> {
     preparation::assignment(
-        &state.vote_repository,
+        &state.pg_database,
         route_election_id(election)?,
         authenticated_account_id(account.account_id)?,
     )
@@ -255,7 +256,7 @@ pub(super) async fn register_authority(
         .map_err(|error| tally_error(BoardError::InvalidEvidence(Box::new(error))))?;
 
     preparation::register_authority(
-        &state.vote_repository,
+        &state.pg_database,
         signer,
         route_election_id(election)?,
         authenticated_account_id(account.account_id)?,
@@ -276,7 +277,7 @@ pub(super) async fn publish_manifest(
         .as_deref()
         .ok_or_else(ApiError::service_unavailable)?;
     preparation::publish_manifest(
-        &state.vote_repository,
+        &state.pg_database,
         signer,
         route_election_id(election)?,
         authenticated_account_id(account.account_id)?,
@@ -295,7 +296,7 @@ pub(super) async fn reschedule(
     let period = ElectionPeriod::try_new(request.starts_at, request.ends_at)
         .map_err(|_| tally_error(BoardError::InvalidAdministration("período inválido")))?;
     administration::reschedule(
-        &state.vote_repository,
+        &state.pg_database,
         route_election_id(election)?,
         authenticated_account_id(account.account_id)?,
         period,
@@ -313,7 +314,7 @@ pub(super) async fn cancel(
     Json(request): Json<CancellationRequest>,
 ) -> ApiResult<Json<BoardCancellation>> {
     administration::cancel(
-        &state.vote_repository,
+        &state.pg_database,
         route_election_id(election)?,
         authenticated_account_id(account.account_id)?,
         &request.reason,

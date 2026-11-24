@@ -44,13 +44,16 @@ async fn authenticated_router(pool: &PgPool) -> (Router, MockServer, String) {
         .mount(&jwks)
         .await;
     let http = reqwest::Client::new();
-    let mut clients =
+    let clients =
         local_identity_clients("board-test".into(), http.clone(), uri.clone(), jwks.uri()).unwrap();
     let app_id = "1:1234567890:android:capp";
-    clients.app_check =
+    let app_check =
         AppCheckVerifier::new_with_endpoint("1234567890".into(), vec![app_id.into()], http, uri)
             .unwrap();
-    let app = create_router(AppState::new(PgDatabase::new(pool.clone()), clients));
+    let app = create_router(
+        AppState::new(PgDatabase::new(pool.clone()), clients),
+        app_check,
+    );
     let now = Utc::now().timestamp();
     let attestation = jwt(
         json!({"sub":app_id, "iss":"https://firebaseappcheck.googleapis.com/1234567890",

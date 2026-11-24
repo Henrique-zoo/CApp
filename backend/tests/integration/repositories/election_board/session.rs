@@ -57,11 +57,11 @@ impl SessionApi {
             .mount(&jwks)
             .await;
         let http = reqwest::Client::new();
-        let mut clients =
+        let clients =
             local_identity_clients("board-test".into(), http.clone(), uri.clone(), jwks.uri())
                 .unwrap();
         let app_id = "1:1234567890:android:capp";
-        clients.app_check = AppCheckVerifier::new_with_endpoint(
+        let app_check = AppCheckVerifier::new_with_endpoint(
             "1234567890".into(),
             vec![app_id.into()],
             http,
@@ -69,10 +69,11 @@ impl SessionApi {
         )
         .unwrap();
         let state = AppState::new(PgDatabase::new(pool.clone()), clients);
-        let app = create_router(match signer {
+        let state = match signer {
             Some(signer) => state.with_election_signer(signer),
             None => state,
-        });
+        };
+        let app = create_router(state, app_check);
         let now = Utc::now().timestamp();
         let attestation = jwt(
             json!({"sub":app_id, "iss":"https://firebaseappcheck.googleapis.com/1234567890",

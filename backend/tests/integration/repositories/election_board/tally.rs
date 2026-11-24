@@ -7,6 +7,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use backend::infrastructure::database::PgDatabase;
 use backend::modules::elections::{
     application::{
         ports::ElectionBoardRepository,
@@ -18,7 +19,6 @@ use backend::modules::elections::{
         entities::authority::AuthorityRole,
         identifiers::{AuthorityId, SlateId},
     },
-    infrastructure::PgElectionBoardRepository,
 };
 use chrono::{Duration, Timelike, Utc};
 use rsa::BigUint;
@@ -43,7 +43,7 @@ fn contribution_request(uri: &str, envelope: &Value) -> Request<Body> {
 async fn three_votes_are_counted_after_all_designated_authorities_contribute() {
     let db = TestDatabase::new().await;
     let signer = server();
-    let boards = PgElectionBoardRepository::new(db.pool.clone());
+    let boards = PgDatabase::new(db.pool.clone());
     let api = SessionApi::with_signer(&db.pool, Some(signer.clone())).await;
 
     let mut custodians = Vec::new();
@@ -311,7 +311,7 @@ async fn commission_can_extend_and_cancel_while_accepted_votes_remain_public() {
 
     let db = TestDatabase::new().await;
     let signer = server();
-    let boards = PgElectionBoardRepository::new(db.pool.clone());
+    let boards = PgDatabase::new(db.pool.clone());
     let api = SessionApi::with_signer(&db.pool, Some(signer.clone())).await;
     let commission = Voter::new(&db.pool, "valid/ballot-0").await;
     let voter = Voter::new(&db.pool, "valid/ballot-1").await;

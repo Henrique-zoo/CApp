@@ -23,7 +23,6 @@ use backend::modules::elections::{
         board::BoardError, ports::ElectionBoardRepository, services::board as board_service,
     },
     crypto_wire::object_digest,
-    infrastructure::PgElectionBoardRepository,
 };
 use backend::modules::identity::infrastructure::{
     firebase::{AppCheckVerifier, FirebaseTokenVerifier},
@@ -50,7 +49,7 @@ use uuid::Uuid;
 async fn paged_export_keeps_its_original_snapshot_while_another_vote_commits() {
     let db = TestDatabase::new().await;
     let signer = server();
-    let store = PgElectionBoardRepository::new(db.pool.clone());
+    let store = PgDatabase::new(db.pool.clone());
     let origin = Origin::during(&signer, Utc::now() + Duration::hours(1));
     let id = origin.election;
 
@@ -110,14 +109,17 @@ async fn public_evidence(pool: &sqlx::PgPool, uri: &str, expected: StatusCode) -
     let clients = Clients::new(
         FirebaseTokenVerifier::new("capp-test".into(), http.clone()).unwrap(),
         MicrosoftGraphClient::new(http.clone()),
-        AppCheckVerifier::new(
-            "1234567890".into(),
-            vec!["1:1234567890:android:capp".into()],
-            http,
-        )
-        .unwrap(),
     );
-    let router = create_router(AppState::new(PgDatabase::new(pool.clone()), clients));
+    let app_check = AppCheckVerifier::new(
+        "1234567890".into(),
+        vec!["1:1234567890:android:capp".into()],
+        http,
+    )
+    .unwrap();
+    let router = create_router(
+        AppState::new(PgDatabase::new(pool.clone()), clients),
+        app_check,
+    );
     let response = router
         .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
         .await
@@ -130,7 +132,7 @@ async fn public_evidence(pool: &sqlx::PgPool, uri: &str, expected: StatusCode) -
 async fn rollback_concurrency_and_recovery_preserve_one_chain() {
     let db = TestDatabase::new().await;
     let signer = server();
-    let store = PgElectionBoardRepository::new(db.pool.clone());
+    let store = PgDatabase::new(db.pool.clone());
     let origin = Origin::during(&signer, Utc::now() + Duration::hours(1));
     let id = origin.election;
     seed_academic_center(&db.pool).await;
@@ -282,9 +284,8 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
         .connect_with((*db.pool.connect_options()).clone())
         .await
         .unwrap();
-    let restarted = PgElectionBoardRepository::new(fresh_pool.clone());
-    let reader = PgDatabase::new(fresh_pool.clone());
-    let saved = board_service::read_own_receipt(&reader, vote_key(id, a.account))
+    let restarted = PgDatabase::new(fresh_pool.clone());
+    let saved = board_service::read_own_receipt(&restarted, vote_key(id, a.account))
         .await
         .unwrap()
         .unwrap();
@@ -297,7 +298,7 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
     )
     .await;
     assert!(
-        board_service::read_own_receipt(&reader, vote_key(id, Uuid::new_v4()))
+        board_service::read_own_receipt(&restarted, vote_key(id, Uuid::new_v4()))
             .await
             .unwrap()
             .is_none()
@@ -325,7 +326,7 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
 async fn close_freezes_the_accepted_vote_and_preserves_its_receipt() {
     let db = TestDatabase::new().await;
     let signer = server();
-    let store = PgElectionBoardRepository::new(db.pool.clone());
+    let store = PgDatabase::new(db.pool.clone());
     let voter = Voter::new(&db.pool, "valid/ballot-0").await;
     let late_voter = Voter::new(&db.pool, "valid/ballot-1").await;
     let end = Utc::now() + Duration::seconds(15);
