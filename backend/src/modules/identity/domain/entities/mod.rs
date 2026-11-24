@@ -26,6 +26,10 @@ pub use app_user::VETERANO_1_DIDACTIC_ID;
 pub use app_user::VETERANO_2_DIDACTIC_ID;
 pub use user_preference::UserPreference;
 pub use user_preference::UserPreferenceError;
+pub use academic_data::*;
+pub use institution::*;
+pub use institutional_verification::*;
+pub use user::*;
 /// Estado de ciclo de vida e retenção da identidade de um discente na plataforma.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IdentityRetentionStatus {
@@ -87,3 +91,4 @@ impl StudentIdentity {
 }
 pub mod app_user;
 pub mod user_preference;
+pub mod academic_data;

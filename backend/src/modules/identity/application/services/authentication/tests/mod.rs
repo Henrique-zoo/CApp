@@ -121,13 +121,13 @@ async fn first_verification_persists_positive_evidence_with_all_identifiers() {
     repo.expect_save()
         .times(1)
         .withf(|v| {
-            v.user_id == Uuid::nil()
-                && v.microsoft_object_id == microsoft_object_id()
-                && v.microsoft_tenant_id == tenant_id()
-                && v.microsoft_student_group_id == student_group_id()
-                && v.institution_id == institution_id()
-                && v.student_membership_confirmed
-                && v.expires_at == v.checked_at + Duration::days(120)
+            v.user_id() == Uuid::nil()
+                && v.microsoft_object_id() == microsoft_object_id()
+                && v.microsoft_tenant_id() == tenant_id()
+                && v.microsoft_student_group_id() == student_group_id()
+                && v.institution_id() == institution_id()
+                && v.student_membership_confirmed()
+                && v.expires_at() == v.checked_at() + Duration::days(120)
         })
         .returning(|_| Ok(true));
 
@@ -337,7 +337,7 @@ async fn non_student_membership_is_saved_and_profile_is_returned() {
 
     repo.expect_save()
         .times(1)
-        .withf(|v| !v.student_membership_confirmed)
+        .withf(|v| !v.student_membership_confirmed())
         .returning(|_| Ok(true));
 
     let result = verify_institutional_identity(
@@ -465,10 +465,20 @@ async fn another_microsoft_account_cannot_reuse_saved_verification() {
     repo.expect_find_valid_by_firebase_uid()
         .times(1)
         .returning(|_| {
-            let mut v = evidence(true, Duration::hours(1));
-
-            v.microsoft_object_id =
-                Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap();
+            let checked_at = Utc::now();
+            let v = InstitutionalVerification::reconstitute(
+                Uuid::nil(),
+                None,
+                Some("Curso de Teste".to_string()),
+                institution_id(),
+                Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap(),
+                tenant_id(),
+                student_group_id(),
+                true,
+                checked_at,
+                checked_at + Duration::hours(1),
+            )
+            .unwrap();
 
             Ok(Some(v))
         });
@@ -660,7 +670,7 @@ async fn non_student_verification_requires_persisted_evidence() {
 
     repo.expect_save()
         .times(1)
-        .withf(|v| !v.student_membership_confirmed)
+        .withf(|v| !v.student_membership_confirmed())
         .returning(|_| Ok(false));
 
     let result = verify_institutional_identity(
@@ -804,7 +814,7 @@ async fn missing_course_persists_limited_access_even_with_student_group() {
 
     repo.expect_save()
         .withf(|verification| {
-            !verification.student_membership_confirmed && verification.course_name.is_none()
+            !verification.student_membership_confirmed() && verification.course_name().is_none()
         })
         .times(1)
         .returning(|_| Ok(true));
@@ -839,7 +849,7 @@ async fn non_student_persistence_failure_never_returns_success() {
     let mut repo = repositories_institution();
 
     repo.expect_save()
-        .withf(|verification| !verification.student_membership_confirmed)
+        .withf(|verification| !verification.student_membership_confirmed())
         .times(1)
         .returning(|_| Err(InstitutionalVerificationRepositoryError));
 
@@ -916,9 +926,19 @@ async fn restore_downgrades_legacy_student_evidence_without_course() {
     for course in [None, Some(String::new()), Some(" \t\n".into())] {
         let verifier = verifier_ok();
         let mut repo = repositories_institution();
-        let mut legacy = evidence(true, Duration::days(120));
-
-        legacy.course_name = course;
+        let legacy = InstitutionalVerification::reconstitute(
+            Uuid::nil(),
+            None,
+            course,
+            institution_id(),
+            microsoft_object_id(),
+            tenant_id(),
+            student_group_id(),
+            true,
+            Utc::now(),
+            Utc::now() + Duration::days(120),
+        )
+        .unwrap();
 
         repo.expect_get_by_firebase_uid()
             .with(eq(FIREBASE_UID))

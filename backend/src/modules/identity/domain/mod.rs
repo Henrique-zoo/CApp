@@ -29,3 +29,5 @@ pub use rules::has_academic_enrollment_via_preference;
 pub use rules::has_administrative_privileges_via_preference;
 pub use rules::is_eligible_to_vote_via_preference;
 pub use rules::validate_favorite_ca_selection;
+pub use status::CatalogStatusError;
+pub use status::UserStatusError;

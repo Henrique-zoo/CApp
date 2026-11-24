@@ -8,6 +8,9 @@ use super::entities::StudentIdentity;
 use crate::shared::retention::PiiSanitizer;
 use crate::shared::retention::RetentionError;
 pub use preference_rules::*;
+pub use academic_data::*;
+pub use institution::*;
+pub use institutional_verification::*;
 /// Valida que a plataforma opera exclusivamente no contexto da UnB e rejeita `institution_id`.
 pub fn validate_unb_single_institution<T>(institution_id: Option<T>) -> Result<(), RetentionError> {
     PiiSanitizer::validate_no_institution_id(institution_id)
@@ -36,3 +39,6 @@ pub fn anonymize_identity(
     Ok(())
 }
 pub mod preference_rules;
+pub mod academic_data;
+pub mod institution;
+pub mod institutional_verification;

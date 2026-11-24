@@ -31,22 +31,25 @@ async fn fixture(pool: &PgPool, student: bool) -> InstitutionalVerification {
     let checked_at =
         chrono::DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).unwrap();
 
-    InstitutionalVerification {
-        user_id: PgDatabase::new(pool.clone())
-            .provision(&Uuid::new_v4().to_string())
-            .await
-            .unwrap()
-            .id(),
-        profile_name: Some("Nome institucional".into()),
-        course_name: student.then(|| "Curso".into()),
-        microsoft_object_id: Uuid::new_v4(),
-        institution_id: id,
-        microsoft_tenant_id: tenant,
-        microsoft_student_group_id: group,
-        student_membership_confirmed: student,
+    let user_id = PgDatabase::new(pool.clone())
+        .provision(&Uuid::new_v4().to_string())
+        .await
+        .unwrap()
+        .id();
+
+    InstitutionalVerification::new(
+        user_id,
+        Some("Nome institucional".into()),
+        student.then(|| "Curso".into()),
+        id,
+        Uuid::new_v4(),
+        tenant,
+        group,
+        student,
         checked_at,
-        expires_at: checked_at + Duration::hours(24),
-    }
+        checked_at + Duration::hours(24),
+    )
+    .unwrap()
 }
 
 async fn uid(pool: &PgPool, id: Uuid) -> String {
@@ -324,34 +327,34 @@ async fn institution_lookup(pool: &PgPool, repo: &PgDatabase) {
     );
 
     let institution = repo
-        .find_by_microsoft_tenant_id(v.microsoft_tenant_id)
+        .find_by_microsoft_tenant_id(v.microsoft_tenant_id())
         .await
         .unwrap()
         .unwrap();
 
-    assert_eq!(institution.id, v.institution_id);
-    assert_eq!(institution.name, "Instituição fictícia");
-    assert_eq!(institution.acronym.as_deref(), Some("IF"));
+    assert_eq!(institution.id(), v.institution_id());
+    assert_eq!(institution.name(), "Instituição fictícia");
+    assert_eq!(institution.acronym(), Some("IF"));
     assert_eq!(
-        institution.microsoft_student_group_id,
-        v.microsoft_student_group_id
+        institution.microsoft_student_group_id(),
+        v.microsoft_student_group_id()
     );
-    assert!(matches!(institution.status, CatalogStatus::Active));
+    assert!(matches!(institution.status(), CatalogStatus::Active));
 
     sqlx::query("UPDATE institution SET status='inactive', acronym=NULL WHERE id=$1")
-        .bind(v.institution_id)
+        .bind(v.institution_id())
         .execute(pool)
         .await
         .unwrap();
 
     let institution = repo
-        .find_by_microsoft_tenant_id(v.microsoft_tenant_id)
+        .find_by_microsoft_tenant_id(v.microsoft_tenant_id())
         .await
         .unwrap()
         .unwrap();
 
-    assert!(matches!(institution.status, CatalogStatus::Inactive));
-    assert!(institution.acronym.is_none());
+    assert!(matches!(institution.status(), CatalogStatus::Inactive));
+    assert!(institution.acronym().is_none());
 }
 
 /// Evidências vigentes de estudantes e não estudantes preservam todos os identificadores.
@@ -362,24 +365,39 @@ async fn evidence_roundtrip(pool: &PgPool, repo: &PgDatabase) {
         assert!(repo.save(&v).await.unwrap());
 
         let stored = repo
-            .find_valid_by_firebase_uid(&uid(pool, v.user_id).await)
+            .find_valid_by_firebase_uid(&uid(pool, v.user_id()).await)
             .await
             .unwrap()
             .expect("ambos os vínculos devem ser reutilizáveis");
 
-        assert_eq!(stored.user_id, v.user_id);
-        assert_eq!(stored.microsoft_object_id, v.microsoft_object_id);
-        assert_eq!(stored.institution_id, v.institution_id);
-        assert_eq!(stored.microsoft_tenant_id, v.microsoft_tenant_id);
+        assert_eq!(stored.user_id(), v.user_id());
+        assert_eq!(stored.microsoft_object_id(), v.microsoft_object_id());
+        assert_eq!(stored.institution_id(), v.institution_id());
+        assert_eq!(stored.microsoft_tenant_id(), v.microsoft_tenant_id());
         assert_eq!(
-            stored.microsoft_student_group_id,
-            v.microsoft_student_group_id
+            stored.microsoft_student_group_id(),
+            v.microsoft_student_group_id()
         );
-        assert_eq!(stored.student_membership_confirmed, student);
-        assert_eq!(stored.checked_at, v.checked_at);
-        assert_eq!(stored.expires_at, v.expires_at);
+        assert_eq!(stored.student_membership_confirmed(), student);
+        assert_eq!(stored.checked_at(), v.checked_at());
+        assert_eq!(stored.expires_at(), v.expires_at());
+
+        let stored_by_id = repo
+            .find_valid_by_user_id(v.user_id())
+            .await
+            .unwrap()
+            .expect("consulta por user_id deve retornar a mesma evidência");
+        assert_eq!(stored_by_id.user_id(), v.user_id());
+        assert_eq!(stored_by_id.microsoft_object_id(), v.microsoft_object_id());
+
         assert!(
             repo.find_valid_by_firebase_uid("uid-ausente")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            repo.find_valid_by_user_id(Uuid::new_v4())
                 .await
                 .unwrap()
                 .is_none()
@@ -400,46 +418,69 @@ async fn uid_isolation(pool: &PgPool, repo: &PgDatabase) {
             .is_none()
     );
 
-    let mut other = v.clone();
-
-    other.user_id = repo
+    let other_user_id = repo
         .provision(&Uuid::new_v4().to_string())
         .await
         .unwrap()
         .id();
-    other.student_membership_confirmed = false;
-    other.course_name = None;
+
+    let other = InstitutionalVerification::reconstitute(
+        other_user_id,
+        v.profile_name().map(ToString::to_string),
+        None,
+        v.institution_id(),
+        v.microsoft_object_id(),
+        v.microsoft_tenant_id(),
+        v.microsoft_student_group_id(),
+        false,
+        v.checked_at(),
+        v.expires_at(),
+    )
+    .unwrap();
 
     repo.save(&other).await.unwrap();
 
     assert!(
-        repo.find_valid_by_firebase_uid(&uid(pool, v.user_id).await)
+        repo.find_valid_by_firebase_uid(&uid(pool, v.user_id()).await)
             .await
             .unwrap()
             .unwrap()
-            .student_membership_confirmed
+            .student_membership_confirmed()
     );
     assert!(
         !repo
-            .find_valid_by_firebase_uid(&uid(pool, other.user_id).await)
+            .find_valid_by_firebase_uid(&uid(pool, other.user_id()).await)
             .await
             .unwrap()
             .unwrap()
-            .student_membership_confirmed
+            .student_membership_confirmed()
     );
 }
 
 /// Evidência expirada e alterações de tenant/grupo invalidam a reutilização.
 async fn stale_evidence_is_filtered(pool: &PgPool, repo: &PgDatabase) {
-    let mut expired = fixture(pool, true).await;
+    let v = fixture(pool, true).await;
+    let checked_at = Utc::now() - Duration::hours(2);
+    let expires_at = Utc::now() - Duration::hours(1);
 
-    expired.checked_at = Utc::now() - Duration::hours(2);
-    expired.expires_at = Utc::now() - Duration::hours(1);
+    let expired = InstitutionalVerification::reconstitute(
+        v.user_id(),
+        v.profile_name().map(ToString::to_string),
+        v.course_name().map(ToString::to_string),
+        v.institution_id(),
+        v.microsoft_object_id(),
+        v.microsoft_tenant_id(),
+        v.microsoft_student_group_id(),
+        v.student_membership_confirmed(),
+        checked_at,
+        expires_at,
+    )
+    .unwrap();
 
     repo.save(&expired).await.unwrap();
 
     assert!(
-        repo.find_valid_by_firebase_uid(&uid(pool, expired.user_id).await)
+        repo.find_valid_by_firebase_uid(&uid(pool, expired.user_id()).await)
             .await
             .unwrap()
             .is_none()
@@ -451,13 +492,13 @@ async fn stale_evidence_is_filtered(pool: &PgPool, repo: &PgDatabase) {
         repo.save(&v).await.unwrap();
         sqlx::query(&format!("UPDATE institution SET {column}=$1 WHERE id=$2"))
             .bind(Uuid::new_v4())
-            .bind(v.institution_id)
+            .bind(v.institution_id())
             .execute(pool)
             .await
             .unwrap();
 
         assert!(
-            repo.find_valid_by_firebase_uid(&uid(pool, v.user_id).await)
+            repo.find_valid_by_firebase_uid(&uid(pool, v.user_id()).await)
                 .await
                 .unwrap()
                 .is_none()
@@ -471,58 +512,97 @@ async fn newer_evidence_wins(pool: &PgPool, repo: &PgDatabase) {
 
     repo.save(&old).await.unwrap();
 
-    let mut latest = fixture(pool, false).await;
+    let latest_checked_at = old.checked_at() + Duration::seconds(1);
+    let latest_expires_at = latest_checked_at + Duration::hours(24);
+    let latest_inst = fixture(pool, false).await;
 
-    latest.user_id = old.user_id;
-    latest.checked_at = old.checked_at + Duration::seconds(1);
-    latest.expires_at = latest.checked_at + Duration::hours(24);
+    let latest = InstitutionalVerification::reconstitute(
+        old.user_id(),
+        latest_inst.profile_name().map(ToString::to_string),
+        None,
+        latest_inst.institution_id(),
+        latest_inst.microsoft_object_id(),
+        latest_inst.microsoft_tenant_id(),
+        latest_inst.microsoft_student_group_id(),
+        false,
+        latest_checked_at,
+        latest_expires_at,
+    )
+    .unwrap();
 
     assert!(repo.save(&latest).await.unwrap());
     assert!(!repo.save(&old).await.unwrap());
 
-    let mut tied = latest.clone();
-
-    tied.student_membership_confirmed = true;
-    tied.course_name = Some("Curso".into());
+    let tied = InstitutionalVerification::reconstitute(
+        latest.user_id(),
+        latest.profile_name().map(ToString::to_string),
+        Some("Curso".into()),
+        latest.institution_id(),
+        latest.microsoft_object_id(),
+        latest.microsoft_tenant_id(),
+        latest.microsoft_student_group_id(),
+        true,
+        latest.checked_at(),
+        latest.expires_at(),
+    )
+    .unwrap();
 
     assert!(!repo.save(&tied).await.unwrap());
 
     let stored = repo
-        .find_valid_by_firebase_uid(&uid(pool, old.user_id).await)
+        .find_valid_by_firebase_uid(&uid(pool, old.user_id()).await)
         .await
         .unwrap()
         .unwrap();
 
-    assert_eq!(stored.institution_id, latest.institution_id);
-    assert_eq!(stored.microsoft_object_id, latest.microsoft_object_id);
-    assert!(!stored.student_membership_confirmed);
-    assert_eq!(stored.checked_at, latest.checked_at);
+    assert_eq!(stored.institution_id(), latest.institution_id());
+    assert_eq!(stored.microsoft_object_id(), latest.microsoft_object_id());
+    assert!(!stored.student_membership_confirmed());
+    assert_eq!(stored.checked_at(), latest.checked_at());
 
-    latest.checked_at += Duration::seconds(1);
+    let next_checked_at = latest.checked_at() + Duration::seconds(1);
+    let next_expires_at = latest.expires_at() + Duration::seconds(1);
 
-    latest.student_membership_confirmed = true;
-    latest.course_name = Some("Curso".into());
+    let next = InstitutionalVerification::reconstitute(
+        latest.user_id(),
+        latest.profile_name().map(ToString::to_string),
+        Some("Curso".into()),
+        latest.institution_id(),
+        latest.microsoft_object_id(),
+        latest.microsoft_tenant_id(),
+        latest.microsoft_student_group_id(),
+        true,
+        next_checked_at,
+        next_expires_at,
+    )
+    .unwrap();
 
-    assert!(repo.save(&latest).await.unwrap());
+    assert!(repo.save(&next).await.unwrap());
     assert!(
-        repo.find_valid_by_firebase_uid(&uid(pool, latest.user_id).await)
+        repo.find_valid_by_firebase_uid(&uid(pool, next.user_id()).await)
             .await
             .unwrap()
             .unwrap()
-            .student_membership_confirmed
+            .student_membership_confirmed()
     );
 }
 
 /// UPSERT concorrente preserva o maior checked_at, independentemente da ordem de chegada.
 async fn concurrent_writes_preserve_newest(pool: &PgPool, repo: &PgDatabase) {
     let old = fixture(pool, true).await;
-    let mut new = old.clone();
-
-    new.checked_at += Duration::seconds(1);
-    new.expires_at += Duration::seconds(1);
-
-    new.student_membership_confirmed = false;
-    new.course_name = None;
+    let new = InstitutionalVerification::reconstitute(
+        old.user_id(),
+        old.profile_name().map(ToString::to_string),
+        None,
+        old.institution_id(),
+        old.microsoft_object_id(),
+        old.microsoft_tenant_id(),
+        old.microsoft_student_group_id(),
+        false,
+        old.checked_at() + Duration::seconds(1),
+        old.expires_at() + Duration::seconds(1),
+    )
+    .unwrap();
 
     let (a, b) = tokio::join!(repo.save(&old), repo.save(&new));
 
@@ -531,13 +611,13 @@ async fn concurrent_writes_preserve_newest(pool: &PgPool, repo: &PgDatabase) {
     assert!(b.unwrap());
 
     let stored = repo
-        .find_valid_by_firebase_uid(&uid(pool, old.user_id).await)
+        .find_valid_by_firebase_uid(&uid(pool, old.user_id()).await)
         .await
         .unwrap()
         .unwrap();
 
-    assert_eq!(stored.checked_at, new.checked_at);
-    assert!(!stored.student_membership_confirmed);
+    assert_eq!(stored.checked_at(), new.checked_at());
+    assert!(!stored.student_membership_confirmed());
 }
 
 /// FKs, UID e período inválidos são rejeitados, sem transformar falhas em sucesso.
@@ -545,23 +625,99 @@ async fn invalid_evidence_is_rejected(pool: &PgPool, repo: &PgDatabase) {
     let v = fixture(pool, true).await;
 
     for kind in 0..8 {
-        let mut invalid = v.clone();
-
-        match kind {
-            0 => invalid.institution_id = Uuid::new_v4(),
-            1 | 2 => invalid.user_id = Uuid::new_v4(),
-            3 => invalid.expires_at = invalid.checked_at,
-            4 => invalid.course_name = None,
-            5 => invalid.course_name = Some(String::new()),
-            6 => invalid.course_name = Some(" \t\n".into()),
-            _ => invalid.student_membership_confirmed = false,
+        let invalid = match kind {
+            0 => InstitutionalVerification::reconstitute(
+                v.user_id(),
+                v.profile_name().map(ToString::to_string),
+                v.course_name().map(ToString::to_string),
+                Uuid::new_v4(),
+                v.microsoft_object_id(),
+                v.microsoft_tenant_id(),
+                v.microsoft_student_group_id(),
+                v.student_membership_confirmed(),
+                v.checked_at(),
+                v.expires_at(),
+            ),
+            1 | 2 => InstitutionalVerification::reconstitute(
+                Uuid::new_v4(),
+                v.profile_name().map(ToString::to_string),
+                v.course_name().map(ToString::to_string),
+                v.institution_id(),
+                v.microsoft_object_id(),
+                v.microsoft_tenant_id(),
+                v.microsoft_student_group_id(),
+                v.student_membership_confirmed(),
+                v.checked_at(),
+                v.expires_at(),
+            ),
+            3 => InstitutionalVerification::reconstitute(
+                v.user_id(),
+                v.profile_name().map(ToString::to_string),
+                v.course_name().map(ToString::to_string),
+                v.institution_id(),
+                v.microsoft_object_id(),
+                v.microsoft_tenant_id(),
+                v.microsoft_student_group_id(),
+                v.student_membership_confirmed(),
+                v.checked_at(),
+                v.checked_at(),
+            ),
+            4 => InstitutionalVerification::reconstitute(
+                v.user_id(),
+                v.profile_name().map(ToString::to_string),
+                None,
+                v.institution_id(),
+                v.microsoft_object_id(),
+                v.microsoft_tenant_id(),
+                v.microsoft_student_group_id(),
+                true,
+                v.checked_at(),
+                v.expires_at(),
+            ),
+            5 => InstitutionalVerification::reconstitute(
+                v.user_id(),
+                v.profile_name().map(ToString::to_string),
+                Some(String::new()),
+                v.institution_id(),
+                v.microsoft_object_id(),
+                v.microsoft_tenant_id(),
+                v.microsoft_student_group_id(),
+                true,
+                v.checked_at(),
+                v.expires_at(),
+            ),
+            6 => InstitutionalVerification::reconstitute(
+                v.user_id(),
+                v.profile_name().map(ToString::to_string),
+                Some(" \t\n".into()),
+                v.institution_id(),
+                v.microsoft_object_id(),
+                v.microsoft_tenant_id(),
+                v.microsoft_student_group_id(),
+                true,
+                v.checked_at(),
+                v.expires_at(),
+            ),
+            _ => InstitutionalVerification::reconstitute(
+                v.user_id(),
+                v.profile_name().map(ToString::to_string),
+                v.course_name().map(ToString::to_string),
+                v.institution_id(),
+                v.microsoft_object_id(),
+                v.microsoft_tenant_id(),
+                v.microsoft_student_group_id(),
+                false,
+                v.checked_at(),
+                v.expires_at(),
+            ),
         }
+        .unwrap();
 
         assert!(repo.save(&invalid).await.is_err());
     }
 
     assert!(
-        repo.find_valid_by_firebase_uid(&uid(pool, v.user_id).await)
+        repo.find_valid_by_firebase_uid(&uid(pool, v.user_id()).await)
             .await
             .unwrap()
             .is_none()
@@ -574,8 +730,8 @@ async fn institution_constraints_and_cascade(pool: &PgPool, repo: &PgDatabase) {
 
     repo.save(&v).await.unwrap();
 
-    let duplicate=sqlx::query("INSERT INTO institution (name,microsoft_tenant_id,microsoft_student_group_id) VALUES ('Outra',$1,$2)")
-        .bind(v.microsoft_tenant_id).bind(Uuid::new_v4()).execute(pool).await.unwrap_err();
+    let duplicate = sqlx::query("INSERT INTO institution (name,microsoft_tenant_id,microsoft_student_group_id) VALUES ('Outra',$1,$2)")
+        .bind(v.microsoft_tenant_id()).bind(Uuid::new_v4()).execute(pool).await.unwrap_err();
 
     assert_eq!(
         duplicate.as_database_error().unwrap().code().as_deref(),
@@ -586,7 +742,7 @@ async fn institution_constraints_and_cascade(pool: &PgPool, repo: &PgDatabase) {
         let error = sqlx::query(&format!(
             "UPDATE institution SET {column}='   ' WHERE id=$1"
         ))
-        .bind(v.institution_id)
+        .bind(v.institution_id())
         .execute(pool)
         .await
         .unwrap_err();
@@ -598,14 +754,14 @@ async fn institution_constraints_and_cascade(pool: &PgPool, repo: &PgDatabase) {
     }
 
     sqlx::query("DELETE FROM institution WHERE id=$1")
-        .bind(v.institution_id)
+        .bind(v.institution_id())
         .execute(pool)
         .await
         .unwrap();
 
     let count: i64 =
         sqlx::query_scalar("SELECT count(*) FROM institutional_verification WHERE user_id=$1")
-            .bind(v.user_id)
+            .bind(v.user_id())
             .fetch_one(pool)
             .await
             .unwrap();
@@ -632,18 +788,19 @@ async fn closed_pool_returns_repository_errors() {
     assert!(repo.provision("uid").await.is_err());
 
     let now = Utc::now();
-    let v = InstitutionalVerification {
-        user_id: Uuid::new_v4(),
-        profile_name: None,
-        course_name: None,
-        microsoft_object_id: Uuid::new_v4(),
-        institution_id: Uuid::new_v4(),
-        microsoft_tenant_id: Uuid::new_v4(),
-        microsoft_student_group_id: Uuid::new_v4(),
-        student_membership_confirmed: false,
-        checked_at: now,
-        expires_at: now + Duration::hours(1),
-    };
+    let v = InstitutionalVerification::reconstitute(
+        Uuid::new_v4(),
+        None,
+        None,
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        false,
+        now,
+        now + Duration::hours(1),
+    )
+    .unwrap();
 
     assert!(repo.save(&v).await.is_err());
 }
