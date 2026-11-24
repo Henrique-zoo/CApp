@@ -537,3 +537,105 @@ async fn should_enforce_status_history_cascade_and_constraints() {
 
     db.close().await;
 }
+
+#[tokio::test]
+async fn should_create_demand_and_initial_history_atomically_using_postgres_repository() {
+    use backend::modules::demands::{
+        application::ports::DemandRepository, infrastructure::PostgresDemandRepository,
+    };
+
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "Universidade Repositório").await;
+    let ca_id = create_test_ca(
+        &db.pool,
+        institution_id,
+        "Centro Acadêmico de Redes",
+        "CAER",
+    )
+    .await;
+    let author_id = create_test_user(&db.pool, "user-repo-test-1").await;
+
+    let repo = PostgresDemandRepository::new(db.pool.clone());
+
+    let demand_id = Uuid::new_v4();
+    let now = Utc::now();
+    let demand = Demand::new(
+        demand_id,
+        ca_id,
+        author_id,
+        DemandForum::PhysicalSpace,
+        Some("Reparo da fechadura".to_string()),
+        "A fechadura da porta principal está quebrada".to_string(),
+        Some("Manutenção".to_string()),
+        None,
+        now,
+    )
+    .expect("demanda válida");
+
+    repo.create(&demand)
+        .await
+        .expect("deve criar demanda transacionalmente");
+
+    // Verifica persistência na tabela demand
+    let retrieved = repo
+        .find_by_id(demand_id)
+        .await
+        .expect("consulta deve ser bem-sucedida")
+        .expect("demanda deve existir");
+
+    assert_eq!(retrieved.id(), demand_id);
+    assert_eq!(retrieved.academic_center_id(), ca_id);
+    assert_eq!(retrieved.author_id(), author_id);
+    assert_eq!(retrieved.forum(), DemandForum::PhysicalSpace);
+    assert_eq!(retrieved.title(), Some("Reparo da fechadura"));
+    assert_eq!(
+        retrieved.description(),
+        "A fechadura da porta principal está quebrada"
+    );
+    assert_eq!(retrieved.category(), Some("Manutenção"));
+    assert_eq!(retrieved.status(), DemandStatus::Open);
+
+    // Verifica que o histórico inicial de status 'open' foi registrado transacionalmente
+    let history_row = sqlx::query(
+        "SELECT demand_id, from_status, to_status, changed_by_id, comment
+         FROM demand_status_history WHERE demand_id = $1",
+    )
+    .bind(demand_id)
+    .fetch_one(&db.pool)
+    .await
+    .expect("deve encontrar registro no histórico");
+
+    let h_demand_id: Uuid = history_row.get("demand_id");
+    let h_from: Option<String> = history_row.get("from_status");
+    let h_to: String = history_row.get("to_status");
+    let h_changed_by: Uuid = history_row.get("changed_by_id");
+    let h_comment: Option<String> = history_row.get("comment");
+
+    assert_eq!(h_demand_id, demand_id);
+    assert_eq!(h_from, None);
+    assert_eq!(h_to, "open");
+    assert_eq!(h_changed_by, author_id);
+    assert_eq!(h_comment, None);
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_return_none_when_demand_not_found_in_postgres_repository() {
+    use backend::modules::demands::{
+        application::ports::DemandRepository, infrastructure::PostgresDemandRepository,
+    };
+
+    let db = TestDatabase::new().await;
+    let repo = PostgresDemandRepository::new(db.pool.clone());
+
+    let non_existent_id = Uuid::new_v4();
+    let result = repo
+        .find_by_id(non_existent_id)
+        .await
+        .expect("busca por id inexistente deve retornar Ok");
+
+    assert!(result.is_none());
+
+    db.close().await;
+}

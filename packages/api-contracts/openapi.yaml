@@ -38,6 +38,9 @@ tags:
   - name: Centros Acadêmicos
     description: Gestão, mandatos e governança dos Centros Acadêmicos.
 
+  - name: Demandas
+    description: Criação e acompanhamento de demandas nos fóruns institucional e de espaço físico.
+
 paths:
   /elections/{id}/ballots:
     parameters:
@@ -1035,6 +1038,225 @@ paths:
         "503":
           $ref: "#/components/responses/AccountServiceUnavailable"
 
+  /api/v1/academic-centers/{academic_center_id}/demands:
+    post:
+      operationId: createDemand
+      tags: [Demandas]
+      summary: Criar nova demanda no fórum institucional ou de espaço físico
+      description: |
+        Registra uma nova demanda estudantil vinculada a um Centro Acadêmico.
+
+        Demandas de espaço físico (`physical_space`) pertencem diretamente ao Centro
+        Acadêmico, são abertas a qualquer estudante com vínculo ativo e não aceitam
+        curso associado (`courseName`).
+
+        Demandas do fórum institucional (`institutional`) exigem indicação obrigatória
+        de um curso válido (`courseName`) representado pelo Centro Acadêmico, e o autor
+        deve estar matriculado no curso ou ser membro da gestão do CA.
+
+        O status inicial é sempre `open`, gerando o registro inicial no histórico
+        de status da demanda de forma atômica.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: academic_center_id
+          in: path
+          required: true
+          description: Identificador único (UUID) do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+          example: "00000000-0000-0000-0000-000000000001"
+      requestBody:
+        required: true
+        description: Dados da demanda a ser registrada nos fóruns institucional ou de espaço físico.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDemandRequest"
+            examples:
+              physicalSpaceDemand:
+                summary: Demanda de espaço físico
+                value:
+                  forum: physical_space
+                  title: Reparo do ar-condicionado
+                  description: O ar-condicionado da sala de estudos não está refrigerando adequadamente.
+                  category: Infraestrutura
+              institutionalDemand:
+                summary: Demanda institucional
+                value:
+                  forum: institutional
+                  title: Revisão de pré-requisitos de disciplina
+                  description: Solicitação de ajuste nos pré-requisitos para viabilizar matrículas no fluxo padrão.
+                  category: Pedagógico
+                  courseName: Ciência da Computação
+      responses:
+        "201":
+          description: Demanda criada com sucesso e status inicial 'open' registrado no histórico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DemandResponse"
+              examples:
+                createdPhysicalSpaceDemand:
+                  summary: Demanda de espaço físico criada
+                  value:
+                    id: "00000000-0000-0000-0000-000000000020"
+                    academicCenterId: "00000000-0000-0000-0000-000000000001"
+                    authorId: "00000000-0000-0000-0000-000000000010"
+                    forum: physical_space
+                    title: Reparo do ar-condicionado
+                    description: O ar-condicionado da sala de estudos não está refrigerando adequadamente.
+                    category: Infraestrutura
+                    courseName: null
+                    status: open
+                    createdAt: "2026-11-20T12:00:00Z"
+                    updatedAt: "2026-11-20T12:00:00Z"
+                createdInstitutionalDemand:
+                  summary: Demanda institucional criada
+                  value:
+                    id: "00000000-0000-0000-0000-000000000021"
+                    academicCenterId: "00000000-0000-0000-0000-000000000001"
+                    authorId: "00000000-0000-0000-0000-000000000010"
+                    forum: institutional
+                    title: Revisão de pré-requisitos de disciplina
+                    description: Solicitação de ajuste nos pré-requisitos para viabilizar matrículas no fluxo padrão.
+                    category: Pedagógico
+                    courseName: Ciência da Computação
+                    status: open
+                    createdAt: "2026-11-20T12:00:00Z"
+                    updatedAt: "2026-11-20T12:00:00Z"
+        "400":
+          description: |
+            bad_request — JSON ausente, malformado, de tipo incompatível ou excedendo o limite de tamanho do corpo.
+            invalid_forum — fórum desconhecido (deve ser 'institutional' ou 'physical_space').
+            invalid_demand — dados gerais da demanda rejeitados pelo domínio.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                badRequest:
+                  value:
+                    error:
+                      code: bad_request
+                      message: Requisição inválida
+                      details: null
+                invalidForum:
+                  value:
+                    error:
+                      code: invalid_forum
+                      message: Fórum de demanda inválido
+                      details: null
+        "401":
+          description: |
+            Credenciais ausentes ou inválidas. Códigos possíveis:
+            - unauthorized: cabeçalho Authorization ausente, repetido ou formato Bearer malformado;
+            - invalid_token: credencial rejeitada pelo verificador de identidade;
+            - expired_token: token de autenticação expirado.
+          headers:
+            WWW-Authenticate:
+              description: Desafio Bearer incluído em todas as respostas 401.
+              schema:
+                type: string
+                const: Bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                missingCredentials:
+                  value:
+                    error:
+                      code: unauthorized
+                      message: Autenticação necessária
+                      details: null
+        "403":
+          description: |
+            Acesso negado. Possíveis códigos:
+            - student_membership_required: autor não possui vínculo estudantil ativo na instituição do CA;
+            - user_not_permitted_in_ca: estudante pertence a curso não atendido pelo CA e não integra a gestão;
+            - user_not_found: usuário não encontrado na base de dados interna;
+            - forbidden: authorId informado no corpo diverge da credencial autenticada;
+            - app_check_required / app_check_invalid: comprovação do aplicativo ausente ou recusada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                studentMembershipRequired:
+                  value:
+                    error:
+                      code: student_membership_required
+                      message: Vínculo estudantil ativo é obrigatório para registrar demandas
+                      details: null
+                userNotPermittedInCa:
+                  value:
+                    error:
+                      code: user_not_permitted_in_ca
+                      message: Usuário sem permissão para criar demandas neste Centro Acadêmico
+                      details: null
+        "404":
+          description: |
+            academic_center_not_found — Centro Acadêmico informado não foi encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: academic_center_not_found
+                  message: Centro Acadêmico não encontrado
+                  details:
+                    academic_center_id: "00000000-0000-0000-0000-000000000001"
+        "422":
+          description: |
+            Violação de regras de validação e restrições de negócio da demanda. Possíveis códigos:
+            - academic_center_inactive: Centro Acadêmico encontra-se desativado/arquivado;
+            - course_name_required: demandas do fórum institucional exigem curso associado;
+            - course_not_represented_by_ca: curso informado não é representado pelo Centro Acadêmico;
+            - course_not_allowed_for_physical_space: demandas de espaço físico não permitem curso;
+            - empty_description / description_too_long: descrição vazia ou superior a 2000 caracteres;
+            - empty_title / title_too_long: título vazio ou superior a 200 caracteres;
+            - empty_category / category_too_long: categoria vazia ou superior a 100 caracteres;
+            - empty_course_name / course_name_too_long: curso vazio ou superior a 200 caracteres.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              examples:
+                courseNameRequired:
+                  value:
+                    error:
+                      code: course_name_required
+                      message: Demandas do fórum institucional exigem associação válida a um curso
+                      details: null
+                courseNotAllowedForPhysicalSpace:
+                  value:
+                    error:
+                      code: course_not_allowed_for_physical_space
+                      message: Demandas de espaço físico não permitem associação a curso
+                      details: null
+                courseNotRepresented:
+                  value:
+                    error:
+                      code: course_not_represented_by_ca
+                      message: O curso informado não é representado pelo Centro Acadêmico
+                      details:
+                        academic_center_id: "00000000-0000-0000-0000-000000000001"
+                        course_name: "Engenharia Mecânica"
+                emptyDescription:
+                  value:
+                    error:
+                      code: empty_description
+                      message: A descrição da demanda não pode ser vazia
+                      details: null
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
 components:
   parameters:
     ElectionId:
@@ -1543,3 +1765,98 @@ components:
           format: date-time
           description: Instante UTC da última modificação do registro.
           example: "2026-11-22T14:00:00Z"
+    CreateDemandRequest:
+      type: object
+      additionalProperties: false
+      required: [forum, description]
+      properties:
+        forum:
+          type: string
+          enum: [institutional, physical_space]
+          description: Fórum alvo da demanda (`institutional` ou `physical_space`).
+        title:
+          type: [string, "null"]
+          maxLength: 200
+          description: Título ou resumo identificador opcional da demanda.
+        description:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: '\S'
+          description: Conteúdo ou descrição detalhada da demanda.
+        category:
+          type: [string, "null"]
+          maxLength: 100
+          description: Categoria temática opcional.
+        courseName:
+          type: [string, "null"]
+          maxLength: 200
+          description: Nome do curso associado (obrigatório em fórum institucional, proibido em espaço físico).
+        authorId:
+          type: [string, "null"]
+          format: uuid
+          description: Identificador opcional do autor; se informado, deve coincidir com o usuário autenticado.
+    DemandResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - academicCenterId
+        - authorId
+        - forum
+        - description
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único estável da demanda.
+        academicCenterId:
+          type: string
+          format: uuid
+          description: Identificador do Centro Acadêmico responsável.
+        authorId:
+          type: string
+          format: uuid
+          description: Identificador do usuário autor da demanda.
+        forum:
+          type: string
+          enum: [institutional, physical_space]
+          description: Fórum ao qual a demanda pertence.
+        title:
+          type: [string, "null"]
+          maxLength: 200
+          description: Título ou resumo identificador da demanda, se houver.
+        description:
+          type: string
+          maxLength: 2000
+          description: Descrição detalhada do problema ou necessidade comunicada.
+        category:
+          type: [string, "null"]
+          maxLength: 100
+          description: Categoria temática, se informada.
+        courseName:
+          type: [string, "null"]
+          maxLength: 200
+          description: Curso associado à demanda (presente somente em demandas institucionais).
+        status:
+          type: string
+          enum:
+            - open
+            - in_analysis
+            - rejected
+            - forwarded_to_coordination
+            - in_execution
+            - resolved
+            - cancelled
+          description: Status atual da demanda no ciclo de vida.
+        createdAt:
+          type: string
+          format: date-time
+          description: Instante UTC de registro da demanda.
+        updatedAt:
+          type: string
+          format: date-time
+          description: Instante UTC da última modificação da demanda.
