@@ -32,6 +32,17 @@ fn given_nao_recebeu_uma_concessao_separada_de_valor(_world: &mut AppWorld, _val
     pending_step("não recebeu uma concessão separada de {string}");
 }
 
+/// Pendente: o CA {string} possui os cargos {string} e {string}.
+#[given(regex = r#"^o CA "([^"]*)" possui os cargos "([^"]*)" e "([^"]*)"$"#)]
+fn given_o_ca_valor_possui_os_cargos_valor_e_valor(
+    _world: &mut AppWorld,
+    _value_1: String,
+    _value_2: String,
+    _value_3: String,
+) {
+    pending_step("o CA {string} possui os cargos {string} e {string}");
+}
+
 /// Pendente: o CA {string} possui os cargos {string}, {string} e {string}.
 #[given(regex = r#"^o CA "([^"]*)" possui os cargos "([^"]*)", "([^"]*)" e "([^"]*)"$"#)]
 fn given_o_ca_valor_possui_os_cargos_valor_valor_e_valor(
@@ -101,6 +112,16 @@ fn given_o_estudante_valor_nao_possui_cargo_de_gestao_em_valor(
     pending_step("o estudante {string} não possui cargo de gestão em {string}");
 }
 
+/// Pendente: {string} não possui cargo de gestão em {string}.
+#[given(regex = r#"^"([^"]*)" não possui cargo de gestão em "([^"]*)"$"#)]
+fn given_valor_nao_possui_cargo_de_gestao_em_valor(
+    _world: &mut AppWorld,
+    _value_1: String,
+    _value_2: String,
+) {
+    pending_step("{string} não possui cargo de gestão em {string}");
+}
+
 /// Pendente: o estudante {string} possui perfil no CApp.
 #[given(regex = r#"^o estudante "([^"]*)" possui perfil no CApp$"#)]
 fn given_o_estudante_valor_possui_perfil_no_capp(_world: &mut AppWorld, _value_1: String) {
@@ -119,10 +140,22 @@ fn given_possuo_a_permissao_valor_nesse_ca(_world: &mut AppWorld, _value_1: Stri
     pending_step("possuo a permissão {string} nesse CA");
 }
 
+/// Pendente: que estou autenticado como {string}.
+#[given(regex = r#"^que estou autenticado como "([^"]*)"$"#)]
+fn given_que_estou_autenticado_como_valor(_world: &mut AppWorld, _value_1: String) {
+    pending_step("que estou autenticado como {string}");
+}
+
 /// Pendente: que estou autenticado no CApp.
 #[given(regex = r#"^que estou autenticado no CApp$"#)]
 fn given_que_estou_autenticado_no_capp(_world: &mut AppWorld) {
     pending_step("que estou autenticado no CApp");
+}
+
+/// Pendente: o CA ativo é {string}.
+#[given(regex = r#"^o CA ativo é "([^"]*)"$"#)]
+fn given_o_ca_ativo_e_valor(_world: &mut AppWorld, _value_1: String) {
+    pending_step("o CA ativo é {string}");
 }
 
 /// Pendente: que o CA ativo é {string}.

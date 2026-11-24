@@ -2,7 +2,9 @@ import '../support/step_registry.dart';
 import 'academic_identity/academic_data_steps.dart';
 import 'authentication/account_session_steps.dart';
 import 'authentication/authentication_steps.dart';
+import 'demands/demand_communication_steps.dart';
 import 'demands/demand_creation_steps.dart';
+import 'demands/demand_management_steps.dart';
 import 'demands/demand_tracking_steps.dart';
 import 'elections/tally_steps.dart';
 import 'elections/voting_steps.dart';
@@ -38,7 +40,9 @@ final stepDefinitions = <StepDefinition>[
   ...authenticationSteps,
   ...caCreationSteps,
   ...defaultRolesSteps,
+  ...demandCommunicationSteps,
   ...demandCreationSteps,
+  ...demandManagementSteps,
   ...demandTrackingSteps,
   ...eventBrowsingSteps,
   ...eventCapacitySteps,
