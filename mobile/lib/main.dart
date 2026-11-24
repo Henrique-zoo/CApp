@@ -76,6 +76,9 @@ Future<void> main() async {
       dependencies: dependencies,
       electionId: const String.fromEnvironment('ELECTION_ID'),
       manifestHash: const String.fromEnvironment('ELECTION_MANIFEST_SHA256'),
+      academicCenterId: const String.fromEnvironment('ACADEMIC_CENTER_ID'),
+      academicCenterName: const String.fromEnvironment('ACADEMIC_CENTER_NAME'),
+      isCaManager: const bool.fromEnvironment('IS_CA_MANAGER'),
     ),
   );
 }

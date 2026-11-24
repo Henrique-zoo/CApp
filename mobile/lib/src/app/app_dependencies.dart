@@ -50,6 +50,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../infrastructure/backend/backend_api.dart';
+import '../modules/demands/demands.dart';
+import '../modules/demands/infrastructure/backend/backend_demands_gateway.dart';
 import '../modules/elections/elections.dart';
 import '../modules/elections/infrastructure/backend/voter_registration_gateway.dart';
 import '../modules/elections/infrastructure/device_voter_keys.dart';
@@ -114,6 +116,11 @@ final class AppDependencies {
     _voterRegistrationGateway,
     _currentAccount,
     _preferences,
+  );
+
+  /// Porta de acesso remoto do módulo de demandas.
+  late final DemandsGateway demandsGateway = BackendDemandsGateway(
+    _backendApi.demands,
   );
 
   /// Coordenação exposta à interface pela API pública do módulo.

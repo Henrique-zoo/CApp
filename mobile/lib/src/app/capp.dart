@@ -69,6 +69,8 @@ class CApp extends StatelessWidget {
     required this.sessionController,
     required this.backendReadinessController,
     this.electionHome,
+    this.demandsHome,
+    this.demandsHomeBuilder,
   });
 
   /// Fonte do estado e das operações de entrada.
@@ -79,6 +81,13 @@ class CApp extends StatelessWidget {
 
   /// Conteúdo eleitoral apresentado no Início após o login institucional.
   final Widget? electionHome;
+
+  /// Conteúdo de demandas apresentado diretamente na aba Demandas.
+  final Widget? demandsHome;
+
+  /// Construtor opcional da aba Demandas com acesso ao estado da sessão atual.
+  final Widget Function(BuildContext context, SessionSignedIn state)?
+  demandsHomeBuilder;
 
   /// Solicita saída apenas para uma conta conhecida e sem outra operação.
   ///
@@ -155,6 +164,8 @@ class CApp extends StatelessWidget {
             child: MainPage(
               state: state,
               electionHome: electionHome,
+              demandsHome:
+                  demandsHomeBuilder?.call(context, state) ?? demandsHome,
               onSignOut: (mode) => _signOut(mode: mode),
             ),
           ),
