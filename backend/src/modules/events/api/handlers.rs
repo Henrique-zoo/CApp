@@ -1,4 +1,9 @@
-//! Handlers HTTP (Axum) para criação, edição, publicação e consulta de eventos.
+//! Handlers HTTP (Axum) para criação, edição, publicação direta e consulta de eventos.
+//!
+//! Os endpoints de escrita e publicação direta integram [`AuthenticatedUser`]
+//! e [`PostgresEventAuthorizationService`] para garantir que apenas usuários com a
+//! permissão [`DIRECT_EVENT_MANAGEMENT_PERMISSION`](crate::modules::events::domain::DIRECT_EVENT_MANAGEMENT_PERMISSION)
+//! no respectivo Centro Acadêmico possam publicar diretamente (sem homologação) e editar eventos.
 
 use axum::{
     Json,
@@ -14,13 +19,16 @@ use super::dto::{
 };
 use crate::{
     api::state::AppState,
-    modules::events::{
-        application::{
-            CreateEventCommand, EventApplicationError, EventService, GetEventByIdQuery,
-            ListCaEventsQuery, PublishEventCommand, UpdateEventCommand,
+    modules::{
+        events::{
+            application::{
+                CreateEventCommand, EventApplicationError, EventService, GetEventByIdQuery,
+                ListCaEventsQuery, PublishEventCommand, UpdateEventCommand,
+            },
+            domain::EventDomainError,
+            infrastructure::{PostgresEventAuthorizationService, PostgresEventRepository},
         },
-        domain::EventDomainError,
-        infrastructure::PostgresEventRepository,
+        identity::api::AuthenticatedUser,
     },
 };
 
@@ -54,9 +62,22 @@ fn repository(state: &AppState) -> PostgresEventRepository {
     PostgresEventRepository::new(state.pg_database.pool.clone())
 }
 
+fn authorized_service(
+    state: &AppState,
+) -> EventService<PostgresEventRepository, PostgresEventAuthorizationService> {
+    EventService::with_authorizer(
+        repository(state),
+        PostgresEventAuthorizationService::new(state.pg_database.pool.clone()),
+    )
+}
+
 /// Handler `POST /api/v1/events` para criar um novo evento (rascunho ou publicado diretamente).
+///
+/// Verifica se o usuário autenticado (ou autor informado) possui a permissão
+/// `DIRECT_EVENT_MANAGEMENT_PERMISSION` no Centro Acadêmico antes de criar/publicar diretamente.
 pub async fn create_event_handler(
     State(state): State<AppState>,
+    authenticated_user: Option<AuthenticatedUser>,
     Json(payload): Json<CreateEventRequest>,
 ) -> Response {
     let capacity = match payload.capacity() {
@@ -68,10 +89,13 @@ pub async fn create_event_handler(
         Err(error) => return map_application_error(EventApplicationError::Domain(error)),
     };
 
-    let service = EventService::new(repository(&state));
+    let author_id = authenticated_user
+        .map(|user| user.user_id)
+        .unwrap_or(payload.author_id);
+    let service = authorized_service(&state);
     let command = CreateEventCommand {
         academic_center_id: payload.academic_center_id,
-        author_id: payload.author_id,
+        author_id,
         title: payload.title,
         description: payload.description,
         location: payload.location,
@@ -108,10 +132,11 @@ pub async fn get_event_handler(
 /// Handler `PUT /api/v1/events/{id}` para editar as informações de um evento existente.
 pub async fn update_event_handler(
     State(state): State<AppState>,
+    authenticated_user: Option<AuthenticatedUser>,
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateEventRequest>,
 ) -> Response {
-    let service = EventService::new(repository(&state));
+    let service = authorized_service(&state);
 
     let (capacity, registration) = if payload.touches_registration() {
         let existing = match service
@@ -146,10 +171,14 @@ pub async fn update_event_handler(
         (None, None)
     };
 
+    let actor_id = authenticated_user
+        .map(|user| user.user_id)
+        .or(payload.actor_id);
+
     let command = UpdateEventCommand {
         event_id: id,
         academic_center_id: payload.academic_center_id,
-        actor_id: payload.actor_id,
+        actor_id,
         title: payload.title,
         description: payload.description,
         location: payload.location,
@@ -166,18 +195,23 @@ pub async fn update_event_handler(
 }
 
 /// Handler `POST /api/v1/events/{id}/publish` para publicar diretamente um evento em rascunho.
+///
+/// Extrai o usuário autenticado via [`AuthenticatedUser`] e verifica por meio de
+/// [`PostgresEventAuthorizationService`] se ele possui [`DIRECT_EVENT_MANAGEMENT_PERMISSION`](crate::modules::events::domain::DIRECT_EVENT_MANAGEMENT_PERMISSION)
+/// no Centro Acadêmico do evento antes de efetivar a publicação direta sem homologação.
 pub async fn publish_event_handler(
     State(state): State<AppState>,
+    authenticated_user: AuthenticatedUser,
     Path(id): Path<Uuid>,
     payload: Option<Json<PublishEventRequest>>,
 ) -> Response {
-    let service = EventService::new(repository(&state));
+    let service = authorized_service(&state);
     let body = payload.map(|json| json.0).unwrap_or_default();
 
     let command = PublishEventCommand {
         event_id: id,
         academic_center_id: body.academic_center_id,
-        actor_id: body.actor_id,
+        actor_id: Some(authenticated_user.user_id),
     };
 
     match service.publish_event_directly(command).await {

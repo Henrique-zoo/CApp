@@ -10,15 +10,15 @@
 //! a conta interna e concluir seu perfil. Só o endpoint institucional precisa de
 //! access token Microsoft. A autenticação de perfil é conferida pela aplicação.
 
-use axum::{Router, routing::post};
-
+use axum::Router;
+use axum::routing::post;
 use crate::api::state::AppState;
-
+pub use extractor::AuthExtractionError;
+pub use extractor::AuthenticatedUser;
 pub mod dto;
 pub mod error;
 pub mod extractors;
 pub mod handlers;
-
 /// Constrói as rotas de identidade, ainda dependentes do estado.
 ///
 /// # Rotas
@@ -47,6 +47,6 @@ pub fn router() -> Router<AppState> {
             post(handlers::verify_institutional),
         )
 }
-
 #[cfg(test)]
 mod tests;
+pub mod extractor;

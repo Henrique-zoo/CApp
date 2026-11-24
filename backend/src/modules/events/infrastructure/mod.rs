@@ -1,8 +1,8 @@
-//! Camada de persistência do módulo de eventos.
+//! Camada de persistência e autorização do módulo de eventos.
 //!
-//! [`repository`] disponibiliza o adaptador PostgreSQL ([`PostgresEventRepository`])
-//! que implementa [`EventRepository`](crate::modules::events::application::EventRepository).
+//! [`repository`] disponibiliza os adaptadores PostgreSQL [`PostgresEventRepository`]
+//! e [`PostgresEventAuthorizationService`].
 
 pub mod repository;
 
-pub use repository::PostgresEventRepository;
+pub use repository::{PostgresEventAuthorizationService, PostgresEventRepository};
