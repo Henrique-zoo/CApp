@@ -44,7 +44,26 @@ fn build_test_app() -> axum::Router {
     let pool = PgPoolOptions::new()
         .connect_lazy("postgres://capp:capp@localhost:5432/capp")
         .expect("pool lazy para testes em memória");
-    create_router().with_state(AppState::new(pool))
+    let state = AppState::new(
+        backend::infrastructure::database::PgDatabase::new(pool),
+        backend::api::state::Clients::new(
+            backend::modules::identity::infrastructure::firebase::FirebaseTokenVerifier::new(
+                "capp-qa".into(),
+                reqwest::Client::new(),
+            )
+            .unwrap(),
+            backend::modules::identity::infrastructure::microsoft::MicrosoftGraphClient::new(
+                reqwest::Client::new(),
+            ),
+        ),
+    );
+    let app_check = backend::modules::identity::infrastructure::firebase::AppCheckVerifier::new(
+        "1234567890".into(),
+        vec!["1:1234567890:android:capp".into()],
+        reqwest::Client::new(),
+    )
+    .unwrap();
+    create_router(state, app_check)
 }
 
 #[tokio::test]

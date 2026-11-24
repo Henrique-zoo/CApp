@@ -103,7 +103,9 @@ pub trait EventRepository: Send + Sync {
             .await?;
         Ok(events
             .into_iter()
-            .filter(|event| event.academic_center_id == academic_center_id && event.is_published())
+            .filter(|event| {
+                event.academic_center_id() == academic_center_id && event.is_published()
+            })
             .collect())
     }
 
@@ -184,17 +186,17 @@ impl EventRepository for InMemoryEventRepository {
             .lock()
             .unwrap()
             .iter()
-            .find(|event| event.id == id)
+            .find(|event| event.id() == id)
             .cloned())
     }
 
     async fn update(&self, event: &Event) -> Result<Event, EventApplicationError> {
         let mut guard = self.events.lock().unwrap();
-        if let Some(existing) = guard.iter_mut().find(|item| item.id == event.id) {
+        if let Some(existing) = guard.iter_mut().find(|item| item.id() == event.id()) {
             *existing = event.clone();
             Ok(event.clone())
         } else {
-            Err(EventApplicationError::NotFound(event.id))
+            Err(EventApplicationError::NotFound(event.id()))
         }
     }
 
@@ -209,15 +211,15 @@ impl EventRepository for InMemoryEventRepository {
             .unwrap()
             .iter()
             .filter(|event| {
-                event.academic_center_id == academic_center_id
+                event.academic_center_id() == academic_center_id
                     && (!only_published || event.is_published())
             })
             .cloned()
             .collect();
         results.sort_by(|a, b| {
-            a.starts_at
-                .cmp(&b.starts_at)
-                .then_with(|| a.created_at.cmp(&b.created_at))
+            a.starts_at()
+                .cmp(&b.starts_at())
+                .then_with(|| a.id().cmp(&b.id()))
         });
         Ok(results)
     }
@@ -232,7 +234,7 @@ impl EventRepository for InMemoryEventRepository {
             .lock()
             .unwrap()
             .iter()
-            .find(|item| item.event_id == event_id && item.participant_id == participant_id)
+            .find(|item| item.event_id() == event_id && item.participant_id() == participant_id)
             .cloned())
     }
 
@@ -242,8 +244,8 @@ impl EventRepository for InMemoryEventRepository {
     ) -> Result<EventRegistration, EventApplicationError> {
         let mut guard = self.registrations.lock().unwrap();
         if let Some(existing) = guard.iter_mut().find(|item| {
-            item.event_id == registration.event_id
-                && item.participant_id == registration.participant_id
+            item.event_id() == registration.event_id()
+                && item.participant_id() == registration.participant_id()
         }) {
             *existing = registration.clone();
             Ok(existing.clone())
@@ -262,7 +264,7 @@ impl EventRepository for InMemoryEventRepository {
             .lock()
             .unwrap()
             .iter()
-            .filter(|item| item.event_id == event_id)
+            .filter(|item| item.event_id() == event_id)
             .cloned()
             .collect())
     }
@@ -284,11 +286,11 @@ impl EventRepository for InMemoryEventRepository {
 
         let event = events_guard
             .iter_mut()
-            .find(|item| item.id == event_id)
+            .find(|item| item.id() == event_id)
             .ok_or(EventApplicationError::NotFound(event_id))?;
 
         if let Some(active_ca_id) = academic_center_id
-            && event.academic_center_id != active_ca_id
+            && event.academic_center_id() != active_ca_id
         {
             return Err(EventApplicationError::NotFound(event_id));
         }
@@ -301,7 +303,7 @@ impl EventRepository for InMemoryEventRepository {
 
         if let Some(existing) = registrations_guard
             .iter()
-            .find(|item| item.event_id == event_id && item.participant_id == participant_id)
+            .find(|item| item.event_id() == event_id && item.participant_id() == participant_id)
             && existing.is_active()
         {
             return Err(EventApplicationError::AlreadyRegistered {
@@ -313,27 +315,27 @@ impl EventRepository for InMemoryEventRepository {
         let active_count = u32::try_from(
             registrations_guard
                 .iter()
-                .filter(|item| item.event_id == event_id && item.is_active())
+                .filter(|item| item.event_id() == event_id && item.is_active())
                 .count(),
         )
         .unwrap_or(u32::MAX);
-        event.registration.confirmed_registrations = active_count;
-
-        event.register_participant().map_err(|err| match err {
-            EventDomainError::CapacityExceeded { max_capacity, .. } => {
-                EventApplicationError::EventFull {
-                    event_id,
-                    max_capacity,
+        event
+            .register_participant(chrono::Utc::now(), active_count)
+            .map_err(|err| match err {
+                EventDomainError::CapacityExceeded { max_capacity, .. } => {
+                    EventApplicationError::EventFull {
+                        event_id,
+                        max_capacity,
+                    }
                 }
-            }
-            other => EventApplicationError::Domain(other),
-        })?;
+                other => EventApplicationError::Domain(other),
+            })?;
 
         if let Some(existing) = registrations_guard
             .iter_mut()
-            .find(|item| item.event_id == event_id && item.participant_id == participant_id)
+            .find(|item| item.event_id() == event_id && item.participant_id() == participant_id)
         {
-            existing.reactivate();
+            existing.reactivate_registered(chrono::Utc::now())?;
             Ok(existing.clone())
         } else {
             let registration = EventRegistration::new_confirmed(event_id, participant_id)?;
@@ -359,11 +361,11 @@ impl EventRepository for InMemoryEventRepository {
 
         let event = events_guard
             .iter_mut()
-            .find(|item| item.id == event_id)
+            .find(|item| item.id() == event_id)
             .ok_or(EventApplicationError::NotFound(event_id))?;
 
         if let Some(active_ca_id) = academic_center_id
-            && event.academic_center_id != active_ca_id
+            && event.academic_center_id() != active_ca_id
         {
             return Err(EventApplicationError::NotFound(event_id));
         }
@@ -372,8 +374,8 @@ impl EventRepository for InMemoryEventRepository {
             let existing = registrations_guard
                 .iter_mut()
                 .find(|item| {
-                    item.event_id == event_id
-                        && item.participant_id == participant_id
+                    item.event_id() == event_id
+                        && item.participant_id() == participant_id
                         && item.is_active()
                 })
                 .ok_or(EventApplicationError::ActiveRegistrationNotFound {
@@ -383,16 +385,6 @@ impl EventRepository for InMemoryEventRepository {
             existing.cancel();
             existing.clone()
         };
-
-        let active_count = u32::try_from(
-            registrations_guard
-                .iter()
-                .filter(|item| item.event_id == event_id && item.is_active())
-                .count(),
-        )
-        .unwrap_or(0);
-        event.registration.confirmed_registrations = active_count;
-        event.updated_at = chrono::Utc::now();
 
         Ok(cancelled)
     }
@@ -565,7 +557,7 @@ where
         if let Some(actor_id) = command.actor_id {
             let authorized = self
                 .authorizer
-                .can_manage_and_publish_directly(actor_id, event.academic_center_id)
+                .can_manage_and_publish_directly(actor_id, event.academic_center_id())
                 .await?;
             if !authorized {
                 return Err(EventApplicationError::PermissionDenied);
@@ -620,7 +612,7 @@ where
             .ok_or(EventApplicationError::PermissionDenied)?;
         let authorized = self
             .authorizer
-            .can_manage_and_publish_directly(actor_id, event.academic_center_id)
+            .can_manage_and_publish_directly(actor_id, event.academic_center_id())
             .await?;
         if !authorized {
             return Err(EventApplicationError::PermissionDenied);
@@ -646,7 +638,7 @@ where
             .ok_or(EventApplicationError::NotFound(query.event_id))?;
 
         if let Some(active_ca_id) = query.academic_center_id
-            && event.academic_center_id != active_ca_id
+            && event.academic_center_id() != active_ca_id
         {
             return Err(EventApplicationError::NotFound(query.event_id));
         }
@@ -686,7 +678,7 @@ where
         Ok(events
             .into_iter()
             .filter(|event| {
-                event.academic_center_id == query.academic_center_id
+                event.academic_center_id() == query.academic_center_id
                     && (!query.only_published || event.is_published())
             })
             .collect())
@@ -765,11 +757,6 @@ mod tests {
         let now = Utc::now();
         let starts_at = now + Duration::days(3);
         let ends_at = starts_at + Duration::hours(2);
-        let published_at = if status == EventPublicationStatus::Published {
-            Some(now)
-        } else {
-            None
-        };
         Event::new(
             Uuid::new_v4(),
             ca_id,
@@ -779,11 +766,10 @@ mod tests {
             "Auditório 2",
             starts_at,
             ends_at,
+            None,
             status,
+            1,
             EventRegistrationInfo::unrestricted(),
-            published_at,
-            now,
-            now,
         )
         .expect("evento de teste deve ser válido")
     }
@@ -808,6 +794,7 @@ mod tests {
         // Criação em rascunho por usuário autorizado deve funcionar.
         let draft = service
             .create_event(CreateEventCommand {
+                capacity: None,
                 academic_center_id: ca_id,
                 author_id: authorized_user,
                 title: "Oficina de Git".to_string(),
@@ -820,12 +807,12 @@ mod tests {
             })
             .await
             .expect("autorizado deve criar rascunho");
-        assert_eq!(draft.status, EventPublicationStatus::Draft);
+        assert_eq!(draft.status(), EventPublicationStatus::Draft);
 
         // Publicação direta por usuário sem permissão no CA deve ser negada.
         let denied = service
             .publish_event_directly(PublishEventCommand {
-                event_id: draft.id,
+                event_id: draft.id(),
                 academic_center_id: Some(ca_id),
                 actor_id: Some(unauthorized_user),
             })
@@ -838,14 +825,13 @@ mod tests {
         // Publicação direta pelo usuário autorizado deve publicar sem homologação.
         let published = service
             .publish_event_directly(PublishEventCommand {
-                event_id: draft.id,
+                event_id: draft.id(),
                 academic_center_id: Some(ca_id),
                 actor_id: Some(authorized_user),
             })
             .await
             .expect("autorizado deve publicar diretamente");
-        assert_eq!(published.status, EventPublicationStatus::Published);
-        assert!(published.published_at.is_some());
+        assert_eq!(published.status(), EventPublicationStatus::Published);
     }
 
     #[tokio::test]
@@ -873,7 +859,7 @@ mod tests {
             author_id,
             "Hackathon em análise",
             "Proposta aguardando homologação",
-            EventPublicationStatus::PendingApproval,
+            EventPublicationStatus::PendingReview,
         );
         let encontro_rascunho = make_event_with_status(
             ca_computacao,
@@ -912,7 +898,7 @@ mod tests {
             .await
             .expect("deve listar eventos publicados do CA de Computação");
 
-        let titles: Vec<&str> = events_computacao.iter().map(|e| e.title.as_str()).collect();
+        let titles: Vec<&str> = events_computacao.iter().map(|e| e.title()).collect();
         assert_eq!(titles, vec!["Semana Acadêmica", "Palestra de IA"]);
 
         // Alternar o CA ativo para CA de Matemática deve retornar apenas os eventos desse CA.
@@ -921,7 +907,7 @@ mod tests {
             .await
             .expect("deve listar eventos publicados do CA de Matemática");
 
-        let titles_mat: Vec<&str> = events_matematica.iter().map(|e| e.title.as_str()).collect();
+        let titles_mat: Vec<&str> = events_matematica.iter().map(|e| e.title()).collect();
         assert_eq!(titles_mat, vec!["Semana de Matemática"]);
     }
 
@@ -942,7 +928,7 @@ mod tests {
             author_id,
             "Hackathon em análise",
             "Aguardando homologação",
-            EventPublicationStatus::PendingApproval,
+            EventPublicationStatus::PendingReview,
         );
 
         let repo = Arc::new(InMemoryEventRepository::with_events([rascunho, pendente]));
@@ -974,7 +960,7 @@ mod tests {
             author_id,
             "Hackathon em análise",
             "Proposta não homologada",
-            EventPublicationStatus::PendingApproval,
+            EventPublicationStatus::PendingReview,
         );
         let rascunho = make_event_with_status(
             ca_computacao,
@@ -1002,32 +988,38 @@ mod tests {
         // Detalhes de evento publicado no CA ativo devem ser retornados.
         let detail = detail_use_case
             .execute(GetPublishedEventDetailQuery::for_academic_center(
-                publicado.id,
+                publicado.id(),
                 ca_computacao,
             ))
             .await
             .expect("deve retornar detalhes do evento publicado");
-        assert_eq!(detail.title, "Mudança de sala");
-        assert_eq!(detail.description, "A palestra acontecerá no auditório 2.");
+        assert_eq!(detail.title(), "Mudança de sala");
+        assert_eq!(
+            detail.description(),
+            "A palestra acontecerá no auditório 2."
+        );
 
         // Detalhes do mesmo evento quando o CA ativo é outro devem ser recusados (isolamento de CA).
         let wrong_ca = detail_use_case
             .execute(GetPublishedEventDetailQuery::for_academic_center(
-                publicado.id,
+                publicado.id(),
                 ca_matematica,
             ))
             .await;
-        assert_eq!(wrong_ca, Err(EventApplicationError::NotFound(publicado.id)));
+        assert_eq!(
+            wrong_ca,
+            Err(EventApplicationError::NotFound(publicado.id()))
+        );
 
         // Eventos não publicados não devem ter seus detalhes disponibilizados.
         for unpublished in [&pendente, &rascunho, &cancelado] {
             let res = detail_use_case
                 .execute(GetPublishedEventDetailQuery::for_academic_center(
-                    unpublished.id,
+                    unpublished.id(),
                     ca_computacao,
                 ))
                 .await;
-            assert_eq!(res, Err(EventApplicationError::NotFound(unpublished.id)));
+            assert_eq!(res, Err(EventApplicationError::NotFound(unpublished.id())));
         }
     }
 
@@ -1051,24 +1043,32 @@ mod tests {
         // 1. Inscrição em evento publicado é registrada como confirmada
         let registration = service
             .register_in_event(RegisterInEventCommand::for_academic_center(
-                palestra_ia.id,
+                palestra_ia.id(),
                 student,
                 ca_computacao,
             ))
             .await
             .expect("deve registrar inscrição em evento publicado");
-        assert_eq!(registration.event_id, palestra_ia.id);
-        assert_eq!(registration.participant_id, student);
+        assert_eq!(registration.event_id(), palestra_ia.id());
+        assert_eq!(registration.participant_id(), student);
         assert!(registration.is_active());
-        assert!(registration.cancelled_at.is_none());
+        assert!(registration.cancelled_at().is_none());
 
-        let updated_event = repo.find_by_id(palestra_ia.id).await.unwrap().unwrap();
-        assert_eq!(updated_event.registration.confirmed_registrations, 1);
+        let updated_event = repo.find_by_id(palestra_ia.id()).await.unwrap().unwrap();
+        assert_eq!(
+            repo.list_registrations_by_event(updated_event.id())
+                .await
+                .unwrap()
+                .iter()
+                .filter(|r| r.is_active())
+                .count() as u32,
+            1
+        );
 
         // 2. Tentativa de inscrição duplicada no mesmo evento é recusada mantendo inscrição única
         let duplicate = service
             .register_in_event(RegisterInEventCommand::for_academic_center(
-                palestra_ia.id,
+                palestra_ia.id(),
                 student,
                 ca_computacao,
             ))
@@ -1076,12 +1076,12 @@ mod tests {
         assert_eq!(
             duplicate,
             Err(EventApplicationError::AlreadyRegistered {
-                event_id: palestra_ia.id,
+                event_id: palestra_ia.id(),
                 participant_id: student,
             })
         );
         let registrations = repo
-            .list_registrations_by_event(palestra_ia.id)
+            .list_registrations_by_event(palestra_ia.id())
             .await
             .unwrap();
         assert_eq!(registrations.len(), 1);
@@ -1089,22 +1089,30 @@ mod tests {
         // 3. Cancelamento da inscrição ativa pelo próprio estudante desativa a inscrição
         let cancelled = service
             .cancel_registration(CancelEventRegistrationCommand::for_academic_center(
-                palestra_ia.id,
+                palestra_ia.id(),
                 student,
                 ca_computacao,
             ))
             .await
             .expect("deve cancelar inscrição ativa");
         assert!(!cancelled.is_active());
-        assert!(cancelled.cancelled_at.is_some());
+        assert!(cancelled.cancelled_at().is_some());
 
-        let event_after_cancel = repo.find_by_id(palestra_ia.id).await.unwrap().unwrap();
-        assert_eq!(event_after_cancel.registration.confirmed_registrations, 0);
+        let event_after_cancel = repo.find_by_id(palestra_ia.id()).await.unwrap().unwrap();
+        assert_eq!(
+            repo.list_registrations_by_event(event_after_cancel.id())
+                .await
+                .unwrap()
+                .iter()
+                .filter(|r| r.is_active())
+                .count() as u32,
+            0
+        );
 
         // 4. Tentativa de cancelar novamente sem inscrição ativa é informada com erro semântico
         let second_cancel = service
             .cancel_registration(CancelEventRegistrationCommand::for_academic_center(
-                palestra_ia.id,
+                palestra_ia.id(),
                 student,
                 ca_computacao,
             ))
@@ -1112,7 +1120,7 @@ mod tests {
         assert_eq!(
             second_cancel,
             Err(EventApplicationError::ActiveRegistrationNotFound {
-                event_id: palestra_ia.id,
+                event_id: palestra_ia.id(),
                 participant_id: student,
             })
         );
@@ -1138,7 +1146,7 @@ mod tests {
             author,
             "Hackathon em análise",
             "Proposta aguardando homologação",
-            EventPublicationStatus::PendingApproval,
+            EventPublicationStatus::PendingReview,
         );
         let rascunho_cc = make_event_with_status(
             ca_computacao,
@@ -1159,7 +1167,7 @@ mod tests {
         for unpublished in [&pendente_cc, &rascunho_cc] {
             let res = service
                 .register_in_event(RegisterInEventCommand::for_academic_center(
-                    unpublished.id,
+                    unpublished.id(),
                     student,
                     ca_computacao,
                 ))
@@ -1167,11 +1175,11 @@ mod tests {
             assert_eq!(
                 res,
                 Err(EventApplicationError::EventNotAvailableForRegistration(
-                    unpublished.id
+                    unpublished.id()
                 ))
             );
             assert!(
-                repo.find_registration(unpublished.id, student)
+                repo.find_registration(unpublished.id(), student)
                     .await
                     .unwrap()
                     .is_none()
@@ -1181,20 +1189,20 @@ mod tests {
         // 2. Não permite inscrição quando o evento pertence a outro CA
         let wrong_ca = service
             .register_in_event(RegisterInEventCommand::for_academic_center(
-                publicado_cc.id,
+                publicado_cc.id(),
                 student,
                 ca_fisica,
             ))
             .await;
         assert_eq!(
             wrong_ca,
-            Err(EventApplicationError::NotFound(publicado_cc.id))
+            Err(EventApplicationError::NotFound(publicado_cc.id()))
         );
 
         // 3. Informa tentativa de cancelar quando o estudante nunca se inscreveu no evento
         let cancel_without_registration = service
             .cancel_registration(CancelEventRegistrationCommand::for_academic_center(
-                publicado_cc.id,
+                publicado_cc.id(),
                 student,
                 ca_computacao,
             ))
@@ -1202,7 +1210,7 @@ mod tests {
         assert_eq!(
             cancel_without_registration,
             Err(EventApplicationError::ActiveRegistrationNotFound {
-                event_id: publicado_cc.id,
+                event_id: publicado_cc.id(),
                 participant_id: student,
             })
         );
@@ -1221,6 +1229,7 @@ mod tests {
         // 1. Criação com limite de 3 vagas persiste max_capacity = Some(3)
         let event_with_limit = service
             .create_event(CreateEventCommand {
+                capacity: Some(3),
                 academic_center_id: ca_computacao,
                 author_id: author,
                 title: "Palestra de IA".to_string(),
@@ -1229,15 +1238,16 @@ mod tests {
                 starts_at,
                 ends_at,
                 publish_directly: true,
-                registration: EventRegistrationInfo::with_signed_capacity(3).unwrap(),
+                registration: EventRegistrationInfo::unrestricted(),
             })
             .await
             .expect("deve criar evento com limite de 3 vagas");
-        assert_eq!(event_with_limit.registration.max_capacity, Some(3));
+        assert_eq!(event_with_limit.capacity(), Some(3));
 
         // 2. Criação com limite inválido (0) no comando é rejeitada pelo domínio
         let invalid_create = service
             .create_event(CreateEventCommand {
+                capacity: Some(0),
                 academic_center_id: ca_computacao,
                 author_id: author,
                 title: "Evento Inválido".to_string(),
@@ -1246,12 +1256,7 @@ mod tests {
                 starts_at,
                 ends_at,
                 publish_directly: false,
-                registration: EventRegistrationInfo {
-                    requires_registration: true,
-                    max_capacity: Some(0),
-                    confirmed_registrations: 0,
-                    registration_deadline: None,
-                },
+                registration: EventRegistrationInfo::unrestricted(),
             })
             .await;
         assert_eq!(
@@ -1264,7 +1269,8 @@ mod tests {
         // 3. Edição para remover o limite (None) atualiza max_capacity para None
         let unlimited = service
             .update_event(UpdateEventCommand {
-                event_id: event_with_limit.id,
+                capacity: Some(None),
+                event_id: event_with_limit.id(),
                 academic_center_id: Some(ca_computacao),
                 actor_id: Some(author),
                 title: "Palestra de IA".to_string(),
@@ -1276,12 +1282,13 @@ mod tests {
             })
             .await
             .expect("deve permitir remover o limite de vagas");
-        assert_eq!(unlimited.registration.max_capacity, None);
+        assert_eq!(unlimited.capacity(), None);
 
         // 4. Edição com limite inválido (0) é rejeitada mantendo o evento intacto
         let invalid_update = service
             .update_event(UpdateEventCommand {
-                event_id: event_with_limit.id,
+                capacity: Some(Some(0)),
+                event_id: event_with_limit.id(),
                 academic_center_id: Some(ca_computacao),
                 actor_id: Some(author),
                 title: "Palestra de IA".to_string(),
@@ -1289,12 +1296,7 @@ mod tests {
                 location: "Auditório 1".to_string(),
                 starts_at,
                 ends_at,
-                registration: Some(EventRegistrationInfo {
-                    requires_registration: true,
-                    max_capacity: Some(0),
-                    confirmed_registrations: 0,
-                    registration_deadline: None,
-                }),
+                registration: Some(EventRegistrationInfo::unrestricted()),
             })
             .await;
         assert_eq!(
@@ -1320,7 +1322,8 @@ mod tests {
             "Auditório 1",
             starts_at,
             ends_at,
-            EventRegistrationInfo::with_capacity(2).unwrap(),
+            Some(2),
+            EventRegistrationInfo::unrestricted(),
         )
         .unwrap();
 
@@ -1332,6 +1335,7 @@ mod tests {
             "Anfiteatro",
             starts_at,
             ends_at,
+            None,
             EventRegistrationInfo::unrestricted(),
         )
         .unwrap();
@@ -1349,7 +1353,7 @@ mod tests {
         // 1. Primeiros 2 participantes ocupam as 2 vagas disponíveis
         service
             .register_in_event(RegisterInEventCommand::for_academic_center(
-                limited_event.id,
+                limited_event.id(),
                 student_1,
                 ca_computacao,
             ))
@@ -1359,7 +1363,7 @@ mod tests {
         // Repetir inscrição para o mesmo participante antes de lotar não consome a segunda vaga
         let repeat_before_full = service
             .register_in_event(RegisterInEventCommand::for_academic_center(
-                limited_event.id,
+                limited_event.id(),
                 student_1,
                 ca_computacao,
             ))
@@ -1367,29 +1371,56 @@ mod tests {
         assert_eq!(
             repeat_before_full,
             Err(EventApplicationError::AlreadyRegistered {
-                event_id: limited_event.id,
+                event_id: limited_event.id(),
                 participant_id: student_1,
             })
         );
 
         service
             .register_in_event(RegisterInEventCommand::for_academic_center(
-                limited_event.id,
+                limited_event.id(),
                 student_2,
                 ca_computacao,
             ))
             .await
             .expect("deve inscrever segundo participante na última vaga");
 
-        let event_full_state = repo.find_by_id(limited_event.id).await.unwrap().unwrap();
-        assert_eq!(event_full_state.registration.confirmed_registrations, 2);
-        assert_eq!(event_full_state.registration.remaining_spots(), Some(0));
-        assert!(!event_full_state.registration.has_available_spots());
+        let event_full_state = repo.find_by_id(limited_event.id()).await.unwrap().unwrap();
+        assert_eq!(
+            repo.list_registrations_by_event(event_full_state.id())
+                .await
+                .unwrap()
+                .iter()
+                .filter(|r| r.is_active())
+                .count() as u32,
+            2
+        );
+        assert_eq!(
+            event_full_state.remaining_spots(
+                repo.list_registrations_by_event(event_full_state.id())
+                    .await
+                    .unwrap()
+                    .iter()
+                    .filter(|r| r.is_active())
+                    .count() as u32
+            ),
+            Some(0)
+        );
+        assert!(
+            !event_full_state.has_available_spots(
+                repo.list_registrations_by_event(event_full_state.id())
+                    .await
+                    .unwrap()
+                    .iter()
+                    .filter(|r| r.is_active())
+                    .count() as u32
+            )
+        );
 
         // 2. Quando todas as vagas estão ocupadas, nova inscrição direta é recusada com EventFull
         let rejected_full = service
             .register_in_event(RegisterInEventCommand::for_academic_center(
-                limited_event.id,
+                limited_event.id(),
                 student_3,
                 ca_computacao,
             ))
@@ -1397,7 +1428,7 @@ mod tests {
         assert_eq!(
             rejected_full,
             Err(EventApplicationError::EventFull {
-                event_id: limited_event.id,
+                event_id: limited_event.id(),
                 max_capacity: 2,
             })
         );
@@ -1405,7 +1436,7 @@ mod tests {
         // Repetir inscrição de quem já está inscrito mesmo com evento lotado retorna AlreadyRegistered
         let repeat_when_full = service
             .register_in_event(RegisterInEventCommand::for_academic_center(
-                limited_event.id,
+                limited_event.id(),
                 student_1,
                 ca_computacao,
             ))
@@ -1413,7 +1444,7 @@ mod tests {
         assert_eq!(
             repeat_when_full,
             Err(EventApplicationError::AlreadyRegistered {
-                event_id: limited_event.id,
+                event_id: limited_event.id(),
                 participant_id: student_1,
             })
         );
@@ -1421,43 +1452,81 @@ mod tests {
         // 3. Cancelamento de student_1 libera 1 vaga e permite que student_3 se inscreva
         service
             .cancel_registration(CancelEventRegistrationCommand::for_academic_center(
-                limited_event.id,
+                limited_event.id(),
                 student_1,
                 ca_computacao,
             ))
             .await
             .expect("deve cancelar inscrição de student_1 e liberar uma vaga");
 
-        let after_cancel = repo.find_by_id(limited_event.id).await.unwrap().unwrap();
-        assert_eq!(after_cancel.registration.confirmed_registrations, 1);
-        assert_eq!(after_cancel.registration.remaining_spots(), Some(1));
+        let after_cancel = repo.find_by_id(limited_event.id()).await.unwrap().unwrap();
+        assert_eq!(
+            repo.list_registrations_by_event(after_cancel.id())
+                .await
+                .unwrap()
+                .iter()
+                .filter(|r| r.is_active())
+                .count() as u32,
+            1
+        );
+        assert_eq!(
+            after_cancel.remaining_spots(
+                repo.list_registrations_by_event(after_cancel.id())
+                    .await
+                    .unwrap()
+                    .iter()
+                    .filter(|r| r.is_active())
+                    .count() as u32
+            ),
+            Some(1)
+        );
 
         service
             .register_in_event(RegisterInEventCommand::for_academic_center(
-                limited_event.id,
+                limited_event.id(),
                 student_3,
                 ca_computacao,
             ))
             .await
             .expect("deve permitir inscrição de student_3 na vaga liberada");
 
-        let after_reoccupy = repo.find_by_id(limited_event.id).await.unwrap().unwrap();
-        assert_eq!(after_reoccupy.registration.confirmed_registrations, 2);
+        let after_reoccupy = repo.find_by_id(limited_event.id()).await.unwrap().unwrap();
+        assert_eq!(
+            repo.list_registrations_by_event(after_reoccupy.id())
+                .await
+                .unwrap()
+                .iter()
+                .filter(|r| r.is_active())
+                .count() as u32,
+            2
+        );
 
         // 4. Evento sem limite de vagas (max_capacity = None) aceita todos sem restrição artificial
         for _ in 0..10 {
             service
                 .register_in_event(RegisterInEventCommand::for_academic_center(
-                    unlimited_event.id,
+                    unlimited_event.id(),
                     Uuid::new_v4(),
                     ca_computacao,
                 ))
                 .await
                 .expect("evento sem limite não deve recusar por capacidade");
         }
-        let unlimited_after = repo.find_by_id(unlimited_event.id).await.unwrap().unwrap();
-        assert_eq!(unlimited_after.registration.confirmed_registrations, 10);
-        assert_eq!(unlimited_after.registration.max_capacity, None);
+        let unlimited_after = repo
+            .find_by_id(unlimited_event.id())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            repo.list_registrations_by_event(unlimited_after.id())
+                .await
+                .unwrap()
+                .iter()
+                .filter(|r| r.is_active())
+                .count() as u32,
+            10
+        );
+        assert_eq!(unlimited_after.capacity(), None);
     }
 
     #[tokio::test]
@@ -1476,7 +1545,8 @@ mod tests {
             "Auditório 1",
             starts_at,
             ends_at,
-            EventRegistrationInfo::with_capacity(3).unwrap(),
+            Some(3),
+            EventRegistrationInfo::unrestricted(),
         )
         .unwrap();
 
@@ -1486,7 +1556,7 @@ mod tests {
         for _ in 0..2 {
             service
                 .register_in_event(RegisterInEventCommand::for_academic_center(
-                    event.id,
+                    event.id(),
                     Uuid::new_v4(),
                     ca_computacao,
                 ))
@@ -1501,7 +1571,7 @@ mod tests {
         for _ in 0..10 {
             let svc = service.clone();
             let bar = barrier.clone();
-            let event_id = event.id;
+            let event_id = event.id();
             handles.push(tokio::spawn(async move {
                 let candidate = Uuid::new_v4();
                 bar.wait().await;
@@ -1527,7 +1597,7 @@ mod tests {
                     event_id,
                     max_capacity,
                 }) => {
-                    assert_eq!(event_id, event.id);
+                    assert_eq!(event_id, event.id());
                     assert_eq!(max_capacity, 3);
                     full_errors += 1;
                 }
@@ -1539,11 +1609,19 @@ mod tests {
         assert_eq!(successes, 1);
         assert_eq!(full_errors, 9);
 
-        let updated_event = repo.find_by_id(event.id).await.unwrap().unwrap();
-        assert_eq!(updated_event.registration.confirmed_registrations, 3);
+        let updated_event = repo.find_by_id(event.id()).await.unwrap().unwrap();
+        assert_eq!(
+            repo.list_registrations_by_event(updated_event.id())
+                .await
+                .unwrap()
+                .iter()
+                .filter(|r| r.is_active())
+                .count() as u32,
+            3
+        );
 
         let active_registrations = repo
-            .list_registrations_by_event(event.id)
+            .list_registrations_by_event(event.id())
             .await
             .unwrap()
             .into_iter()

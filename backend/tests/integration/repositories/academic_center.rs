@@ -4,17 +4,17 @@
 //! opcionalidade da sigla (NULL), ausência de unicidade global e check constraints.
 
 use crate::support::TestDatabase;
+use backend::infrastructure::database::PgDatabase;
+use backend::modules::ca::application::ports::PollRepository;
 use backend::modules::ca::domain::entities::AcademicCenter;
 use backend::modules::ca::domain::entities::AcademicCenterStatus;
+use backend::modules::ca::domain::entities::PollStatus;
+use backend::modules::ca::domain::entities::PollVote;
+use backend::modules::ca::domain::entities::StudentPoll;
 use chrono::Utc;
 use sqlx::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
-use backend::infrastructure::database::PgDatabase;
-use backend::modules::ca::application::ports::PollRepository;
-use backend::modules::ca::domain::entities::PollStatus;
-use backend::modules::ca::domain::entities::PollVote;
-use backend::modules::ca::domain::entities::StudentPoll;
 /// Cria uma instituição no banco descartável para viabilizar o vínculo de chave estrangeira.
 async fn create_test_institution(pool: &PgPool, name: &str) -> Uuid {
     let id = Uuid::new_v4();
@@ -394,11 +394,12 @@ async fn should_persist_and_retrieve_mandate_with_pg_database() {
         .expect("valid mandate");
 
     // Salva via trait MandateRepository
-    pg_db.save(&mandate).await.expect("should save mandate");
+    MandateRepository::save(&pg_db, &mandate)
+        .await
+        .expect("should save mandate");
 
     // Recupera por ID
-    let found = pg_db
-        .find_by_id(mandate.id())
+    let found = MandateRepository::find_by_id(&pg_db, mandate.id())
         .await
         .expect("should query by id")
         .expect("mandate should be found");
@@ -511,7 +512,7 @@ async fn should_enforce_mandate_database_constraints() {
         NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
     )
     .unwrap();
-    pg_db.save(&m1).await.unwrap();
+    MandateRepository::save(&pg_db, &m1).await.unwrap();
 
     let m2 = Mandate::new(
         ca_id,
@@ -522,7 +523,7 @@ async fn should_enforce_mandate_database_constraints() {
     )
     .unwrap();
 
-    let conflict_err = pg_db.save(&m2).await.unwrap_err();
+    let conflict_err = MandateRepository::save(&pg_db, &m2).await.unwrap_err();
     assert!(matches!(conflict_err, MandateRepositoryError::Conflict(_)));
 
     db.close().await;
@@ -575,13 +576,17 @@ async fn should_preserve_concluded_mandates_and_members_history() {
     m1.add_member(member_1.clone());
     m1.add_member(member_2.clone());
 
-    repo.save(&m1).await.expect("salva m1 com membros");
+    MandateRepository::save(&repo, &m1)
+        .await
+        .expect("salva m1 com membros");
 
     // 2. Conclui m1 e desliga um membro antes
     m1.disaffiliate_member(member_2.id(), m1.created_at() + Duration::days(180))
         .unwrap();
     m1.conclude(m1.created_at() + Duration::days(365)).unwrap();
-    repo.save(&m1).await.expect("atualiza m1 concluído");
+    MandateRepository::save(&repo, &m1)
+        .await
+        .expect("atualiza m1 concluído");
 
     // 3. Cria segundo mandato com novo membro
     let mut m2 = Mandate::new(
@@ -594,7 +599,7 @@ async fn should_preserve_concluded_mandates_and_members_history() {
     .unwrap();
     let member_3 = MandateMember::new("Presidente 2026", "Presidente", Some(user_id)).unwrap();
     m2.add_member(member_3);
-    repo.save(&m2).await.expect("salva m2");
+    MandateRepository::save(&repo, &m2).await.expect("salva m2");
 
     // 4. Consulta histórico completo (find_all_by_academic_center_id)
     let all = repo.find_all_by_academic_center_id(ca_id).await.unwrap();
@@ -633,8 +638,7 @@ async fn should_preserve_concluded_mandates_and_members_history() {
     assert_eq!(active.id(), m2.id());
 
     // 6. find_by_id recupera mandate com membros
-    let by_id = repo
-        .find_by_id(m1.id())
+    let by_id = MandateRepository::find_by_id(&repo, m1.id())
         .await
         .unwrap()
         .expect("encontra m1 por id");

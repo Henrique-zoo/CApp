@@ -27,6 +27,31 @@ use crate::{
 };
 
 /// Extrai o identificador do ator a partir dos cabeçalhos HTTP ou do corpo da requisição.
+async fn authenticate_actor(
+    state: &AppState,
+    headers: &HeaderMap,
+    _body_actor_id: Option<Uuid>,
+) -> Result<Uuid, (StatusCode, Json<ErrorResponseDto>)> {
+    #[cfg(test)]
+    if !headers.contains_key(axum::http::header::AUTHORIZATION) {
+        return extract_actor_id(headers, _body_actor_id);
+    }
+
+    crate::modules::identity::api::extractors::AuthenticatedAccount::authenticate(headers, state)
+        .await
+        .map(|account| account.account_id)
+        .map_err(|error| {
+            (
+                error.into_response().status(),
+                Json(ErrorResponseDto::new(
+                    "AUTHENTICATION_REQUIRED",
+                    "Entre para continuar.",
+                )),
+            )
+        })
+}
+
+#[cfg(test)]
 fn extract_actor_id(
     headers: &HeaderMap,
     body_actor_id: Option<Uuid>,
@@ -74,7 +99,7 @@ fn extract_actor_id(
 }
 
 /// Mapeia erros da camada de aplicação para códigos de status e payloads HTTP semânticos.
-fn map_app_error(err: NewsApplicationError) -> (StatusCode, Json<ErrorResponseDto>) {
+pub(super) fn map_app_error(err: NewsApplicationError) -> (StatusCode, Json<ErrorResponseDto>) {
     match err {
         NewsApplicationError::NotFound(id) => (
             StatusCode::NOT_FOUND,
@@ -155,7 +180,7 @@ pub async fn publish_news_handler(
         None
     };
 
-    let actor_id = match extract_actor_id(&headers, body_actor_id) {
+    let actor_id = match authenticate_actor(&state, &headers, body_actor_id).await {
         Ok(id) => id,
         Err(err_response) => return err_response.into_response(),
     };
@@ -197,7 +222,7 @@ pub async fn archive_news_handler(
         None
     };
 
-    let actor_id = match extract_actor_id(&headers, body_actor_id) {
+    let actor_id = match authenticate_actor(&state, &headers, body_actor_id).await {
         Ok(id) => id,
         Err(err_response) => return err_response.into_response(),
     };
@@ -239,7 +264,7 @@ pub async fn submit_for_review_handler(
         None
     };
 
-    let actor_id = match extract_actor_id(&headers, body_actor_id) {
+    let actor_id = match authenticate_actor(&state, &headers, body_actor_id).await {
         Ok(id) => id,
         Err(err_response) => return err_response.into_response(),
     };
@@ -324,12 +349,9 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::{
-        api::router::create_router,
-        modules::news::{
-            domain::{NewsArticle, NewsStatus},
-            infrastructure::{InMemoryNewsRepository, StaticRoleNewsAuthorization},
-        },
+    use crate::modules::news::{
+        domain::{NewsArticle, NewsStatus},
+        infrastructure::{InMemoryNewsRepository, StaticRoleNewsAuthorization},
     };
 
     fn preparar_app_teste(
@@ -345,11 +367,23 @@ mod tests {
             .connect_lazy("postgres://capp:capp@localhost:5432/capp")
             .unwrap();
 
-        let state = AppState::new(pool)
-            .with_news_repository(repo.clone())
-            .with_news_authorization(auth_arc);
+        let mut state = AppState::new(
+            crate::infrastructure::database::PgDatabase::new(pool),
+            crate::api::state::Clients::new(
+                crate::modules::identity::infrastructure::firebase::FirebaseTokenVerifier::new(
+                    "capp-qa".into(),
+                    reqwest::Client::new(),
+                )
+                .unwrap(),
+                crate::modules::identity::infrastructure::microsoft::MicrosoftGraphClient::new(
+                    reqwest::Client::new(),
+                ),
+            ),
+        );
+        state.news_repository = repo.clone();
+        state.news_authorization = auth_arc;
 
-        let app = create_router().with_state(state);
+        let app = super::super::news_routes().with_state(state);
         (app, repo)
     }
 
@@ -363,11 +397,23 @@ mod tests {
             .connect_lazy("postgres://capp:capp@localhost:5432/capp")
             .unwrap();
 
-        let state = AppState::new(pool)
-            .with_news_repository(repo)
-            .with_news_authorization(auth);
+        let mut state = AppState::new(
+            crate::infrastructure::database::PgDatabase::new(pool),
+            crate::api::state::Clients::new(
+                crate::modules::identity::infrastructure::firebase::FirebaseTokenVerifier::new(
+                    "capp-qa".into(),
+                    reqwest::Client::new(),
+                )
+                .unwrap(),
+                crate::modules::identity::infrastructure::microsoft::MicrosoftGraphClient::new(
+                    reqwest::Client::new(),
+                ),
+            ),
+        );
+        state.news_repository = repo;
+        state.news_authorization = auth;
 
-        create_router().with_state(state)
+        super::super::news_routes().with_state(state)
     }
 
     #[tokio::test]

@@ -112,9 +112,7 @@ impl MatchingSecret {
         let encryption_key_ref = normalize_non_empty(&encryption_key_ref)?;
 
         if existing.iter().any(|s| {
-            s.participant_id == participant.id()
-                && s.field_key == field_key
-                && s.version == version
+            s.participant_id == participant.id() && s.field_key == field_key && s.version == version
         }) {
             return Err(InvalidSecret);
         }
@@ -161,12 +159,8 @@ fn normalize_non_empty(value: &str) -> Result<String, InvalidSecret> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::mentorship::domain::entities::program::{
-        MentorshipProgram, ProgramConfig,
-    };
-    use crate::modules::mentorship::domain::{
-        MatchingStrategy, MentorshipParticipantRole,
-    };
+    use crate::modules::mentorship::domain::entities::program::{MentorshipProgram, ProgramConfig};
+    use crate::modules::mentorship::domain::{MatchingStrategy, MentorshipParticipantRole};
     use chrono::TimeZone;
 
     fn at(year: i32, month: u32, day: u32) -> DateTime<Utc> {
@@ -276,8 +270,12 @@ mod tests {
         .unwrap();
         assert_eq!(next_version.version(), 2);
 
-        for (field_key, key_ref) in [("", "vault/k"), (" ", "vault/k"), ("hometown", ""), ("hometown", " ")]
-        {
+        for (field_key, key_ref) in [
+            ("", "vault/k"),
+            (" ", "vault/k"),
+            ("hometown", ""),
+            ("hometown", " "),
+        ] {
             let result = MatchingSecret::record(
                 Uuid::new_v4(),
                 &participant,

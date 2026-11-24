@@ -22,11 +22,7 @@
 //! conexão de três segundos, timeout total de dez segundos e redirecionamentos
 //! desabilitados. A construção desses adaptadores não executa I/O.
 
-use std::{
-    env,
-    net::TcpListener,
-    sync::Arc,
-};
+use std::{env, net::TcpListener, sync::Arc};
 
 use anyhow::{Context, ensure};
 use backend::{
@@ -107,10 +103,12 @@ async fn main() -> anyhow::Result<()> {
     let pool = PgPoolOptions::new()
         .connect(database_url)
         .await
-        .map_err(|error| anyhow::anyhow!(
-            "Não foi possível conectar ao PostgreSQL: {}",
-            backend::config::sanitize_connection_error(&error)
-        ))?;
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "Não foi possível conectar ao PostgreSQL: {}",
+                backend::config::sanitize_connection_error(&error)
+            )
+        })?;
 
     let (tls_config, tls_public_key) = tls::load_from_env()?;
     let election_signer = load_election_signer(&tls_public_key).await?;
@@ -124,10 +122,7 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Migrations do banco de dados atualizadas");
 
-    let state = AppState::new(
-        PgDatabase::new(pool),
-        Clients::new(firebase, microsoft),
-    );
+    let state = AppState::new(PgDatabase::new(pool), Clients::new(firebase, microsoft));
 
     let listener = TcpListener::bind(https_address)
         .with_context(|| format!("Não foi possível abrir o socket HTTPS em {https_address}"))?;
@@ -155,8 +150,9 @@ async fn main() -> anyhow::Result<()> {
         shutdown_state.mark_shutting_down();
         shutdown_handle.graceful_shutdown(Some(timeout));
     });
-    let pg_pool = state.pg_database.pool.clone();
-    let result = server.handle(handle)
+    let pg_pool = state.pg_database.pool().clone();
+    let result = server
+        .handle(handle)
         .serve(api::router::create_router(state, app_check).into_make_service())
         .await;
 

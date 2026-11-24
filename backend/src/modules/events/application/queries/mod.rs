@@ -113,7 +113,7 @@ where
         Ok(events
             .into_iter()
             .filter(|event| {
-                event.academic_center_id == query.academic_center_id && event.is_published()
+                event.academic_center_id() == query.academic_center_id && event.is_published()
             })
             .collect())
     }
@@ -162,7 +162,7 @@ where
         }
 
         if let Some(active_ca_id) = query.academic_center_id
-            && event.academic_center_id != active_ca_id
+            && event.academic_center_id() != active_ca_id
         {
             return Err(EventApplicationError::NotFound(query.event_id));
         }

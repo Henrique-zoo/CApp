@@ -191,10 +191,7 @@ impl MatchingRun {
     }
 }
 
-fn validate_model_id(
-    strategy: MatchingStrategy,
-    model_id: Option<Uuid>,
-) -> Result<(), InvalidRun> {
+fn validate_model_id(strategy: MatchingStrategy, model_id: Option<Uuid>) -> Result<(), InvalidRun> {
     match (strategy, model_id) {
         (MatchingStrategy::Neural, Some(_)) => Ok(()),
         (MatchingStrategy::Neural, None) => Err(InvalidRun),
@@ -403,7 +400,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(run.configuration_snapshot(), &snapshot);
-        assert!(run.configuration_snapshot().get("encrypted_value").is_none());
+        assert!(
+            run.configuration_snapshot()
+                .get("encrypted_value")
+                .is_none()
+        );
         assert!(run.configuration_snapshot().get("secrets").is_none());
     }
 

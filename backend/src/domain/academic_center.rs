@@ -1,6 +1,6 @@
 //! Reexportação dos tipos e contratos da entidade de domínio Centro Acadêmico.
 
-pub use crate::modules::ca::domain::entities::academic_center::*;
+pub use crate::modules::ca::domain::entities::context_center::*;
 
 #[cfg(test)]
 mod tests {

@@ -3,30 +3,30 @@
 //! Contém as implementações concreta ([`PostgresDemandRepository`]) e em memória
 //! ([`InMemoryDemandRepository`] e [`InMemoryAcademicAffiliationPort`]).
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::RwLock;
-use chrono::DateTime;
-use chrono::Utc;
-use sqlx::PgPool;
-use sqlx::Row;
-use uuid::Uuid;
 use crate::modules::demands::application::error::AffiliationError;
 use crate::modules::demands::application::error::DemandRepositoryError;
 use crate::modules::demands::application::ports::AcademicAffiliation;
 use crate::modules::demands::application::ports::AcademicAffiliationPort;
 use crate::modules::demands::application::ports::DemandCommentRepository;
 use crate::modules::demands::application::ports::DemandFilter;
+use crate::modules::demands::application::ports::DemandNotificationRepository;
 use crate::modules::demands::application::ports::DemandRepository;
 use crate::modules::demands::domain::entities::Demand;
 use crate::modules::demands::domain::entities::DemandComment;
 use crate::modules::demands::domain::entities::DemandCommentAuthorRole;
 use crate::modules::demands::domain::entities::DemandForum;
-use crate::modules::demands::domain::entities::DemandStatus;
-use crate::modules::demands::domain::entities::DemandStatusHistoryEntry;
-use crate::modules::demands::application::ports::DemandNotificationRepository;
 use crate::modules::demands::domain::entities::DemandNotification;
 use crate::modules::demands::domain::entities::DemandNotificationEventType;
+use crate::modules::demands::domain::entities::DemandStatus;
+use crate::modules::demands::domain::entities::DemandStatusHistoryEntry;
+use chrono::DateTime;
+use chrono::Utc;
+use sqlx::PgPool;
+use sqlx::Row;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::RwLock;
+use uuid::Uuid;
 /// Estrutura de linha dedicada para mapeamento relacional da tabela `demand`.
 #[derive(Debug, sqlx::FromRow)]
 struct DemandRow {

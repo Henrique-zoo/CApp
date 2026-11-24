@@ -12,8 +12,8 @@ use crate::modules::{
     ca::{
         domain::{
             entities::{
-                context_center::CAER_DIDACTIC_ID,
                 active_context::{ActiveCaContext, ActiveContextError, ManagementRoleAssignment},
+                context_center::CAER_DIDACTIC_ID,
             },
             rules::{
                 assert_favorite_preference_unaltered_by_context_switch,
@@ -22,13 +22,13 @@ use crate::modules::{
             },
         },
         infrastructure::active_context_repository::{
-            ContextCenterRepository, ActiveContextSessionStore, InMemoryContextCenterRepository,
-            InMemoryActiveContextSessionStore,
+            ActiveContextSessionStore, ContextCenterRepository, InMemoryActiveContextSessionStore,
+            InMemoryContextCenterRepository,
         },
     },
     identity::{
         domain::entities::user_preference::UserPreference,
-        infrastructure::active_context_repository::{InMemoryUserPreferenceRepository, UserPreferenceRepository},
+        infrastructure::repository::{InMemoryUserPreferenceRepository, UserPreferenceRepository},
     },
 };
 
@@ -37,7 +37,7 @@ use crate::modules::{
 pub struct ActiveContextService {
     session_store: Arc<dyn ActiveContextSessionStore>,
     preference_repo: Arc<dyn UserPreferenceRepository>,
-    ca_repo: Arc<dyn AcademicCenterRepository>,
+    ca_repo: Arc<dyn ContextCenterRepository>,
     role_assignments: Arc<RwLock<Vec<ManagementRoleAssignment>>>,
 }
 
@@ -46,7 +46,7 @@ impl ActiveContextService {
     pub fn new(
         session_store: Arc<dyn ActiveContextSessionStore>,
         preference_repo: Arc<dyn UserPreferenceRepository>,
-        ca_repo: Arc<dyn AcademicCenterRepository>,
+        ca_repo: Arc<dyn ContextCenterRepository>,
     ) -> Self {
         Self {
             session_store,

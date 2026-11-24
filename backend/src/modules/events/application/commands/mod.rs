@@ -1,13 +1,13 @@
 //! Comandos da camada de aplicação para criação, edição e publicação de eventos.
 
-use chrono::DateTime;
-use chrono::Utc;
-use uuid::Uuid;
-use crate::modules::events::domain::EventRegistrationPolicy;
-use std::sync::Arc;
 use super::services::EventApplicationError;
 use super::services::EventRepository;
 use crate::modules::events::domain::EventRegistration;
+use crate::modules::events::domain::EventRegistrationPolicy;
+use chrono::DateTime;
+use chrono::Utc;
+use std::sync::Arc;
+use uuid::Uuid;
 /// Comando para criar um novo evento (em rascunho ou publicado diretamente) em um Centro Acadêmico.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateEventCommand {

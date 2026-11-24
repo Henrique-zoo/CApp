@@ -1,16 +1,16 @@
 //! Contratos HTTP (DTOs) de entrada e saída para os endpoints de eventos.
 
+use crate::modules::events::domain::Event;
+use crate::modules::events::domain::EventDomainError;
+use crate::modules::events::domain::EventPublicationStatus;
+use crate::modules::events::domain::EventRegistration;
+use crate::modules::events::domain::EventRegistrationPolicy;
+use crate::modules::events::domain::RegistrationStatus;
 use chrono::DateTime;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
-use crate::modules::events::domain::Event;
-use crate::modules::events::domain::EventDomainError;
-use crate::modules::events::domain::EventPublicationStatus;
-use crate::modules::events::domain::EventRegistrationPolicy;
-use crate::modules::events::domain::EventRegistration;
-use crate::modules::events::domain::RegistrationStatus;
 /// Dados do formulário para criação de um novo evento (rascunho ou publicação direta).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateEventRequest {
@@ -159,16 +159,16 @@ pub struct EventSummaryResponse {
 }
 impl From<Event> for EventSummaryResponse {
     fn from(event: Event) -> Self {
-        let remaining_spots = event.registration.remaining_spots();
-        let has_available_spots = event.registration.has_available_spots();
+        let remaining_spots = event.remaining_spots(0);
+        let has_available_spots = event.has_available_spots(0);
         Self {
-            id: event.id,
-            academic_center_id: event.academic_center_id,
-            title: event.title,
-            location: event.location,
-            starts_at: event.starts_at,
-            ends_at: event.ends_at,
-            status: event.status,
+            id: event.id(),
+            academic_center_id: event.academic_center_id(),
+            title: event.title().to_owned(),
+            location: event.location().to_owned(),
+            starts_at: event.starts_at(),
+            ends_at: event.ends_at(),
+            status: event.status(),
             has_available_spots,
             remaining_spots,
         }
@@ -285,12 +285,12 @@ impl EventRegistrationResponse {
     /// Constrói a resposta para uma inscrição confirmada com sucesso.
     pub fn confirmed(registration: EventRegistration) -> Self {
         Self {
-            id: registration.id,
-            event_id: registration.event_id,
-            participant_id: registration.participant_id,
-            status: registration.status,
-            registered_at: registration.registered_at,
-            cancelled_at: registration.cancelled_at,
+            id: registration.id(),
+            event_id: registration.event_id(),
+            participant_id: registration.participant_id(),
+            status: registration.status(),
+            registered_at: registration.registered_at(),
+            cancelled_at: registration.cancelled_at(),
             message: "Inscrição realizada com sucesso.".to_string(),
         }
     }
@@ -298,12 +298,12 @@ impl EventRegistrationResponse {
     /// Constrói a resposta para o cancelamento de inscrição realizado com sucesso.
     pub fn cancelled(registration: EventRegistration) -> Self {
         Self {
-            id: registration.id,
-            event_id: registration.event_id,
-            participant_id: registration.participant_id,
-            status: registration.status,
-            registered_at: registration.registered_at,
-            cancelled_at: registration.cancelled_at,
+            id: registration.id(),
+            event_id: registration.event_id(),
+            participant_id: registration.participant_id(),
+            status: registration.status(),
+            registered_at: registration.registered_at(),
+            cancelled_at: registration.cancelled_at(),
             message: "Cancelamento realizado com sucesso.".to_string(),
         }
     }

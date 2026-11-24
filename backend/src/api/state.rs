@@ -11,15 +11,15 @@ use crate::{
     infrastructure::database::PgDatabase,
     modules::{
         elections::crypto_wire::ServerSigner,
+        identity::infrastructure::{
+            firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
+        },
         news::{
             application::{
                 ports::{NewsAuthorizationPort, NewsRepositoryPort},
                 services::NewsApplicationService,
             },
-            infrastructure::{AllowAllNewsAuthorization, PgNewsRepository},
-        },
-        identity::infrastructure::{
-            firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
+            infrastructure::{PgNewsRepository, authorization::AcademicCenterNewsAuthorization},
         },
     },
 };
@@ -75,8 +75,11 @@ pub struct AppState {
 
     /// Clientes externos compartilhados, sem credenciais de usuários armazenadas.
     pub clients: Clients,
+    /// Serviço de autorização por mandato e Centro Acadêmico.
     pub authorization: Arc<dyn crate::modules::ca::application::ports::AuthorizationServicePort>,
+    /// Armazenamento do ciclo editorial das notícias.
     pub news_repository: Arc<dyn NewsRepositoryPort>,
+    /// Autorizador das operações editoriais.
     pub news_authorization: Arc<dyn NewsAuthorizationPort>,
 
     /// Assinador fornecido pela instalação para as operações eleitorais que usam a chave do servidor.
@@ -135,13 +138,19 @@ impl AppState {
     /// ```
     pub fn new(pg_database: PgDatabase, clients: Clients) -> Self {
         let news_repository = Arc::new(PgNewsRepository::new(pg_database.pool.clone()));
+        let authorization: Arc<dyn crate::modules::ca::application::ports::AuthorizationServicePort> =
+            Arc::new(crate::modules::ca::application::services::authorization_service::AuthorizationService::with_in_memory());
+        let news_authorization = Arc::new(AcademicCenterNewsAuthorization {
+            db: pg_database.clone(),
+            roles: authorization.clone(),
+        });
         Self {
             pg_database,
             shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             clients,
-            authorization: Arc::new(crate::modules::ca::application::services::authorization_service::AuthorizationService::with_in_memory()),
+            authorization,
             news_repository,
-            news_authorization: Arc::new(AllowAllNewsAuthorization),
+            news_authorization,
             election_signer: None,
         }
     }
@@ -152,6 +161,7 @@ impl AppState {
         self
     }
 
+    /// Compõe o serviço editorial com os adaptadores compartilhados.
     pub fn news_service(
         &self,
     ) -> NewsApplicationService<dyn NewsRepositoryPort, dyn NewsAuthorizationPort> {
@@ -161,11 +171,15 @@ impl AppState {
         )
     }
 
+    /// Indica se o backend está drenando as requisições.
     pub fn is_shutting_down(&self) -> bool {
-        self.shutting_down.load(std::sync::atomic::Ordering::Relaxed)
+        self.shutting_down
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Marca o início do encerramento gracioso.
     pub fn mark_shutting_down(&self) {
-        self.shutting_down.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.shutting_down
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }

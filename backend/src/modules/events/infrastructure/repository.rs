@@ -1,17 +1,18 @@
 //! Implementação PostgreSQL do repositório de eventos usando SQLx.
 
+use crate::modules::events::application::EventApplicationError;
+use crate::modules::events::application::EventAuthorizationPort;
+use crate::modules::events::application::EventRepository;
+use crate::modules::events::domain::DIRECT_EVENT_MANAGEMENT_PERMISSION;
+use crate::modules::events::domain::Event;
+use crate::modules::events::domain::EventDomainError;
+use crate::modules::events::domain::EventPublicationStatus;
+use crate::modules::events::domain::EventRegistration;
 use async_trait::async_trait;
+use chrono::Utc;
 use sqlx::PgPool;
 use sqlx::types::Json;
 use uuid::Uuid;
-use crate::modules::events::application::EventApplicationError;
-use crate::modules::events::application::EventRepository;
-use crate::modules::events::domain::Event;
-use crate::modules::events::domain::EventPublicationStatus;
-use crate::modules::events::application::EventAuthorizationPort;
-use crate::modules::events::domain::DIRECT_EVENT_MANAGEMENT_PERMISSION;
-use crate::modules::events::domain::EventRegistration;
-use crate::modules::events::domain::EventDomainError;
 /// Adaptador PostgreSQL para persistência de eventos na tabela `event`.
 #[derive(Debug, Clone)]
 pub struct PostgresEventRepository {
@@ -208,12 +209,12 @@ impl EventRepository for PostgresEventRepository {
             "SELECT
                 id,
                 event_id,
-                participant_id,
+                user_id,
                 status,
                 registered_at,
-                cancelled_at
-             FROM event_registrations
-             WHERE event_id = $1 AND participant_id = $2",
+                cancelled_at, queue_sequence, invitation_expires_at
+             FROM event_registration
+             WHERE event_id = $1 AND user_id = $2",
         )
         .bind(event_id)
         .bind(participant_id)
@@ -229,16 +230,16 @@ impl EventRepository for PostgresEventRepository {
         registration: &EventRegistration,
     ) -> Result<EventRegistration, EventApplicationError> {
         let row: EventRegistration = sqlx::query_as(
-            "INSERT INTO event_registrations (
+            "INSERT INTO event_registration (
                 id,
                 event_id,
-                participant_id,
+                user_id,
                 status,
                 registered_at,
                 cancelled_at
              )
              VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (event_id, participant_id)
+             ON CONFLICT (event_id, user_id)
              DO UPDATE SET
                 status = EXCLUDED.status,
                 registered_at = EXCLUDED.registered_at,
@@ -246,17 +247,17 @@ impl EventRepository for PostgresEventRepository {
              RETURNING
                 id,
                 event_id,
-                participant_id,
+                user_id,
                 status,
                 registered_at,
-                cancelled_at",
+                cancelled_at, queue_sequence, invitation_expires_at",
         )
-        .bind(registration.id)
-        .bind(registration.event_id)
-        .bind(registration.participant_id)
-        .bind(registration.status)
-        .bind(registration.registered_at)
-        .bind(registration.cancelled_at)
+        .bind(registration.id())
+        .bind(registration.event_id())
+        .bind(registration.participant_id())
+        .bind(registration.status())
+        .bind(registration.registered_at())
+        .bind(registration.cancelled_at())
         .fetch_one(&self.pool)
         .await
         .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
@@ -272,11 +273,11 @@ impl EventRepository for PostgresEventRepository {
             "SELECT
                 id,
                 event_id,
-                participant_id,
+                user_id,
                 status,
                 registered_at,
-                cancelled_at
-             FROM event_registrations
+                cancelled_at, queue_sequence, invitation_expires_at
+             FROM event_registration
              WHERE event_id = $1
              ORDER BY registered_at ASC",
         )
@@ -306,25 +307,10 @@ impl EventRepository for PostgresEventRepository {
             .await
             .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
 
-        let row: Option<EventRow> = sqlx::query_as(
-            "SELECT
-                id,
-                academic_center_id,
-                author_id,
-                title,
-                description,
-                location,
-                starts_at,
-                ends_at,
-                status,
-                requires_registration,
-                max_capacity,
-                confirmed_registrations,
-                registration_deadline,
-                published_at,
-                created_at,
-                updated_at
-             FROM events
+        let row: Option<Event> = sqlx::query_as(
+            "SELECT id, ca_id, author_id, title, description, location, starts_at, ends_at,
+                    capacity, status, revision, registration_policy
+             FROM event
              WHERE id = $1
              FOR UPDATE",
         )
@@ -333,12 +319,10 @@ impl EventRepository for PostgresEventRepository {
         .await
         .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
 
-        let mut event = row
-            .map(Event::from)
-            .ok_or(EventApplicationError::NotFound(event_id))?;
+        let event = row.ok_or(EventApplicationError::NotFound(event_id))?;
 
         if let Some(active_ca_id) = academic_center_id
-            && event.academic_center_id != active_ca_id
+            && event.academic_center_id() != active_ca_id
         {
             return Err(EventApplicationError::NotFound(event_id));
         }
@@ -353,12 +337,12 @@ impl EventRepository for PostgresEventRepository {
             "SELECT
                 id,
                 event_id,
-                participant_id,
+                user_id,
                 status,
                 registered_at,
-                cancelled_at
-             FROM event_registrations
-             WHERE event_id = $1 AND participant_id = $2
+                cancelled_at, queue_sequence, invitation_expires_at
+             FROM event_registration
+             WHERE event_id = $1 AND user_id = $2
              FOR UPDATE",
         )
         .bind(event_id)
@@ -375,7 +359,7 @@ impl EventRepository for PostgresEventRepository {
                 });
             }
             Some(mut cancelled_reg) => {
-                cancelled_reg.reactivate();
+                cancelled_reg.reactivate_registered(Utc::now())?;
                 cancelled_reg
             }
             None => EventRegistration::new_confirmed(event_id, participant_id)?,
@@ -383,37 +367,38 @@ impl EventRepository for PostgresEventRepository {
 
         let active_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*)::BIGINT
-             FROM event_registrations
-             WHERE event_id = $1 AND status IN ('confirmed', 'confirmada')",
+             FROM event_registration
+             WHERE event_id = $1 AND status = 'registered'",
         )
         .bind(event_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
 
-        event.registration.confirmed_registrations =
-            u32::try_from(active_count).unwrap_or(u32::MAX);
-        event.register_participant().map_err(|err| match err {
-            EventDomainError::CapacityExceeded { max_capacity, .. } => {
-                EventApplicationError::EventFull {
-                    event_id,
-                    max_capacity,
+        let registered_count = u32::try_from(active_count).unwrap_or(u32::MAX);
+        event
+            .register_participant(Utc::now(), registered_count)
+            .map_err(|err| match err {
+                EventDomainError::CapacityExceeded { max_capacity, .. } => {
+                    EventApplicationError::EventFull {
+                        event_id,
+                        max_capacity,
+                    }
                 }
-            }
-            other => EventApplicationError::Domain(other),
-        })?;
+                other => EventApplicationError::Domain(other),
+            })?;
 
         let saved: EventRegistration = sqlx::query_as(
-            "INSERT INTO event_registrations (
+            "INSERT INTO event_registration (
                 id,
                 event_id,
-                participant_id,
+                user_id,
                 status,
                 registered_at,
                 cancelled_at
              )
              VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (event_id, participant_id)
+             ON CONFLICT (event_id, user_id)
              DO UPDATE SET
                 status = EXCLUDED.status,
                 registered_at = EXCLUDED.registered_at,
@@ -421,33 +406,18 @@ impl EventRepository for PostgresEventRepository {
              RETURNING
                 id,
                 event_id,
-                participant_id,
+                user_id,
                 status,
                 registered_at,
-                cancelled_at",
+                cancelled_at, queue_sequence, invitation_expires_at",
         )
-        .bind(registration.id)
-        .bind(registration.event_id)
-        .bind(registration.participant_id)
-        .bind(registration.status)
-        .bind(registration.registered_at)
-        .bind(registration.cancelled_at)
+        .bind(registration.id())
+        .bind(registration.event_id())
+        .bind(registration.participant_id())
+        .bind(registration.status())
+        .bind(registration.registered_at())
+        .bind(registration.cancelled_at())
         .fetch_one(&mut *tx)
-        .await
-        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
-
-        let confirmed_registrations =
-            i32::try_from(event.registration.confirmed_registrations).unwrap_or(i32::MAX);
-        sqlx::query(
-            "UPDATE events
-             SET confirmed_registrations = $2,
-                 updated_at = $3
-             WHERE id = $1",
-        )
-        .bind(event.id)
-        .bind(confirmed_registrations)
-        .bind(event.updated_at)
-        .execute(&mut *tx)
         .await
         .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
 
@@ -476,25 +446,10 @@ impl EventRepository for PostgresEventRepository {
             .await
             .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
 
-        let row: Option<EventRow> = sqlx::query_as(
-            "SELECT
-                id,
-                academic_center_id,
-                author_id,
-                title,
-                description,
-                location,
-                starts_at,
-                ends_at,
-                status,
-                requires_registration,
-                max_capacity,
-                confirmed_registrations,
-                registration_deadline,
-                published_at,
-                created_at,
-                updated_at
-             FROM events
+        let row: Option<Event> = sqlx::query_as(
+            "SELECT id, ca_id, author_id, title, description, location, starts_at, ends_at,
+                    capacity, status, revision, registration_policy
+             FROM event
              WHERE id = $1
              FOR UPDATE",
         )
@@ -503,12 +458,10 @@ impl EventRepository for PostgresEventRepository {
         .await
         .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
 
-        let event = row
-            .map(Event::from)
-            .ok_or(EventApplicationError::NotFound(event_id))?;
+        let event = row.ok_or(EventApplicationError::NotFound(event_id))?;
 
         if let Some(active_ca_id) = academic_center_id
-            && event.academic_center_id != active_ca_id
+            && event.academic_center_id() != active_ca_id
         {
             return Err(EventApplicationError::NotFound(event_id));
         }
@@ -517,12 +470,12 @@ impl EventRepository for PostgresEventRepository {
             "SELECT
                 id,
                 event_id,
-                participant_id,
+                user_id,
                 status,
                 registered_at,
-                cancelled_at
-             FROM event_registrations
-             WHERE event_id = $1 AND participant_id = $2
+                cancelled_at, queue_sequence, invitation_expires_at
+             FROM event_registration
+             WHERE event_id = $1 AND user_id = $2
              FOR UPDATE",
         )
         .bind(event_id)
@@ -539,47 +492,23 @@ impl EventRepository for PostgresEventRepository {
         registration.cancel();
 
         let saved: EventRegistration = sqlx::query_as(
-            "UPDATE event_registrations
+            "UPDATE event_registration
              SET status = $3,
                  cancelled_at = $4
-             WHERE event_id = $1 AND participant_id = $2
+             WHERE event_id = $1 AND user_id = $2
              RETURNING
                 id,
                 event_id,
-                participant_id,
+                user_id,
                 status,
                 registered_at,
-                cancelled_at",
+                cancelled_at, queue_sequence, invitation_expires_at",
         )
         .bind(event_id)
         .bind(participant_id)
-        .bind(registration.status)
-        .bind(registration.cancelled_at)
+        .bind(registration.status())
+        .bind(registration.cancelled_at())
         .fetch_one(&mut *tx)
-        .await
-        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
-
-        let active_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*)::BIGINT
-             FROM event_registrations
-             WHERE event_id = $1 AND status IN ('confirmed', 'confirmada')",
-        )
-        .bind(event_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
-
-        let confirmed_registrations = i32::try_from(active_count).unwrap_or(0);
-        sqlx::query(
-            "UPDATE events
-             SET confirmed_registrations = $2,
-                 updated_at = $3
-             WHERE id = $1",
-        )
-        .bind(event.id)
-        .bind(confirmed_registrations)
-        .bind(Utc::now())
-        .execute(&mut *tx)
         .await
         .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
 

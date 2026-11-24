@@ -3,18 +3,18 @@
 //! Define as estruturas de requisição e resposta para configuração inicial
 //! e consulta do mandato de gestão do Centro Acadêmico.
 
-use chrono::DateTime;
-use chrono::NaiveDate;
-use chrono::Utc;
-use serde::Deserialize;
-use serde::Serialize;
-use uuid::Uuid;
 use crate::modules::ca::domain::entities::Mandate;
 use crate::modules::ca::domain::entities::MandateMember;
 use crate::modules::ca::domain::entities::PollOptionResult;
 use crate::modules::ca::domain::entities::PollResults;
 use crate::modules::ca::domain::entities::PollVote;
 use crate::modules::ca::domain::entities::StudentPoll;
+use chrono::DateTime;
+use chrono::NaiveDate;
+use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
+use uuid::Uuid;
 /// Corpo da requisição de configuração inicial do mandato da gestão.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

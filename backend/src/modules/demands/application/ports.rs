@@ -3,14 +3,14 @@
 //! Define os contratos abstratos utilizados pelos casos de uso para persistir
 //! demandas e consultar vínculos acadêmicos e representatividade do CA.
 
-use uuid::Uuid;
 use crate::modules::demands::application::error::AffiliationError;
 use crate::modules::demands::application::error::DemandRepositoryError;
 use crate::modules::demands::domain::entities::Demand;
 use crate::modules::demands::domain::entities::DemandComment;
 use crate::modules::demands::domain::entities::DemandForum;
-use crate::modules::demands::domain::entities::DemandStatus;
 use crate::modules::demands::domain::entities::DemandNotification;
+use crate::modules::demands::domain::entities::DemandStatus;
+use uuid::Uuid;
 /// Critérios de filtragem para listagem de demandas no repositório.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DemandFilter {

@@ -4,8 +4,8 @@
 //! e só aceita registro enquanto o programa não estiver encerrado. Não executa o
 //! cálculo de compatibilidade nem valida o contrato semântico de `parameters`.
 
-use crate::modules::mentorship::domain::entities::program::MentorshipProgram;
 use crate::modules::mentorship::domain::MentorshipProgramStatus;
+use crate::modules::mentorship::domain::entities::program::MentorshipProgram;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -136,8 +136,8 @@ fn validate_weight(weight: f64) -> Result<(), InvalidCriterion> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::mentorship::domain::entities::program::ProgramConfig;
     use crate::modules::mentorship::domain::MatchingStrategy;
+    use crate::modules::mentorship::domain::entities::program::ProgramConfig;
     use chrono::{DateTime, TimeZone, Utc};
     use serde_json::json;
 

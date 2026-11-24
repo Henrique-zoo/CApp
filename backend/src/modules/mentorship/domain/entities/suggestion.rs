@@ -7,9 +7,7 @@
 
 use crate::modules::mentorship::domain::entities::participant::MentorshipParticipant;
 use crate::modules::mentorship::domain::entities::run::MatchingRun;
-use crate::modules::mentorship::domain::{
-    MatchingSuggestionStatus, MentorshipParticipantRole,
-};
+use crate::modules::mentorship::domain::{MatchingSuggestionStatus, MentorshipParticipantRole};
 use uuid::Uuid;
 
 /// Fotografia persistida de uma sugestão de par. Não é um contrato HTTP.
@@ -154,9 +152,7 @@ impl MatchingSuggestion {
         if !self.is_pending() {
             return Err(InvalidSuggestion);
         }
-        if self.run_id != run.id()
-            || self.mentor_id != mentor.id()
-            || self.mentee_id != mentee.id()
+        if self.run_id != run.id() || self.mentor_id != mentor.id() || self.mentee_id != mentee.id()
         {
             return Err(InvalidSuggestion);
         }
@@ -214,11 +210,9 @@ fn validate_score(score: Option<f64>) -> Result<(), InvalidSuggestion> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::mentorship::domain::entities::program::{
-        MentorshipProgram, ProgramConfig,
-    };
-    use crate::modules::mentorship::domain::entities::run::MatchingRun;
     use crate::modules::mentorship::domain::MatchingStrategy;
+    use crate::modules::mentorship::domain::entities::program::{MentorshipProgram, ProgramConfig};
+    use crate::modules::mentorship::domain::entities::run::MatchingRun;
     use chrono::{DateTime, TimeZone, Utc};
     use serde_json::json;
 
@@ -284,16 +278,9 @@ mod tests {
         let mentor = enroll(&program, MentorshipParticipantRole::Veterano);
         let mentee = enroll(&program, MentorshipParticipantRole::Calouro);
 
-        let suggestion = MatchingSuggestion::propose(
-            Uuid::new_v4(),
-            &run,
-            &mentor,
-            &mentee,
-            Some(0.85),
-            1,
-            &[],
-        )
-        .unwrap();
+        let suggestion =
+            MatchingSuggestion::propose(Uuid::new_v4(), &run, &mentor, &mentee, Some(0.85), 1, &[])
+                .unwrap();
         assert_eq!(suggestion.status(), MatchingSuggestionStatus::Pending);
         assert_eq!(suggestion.run_id(), run.id());
         assert_eq!(suggestion.mentor_id(), mentor.id());
@@ -337,16 +324,8 @@ mod tests {
         let foreign_mentee = enroll(&other, MentorshipParticipantRole::Calouro);
 
         assert_eq!(
-            MatchingSuggestion::propose(
-                Uuid::new_v4(),
-                &run,
-                &mentor,
-                &mentor,
-                None,
-                1,
-                &[],
-            )
-            .err(),
+            MatchingSuggestion::propose(Uuid::new_v4(), &run, &mentor, &mentor, None, 1, &[],)
+                .err(),
             Some(InvalidSuggestion)
         );
         assert_eq!(
@@ -406,23 +385,14 @@ mod tests {
         let mentor = enroll(&program, MentorshipParticipantRole::Veterano);
         let mentee = enroll(&program, MentorshipParticipantRole::Calouro);
 
-        let mut rejected = MatchingSuggestion::propose(
-            Uuid::new_v4(),
-            &run,
-            &mentor,
-            &mentee,
-            Some(0.5),
-            1,
-            &[],
-        )
-        .unwrap();
+        let mut rejected =
+            MatchingSuggestion::propose(Uuid::new_v4(), &run, &mentor, &mentee, Some(0.5), 1, &[])
+                .unwrap();
         rejected.reject().unwrap();
         assert_eq!(rejected.status(), MatchingSuggestionStatus::Rejected);
         assert!(rejected.reject().is_err());
         assert!(rejected.expire().is_err());
-        assert!(rejected
-            .mark_accepted(&run, &mentor, &mentee)
-            .is_err());
+        assert!(rejected.mark_accepted(&run, &mentor, &mentee).is_err());
 
         let other_mentee = enroll(&program, MentorshipParticipantRole::Calouro);
         let mut expired = MatchingSuggestion::propose(
@@ -453,21 +423,12 @@ mod tests {
         let mentor = enroll(&program, MentorshipParticipantRole::Veterano);
         let mut mentee = enroll(&program, MentorshipParticipantRole::Calouro);
 
-        let mut suggestion = MatchingSuggestion::propose(
-            Uuid::new_v4(),
-            &run,
-            &mentor,
-            &mentee,
-            Some(0.9),
-            1,
-            &[],
-        )
-        .unwrap();
+        let mut suggestion =
+            MatchingSuggestion::propose(Uuid::new_v4(), &run, &mentor, &mentee, Some(0.9), 1, &[])
+                .unwrap();
 
         mentee.leave(at(2026, 5, 1)).unwrap();
-        assert!(suggestion
-            .mark_accepted(&run, &mentor, &mentee)
-            .is_err());
+        assert!(suggestion.mark_accepted(&run, &mentor, &mentee).is_err());
         assert_eq!(suggestion.status(), MatchingSuggestionStatus::Pending);
 
         let active_mentee = enroll(&program, MentorshipParticipantRole::Calouro);
@@ -485,7 +446,11 @@ mod tests {
             .mark_accepted(&run, &mentor, &active_mentee)
             .unwrap();
         assert_eq!(suggestion.status(), MatchingSuggestionStatus::Accepted);
-        assert!(suggestion.mark_accepted(&run, &mentor, &active_mentee).is_err());
+        assert!(
+            suggestion
+                .mark_accepted(&run, &mentor, &active_mentee)
+                .is_err()
+        );
 
         // Aceitar marca a sugestão; a criação do vínculo correspondente é
         // responsabilidade de outra entidade e não ocorre aqui.

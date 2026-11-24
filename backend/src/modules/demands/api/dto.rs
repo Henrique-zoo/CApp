@@ -3,14 +3,14 @@
 //! Encapsula os payloads JSON de requisição e resposta do módulo de demandas,
 //! mantendo o domínio estritamente livre de dependências de serialização.
 
+use crate::modules::demands::domain::entities::Demand;
+use crate::modules::demands::domain::entities::DemandComment;
+use crate::modules::demands::domain::entities::DemandNotification;
 use chrono::DateTime;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
-use crate::modules::demands::domain::entities::Demand;
-use crate::modules::demands::domain::entities::DemandComment;
-use crate::modules::demands::domain::entities::DemandNotification;
 /// Payload de requisição para criação de uma nova demanda.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

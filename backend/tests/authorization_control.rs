@@ -47,7 +47,21 @@ fn create_test_state(auth_service: Arc<dyn AuthorizationServicePort>) -> AppStat
     let pool = PgPoolOptions::new()
         .connect_lazy("postgres://capp:capp@localhost:5432/capp")
         .expect("pool preguiçoso para testes");
-    AppState::with_authorization(pool, auth_service)
+    let mut state = AppState::new(
+        backend::infrastructure::database::PgDatabase::new(pool),
+        backend::api::state::Clients::new(
+            backend::modules::identity::infrastructure::firebase::FirebaseTokenVerifier::new(
+                "capp-qa".into(),
+                reqwest::Client::new(),
+            )
+            .unwrap(),
+            backend::modules::identity::infrastructure::microsoft::MicrosoftGraphClient::new(
+                reqwest::Client::new(),
+            ),
+        ),
+    );
+    state.authorization = auth_service;
+    state
 }
 
 /// Cria o router de testes com endpoints protegidos por diferentes extratores declarativos.
@@ -329,8 +343,9 @@ async fn test_delinked_member_loses_authorization_immediately() {
     )
     .unwrap();
 
-    let role_repo =
-        Arc::new(backend::modules::ca::infrastructure::role_repository::InMemoryRoleRepository::new());
+    let role_repo = Arc::new(
+        backend::modules::ca::infrastructure::role_repository::InMemoryRoleRepository::new(),
+    );
     role_repo.save_role(&role).await.unwrap();
 
     let assignment_repo = Arc::new(

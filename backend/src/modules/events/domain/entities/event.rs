@@ -13,13 +13,13 @@
 //! Todos os campos das entidades e objetos de valor são privados para garantir que
 //! nenhuma construção ou mutação contorne as invariantes de domínio.
 
-use std::fmt;
-use std::str::FromStr;
 use chrono::DateTime;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 use sqlx::types::Json;
+use std::fmt;
+use std::str::FromStr;
 use thiserror::Error;
 use uuid::Uuid;
 /// Comprimento máximo permitido (em caracteres) para o título de um evento.
@@ -720,7 +720,7 @@ impl RegistrationStatus {
 
     /// Indica se a inscrição encontra-se ativa (confirmada).
     pub const fn is_active(&self) -> bool {
-        matches!(self, Self::Confirmed)
+        matches!(self, Self::Registered)
     }
 }
 impl fmt::Display for RegistrationStatus {
@@ -884,7 +884,7 @@ impl EventRegistration {
 
     /// Reativa uma inscrição previamente cancelada pelo participante.
     pub fn reactivate(&mut self) {
-        self.status = RegistrationStatus::Confirmed;
+        self.status = RegistrationStatus::Registered;
         self.registered_at = Utc::now();
         self.cancelled_at = None;
     }
@@ -2190,31 +2190,5 @@ mod tests {
             .expect("segundo cancel deve ser no-op seguro");
         assert_eq!(event, snapshot);
         assert_eq!(event.status(), EventPublicationStatus::Cancelled);
-    }
-}
-impl sqlx::Type<sqlx::Postgres> for RegistrationStatus {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        <String as sqlx::Type<sqlx::Postgres>>::type_info()
-    }
-
-    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
-        <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
-    }
-}
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for RegistrationStatus {
-    fn decode(
-        value: sqlx::postgres::PgValueRef<'r>,
-    ) -> Result<Self, Box<dyn std::error::Error + 'static + Send + Sync>> {
-        let text = <&'r str as sqlx::Decode<'r, sqlx::Postgres>>::decode(value)?;
-        text.parse()
-            .map_err(|err: EventDomainError| Box::new(err) as _)
-    }
-}
-impl<'q> sqlx::Encode<'q, sqlx::Postgres> for RegistrationStatus {
-    fn encode_by_ref(
-        &self,
-        buf: &mut sqlx::postgres::PgArgumentBuffer,
-    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + 'static + Send + Sync>> {
-        <&str as sqlx::Encode<'q, sqlx::Postgres>>::encode_by_ref(&self.as_str(), buf)
     }
 }

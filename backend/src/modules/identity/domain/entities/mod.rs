@@ -9,12 +9,8 @@
 pub mod institution;
 pub mod institutional_verification;
 pub mod user;
-use chrono::DateTime;
-use chrono::Utc;
-use serde::Deserialize;
-use serde::Serialize;
-use uuid::Uuid;
 pub use crate::shared::retention::StudentRecord;
+pub use academic_data::*;
 pub use app_user::AppUser;
 pub use app_user::AppUserError;
 pub use app_user::AppUserStatus;
@@ -24,12 +20,16 @@ pub use app_user::MAX_EMAIL_LENGTH;
 pub use app_user::PROHIBITED_MATRICULA;
 pub use app_user::VETERANO_1_DIDACTIC_ID;
 pub use app_user::VETERANO_2_DIDACTIC_ID;
-pub use user_preference::UserPreference;
-pub use user_preference::UserPreferenceError;
-pub use academic_data::*;
+use chrono::DateTime;
+use chrono::Utc;
 pub use institution::*;
 pub use institutional_verification::*;
+use serde::Deserialize;
+use serde::Serialize;
 pub use user::*;
+pub use user_preference::UserPreference;
+pub use user_preference::UserPreferenceError;
+use uuid::Uuid;
 /// Estado de ciclo de vida e retenção da identidade de um discente na plataforma.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IdentityRetentionStatus {
@@ -89,6 +89,6 @@ impl StudentIdentity {
         })
     }
 }
+pub mod academic_data;
 pub mod app_user;
 pub mod user_preference;
-pub mod academic_data;

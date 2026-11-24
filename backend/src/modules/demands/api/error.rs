@@ -1,10 +1,10 @@
 //! Mapeamento de erros da camada de aplicação de demandas para respostas HTTP.
 
-use axum::http::StatusCode;
-use serde_json::json;
 use crate::api::error::ApiError;
 use crate::modules::demands::application::error::DemandApplicationError;
 use crate::modules::demands::domain::entities::DemandError;
+use axum::http::StatusCode;
+use serde_json::json;
 impl From<DemandApplicationError> for ApiError {
     fn from(error: DemandApplicationError) -> Self {
         match error {

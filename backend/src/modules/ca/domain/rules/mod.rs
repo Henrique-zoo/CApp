@@ -6,8 +6,6 @@
 mod academic_center;
 mod mandate;
 pub use academic_center::*;
-pub use mandate::*;
-pub use poll::*;
 pub use active_context_rules::active_permissions_in_context;
 pub use active_context_rules::assert_favorite_preference_unaltered_by_context_switch;
 pub use active_context_rules::assert_navigation_only_active_context_scope;
@@ -22,6 +20,8 @@ pub use authorization_rules::check_authorization_in_ca;
 pub use authorization_rules::evaluate_effective_permissions;
 pub use authorization_rules::filter_active_assignments;
 pub use authorization_rules::is_authorized_in_ca;
-mod poll;
+pub use mandate::*;
+pub use poll::*;
 pub mod active_context_rules;
 pub mod authorization_rules;
+mod poll;

@@ -9,3 +9,5 @@ pub use repository::{
     AllowAllNewsAuthorization, InMemoryNewsRepository, PgNewsRepository,
     StaticRoleNewsAuthorization,
 };
+
+pub(crate) mod authorization;

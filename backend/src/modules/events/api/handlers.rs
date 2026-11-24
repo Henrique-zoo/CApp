@@ -5,16 +5,6 @@
 //! permissão [`DIRECT_EVENT_MANAGEMENT_PERMISSION`](crate::modules::events::domain::DIRECT_EVENT_MANAGEMENT_PERMISSION)
 //! no respectivo Centro Acadêmico possam publicar diretamente (sem homologação) e editar eventos.
 
-use std::sync::Arc;
-use axum::Json;
-use axum::extract::Path;
-use axum::extract::Query;
-use axum::extract::State;
-use axum::http::HeaderMap;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use axum::response::Response;
-use uuid::Uuid;
 use super::dto::CreateEventRequest;
 use super::dto::EventDetailResponse;
 use super::dto::EventErrorResponse;
@@ -44,6 +34,16 @@ use crate::modules::events::domain::EventDomainError;
 use crate::modules::events::infrastructure::PostgresEventAuthorizationService;
 use crate::modules::events::infrastructure::PostgresEventRepository;
 use crate::modules::identity::api::AuthenticatedUser;
+use axum::Json;
+use axum::extract::Path;
+use axum::extract::Query;
+use axum::extract::State;
+use axum::http::HeaderMap;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::response::Response;
+use std::sync::Arc;
+use uuid::Uuid;
 /// Extrai o identificador do Centro Acadêmico ativo a partir dos parâmetros de query
 /// (`ca_id` / `academic_center_id`) ou dos cabeçalhos HTTP (`X-Academic-Center-Id`, `X-Active-Ca-Id`).
 fn extract_active_ca_id(params: &ListEventsQueryParams, headers: &HeaderMap) -> Option<Uuid> {
@@ -74,8 +74,8 @@ fn map_application_error(error: EventApplicationError) -> Response {
             EventDomainError::EventNotPublished => {
                 (StatusCode::UNPROCESSABLE_ENTITY, "event_not_available")
             }
-            _ => (StatusCode::BAD_REQUEST, "validation_error"),
             EventDomainError::CapacityExceeded { .. } => (StatusCode::CONFLICT, "event_full"),
+            _ => (StatusCode::BAD_REQUEST, "validation_error"),
         },
         EventApplicationError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
         EventApplicationError::EventNotAvailableForRegistration(_) => {
@@ -117,7 +117,7 @@ fn authorized_service(
 /// `DIRECT_EVENT_MANAGEMENT_PERMISSION` no Centro Acadêmico antes de criar/publicar diretamente.
 pub async fn create_event_handler(
     State(state): State<AppState>,
-    authenticated_user: Option<AuthenticatedUser>,
+    authenticated_user: AuthenticatedUser,
     Json(payload): Json<CreateEventRequest>,
 ) -> Response {
     let capacity = match payload.capacity() {
@@ -129,9 +129,7 @@ pub async fn create_event_handler(
         Err(error) => return map_application_error(EventApplicationError::Domain(error)),
     };
 
-    let author_id = authenticated_user
-        .map(|user| user.user_id)
-        .unwrap_or(payload.author_id);
+    let author_id = authenticated_user.user_id;
     let service = authorized_service(&state);
     let command = CreateEventCommand {
         academic_center_id: payload.academic_center_id,
@@ -243,7 +241,7 @@ async fn execute_get_event_by_id<R: EventRepository>(
 /// Handler `PUT /api/v1/events/{id}` para editar as informações de um evento existente.
 pub async fn update_event_handler(
     State(state): State<AppState>,
-    authenticated_user: Option<AuthenticatedUser>,
+    authenticated_user: AuthenticatedUser,
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateEventRequest>,
 ) -> Response {
@@ -253,6 +251,7 @@ pub async fn update_event_handler(
         let existing = match service
             .get_event_by_id(GetEventByIdQuery {
                 event_id: id,
+                academic_center_id: None,
                 only_published: false,
             })
             .await
@@ -282,9 +281,7 @@ pub async fn update_event_handler(
         (None, None)
     };
 
-    let actor_id = authenticated_user
-        .map(|user| user.user_id)
-        .or(payload.actor_id);
+    let actor_id = Some(authenticated_user.user_id);
 
     let command = UpdateEventCommand {
         event_id: id,
@@ -400,7 +397,7 @@ pub async fn register_in_event_handler(
     Path(id): Path<Uuid>,
     Query(params): Query<ListEventsQueryParams>,
 ) -> Response {
-    let repo = Arc::new(PostgresEventRepository::new(state.pool));
+    let repo = Arc::new(repository(&state));
     let active_ca_id = extract_active_ca_id(&params, &headers);
     execute_register_in_event(repo, id, authenticated_user.user_id, active_ca_id).await
 }
@@ -410,7 +407,7 @@ pub async fn register_in_ca_event_handler(
     authenticated_user: AuthenticatedUser,
     Path((ca_id, id)): Path<(Uuid, Uuid)>,
 ) -> Response {
-    let repo = Arc::new(PostgresEventRepository::new(state.pool));
+    let repo = Arc::new(repository(&state));
     execute_register_in_event(repo, id, authenticated_user.user_id, Some(ca_id)).await
 }
 async fn execute_register_in_event<R: EventRepository>(
@@ -443,7 +440,7 @@ pub async fn cancel_event_registration_handler(
     Path(id): Path<Uuid>,
     Query(params): Query<ListEventsQueryParams>,
 ) -> Response {
-    let repo = Arc::new(PostgresEventRepository::new(state.pool));
+    let repo = Arc::new(repository(&state));
     let active_ca_id = extract_active_ca_id(&params, &headers);
     execute_cancel_event_registration(repo, id, authenticated_user.user_id, active_ca_id).await
 }
@@ -453,7 +450,7 @@ pub async fn cancel_ca_event_registration_handler(
     authenticated_user: AuthenticatedUser,
     Path((ca_id, id)): Path<(Uuid, Uuid)>,
 ) -> Response {
-    let repo = Arc::new(PostgresEventRepository::new(state.pool));
+    let repo = Arc::new(repository(&state));
     execute_cancel_event_registration(repo, id, authenticated_user.user_id, Some(ca_id)).await
 }
 async fn execute_cancel_event_registration<R: EventRepository>(
@@ -480,7 +477,12 @@ async fn execute_cancel_event_registration<R: EventRepository>(
 }
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use super::*;
+    use crate::modules::events::domain::EventRegistrationInfo;
+    use crate::modules::events::{
+        application::InMemoryEventRepository,
+        domain::{Event, EventPublicationStatus, RegistrationStatus},
+    };
     use axum::{
         Router,
         body::{Body, to_bytes},
@@ -488,12 +490,8 @@ mod tests {
         routing::{get, post},
     };
     use chrono::{Duration, Utc};
+    use std::sync::Arc;
     use tower::ServiceExt;
-    use super::*;
-    use crate::modules::events::{
-        application::InMemoryEventRepository,
-        domain::{Event, EventPublicationStatus, RegistrationStatus},
-    };
     fn test_read_router(repo: Arc<InMemoryEventRepository>) -> Router {
         Router::new()
             .route(
@@ -606,28 +604,22 @@ mod tests {
         let now = Utc::now();
         let starts_at = now + Duration::hours(starts_in_hours);
         let ends_at = starts_at + Duration::hours(2);
-        let published_at = if status == EventPublicationStatus::Published {
-            Some(now)
-        } else {
-            None
-        };
 
-        Event {
-            id: Uuid::new_v4(),
-            academic_center_id: ca_id,
-            author_id: Uuid::new_v4(),
-            title: title.to_string(),
-            description: format!("Descrição detalhada de {title}"),
-            location: "Auditório Principal".to_string(),
+        Event::new(
+            Uuid::new_v4(),
+            ca_id,
+            Uuid::new_v4(),
+            title.to_string(),
+            format!("Descrição detalhada de {title}"),
+            "Auditório Principal".to_string(),
             starts_at,
             ends_at,
+            Some(100),
             status,
-            registration: EventRegistrationInfo::with_capacity(100)
-                .expect("configuração de inscrição válida"),
-            published_at,
-            created_at: now,
-            updated_at: now,
-        }
+            1,
+            EventRegistrationInfo::unrestricted(),
+        )
+        .unwrap()
     }
     #[tokio::test]
     async fn get_events_lists_only_published_events_for_active_ca() {
@@ -650,7 +642,7 @@ mod tests {
         let pending = build_event(
             ca_cc,
             "Proposta Pendente",
-            EventPublicationStatus::PendingApproval,
+            EventPublicationStatus::PendingReview,
             96,
         );
         let other_ca = build_event(
@@ -684,9 +676,9 @@ mod tests {
         let listed: Vec<EventResponse> = serde_json::from_slice(&body).unwrap();
 
         assert_eq!(listed.len(), 2);
-        assert_eq!(listed[0].id, published_1.id);
+        assert_eq!(listed[0].id, published_1.id());
         assert_eq!(listed[0].title, "Semana da Computação");
-        assert_eq!(listed[1].id, published_2.id);
+        assert_eq!(listed[1].id, published_2.id());
         assert_eq!(listed[1].title, "Torneio de Programação");
     }
     #[tokio::test]
@@ -731,7 +723,7 @@ mod tests {
         let pending_cc = build_event(
             ca_cc,
             "Proposta Não Homologada",
-            EventPublicationStatus::PendingApproval,
+            EventPublicationStatus::PendingReview,
             72,
         );
         let published_fisica = build_event(
@@ -756,7 +748,7 @@ mod tests {
                 Request::builder()
                     .uri(format!(
                         "/api/v1/academic-centers/{ca_cc}/events/{}",
-                        published_cc.id
+                        published_cc.id()
                     ))
                     .body(Body::empty())
                     .unwrap(),
@@ -766,7 +758,7 @@ mod tests {
         assert_eq!(ok_response.status(), StatusCode::OK);
         let body = to_bytes(ok_response.into_body(), usize::MAX).await.unwrap();
         let detail: EventDetailResponse = serde_json::from_slice(&body).unwrap();
-        assert_eq!(detail.id, published_cc.id);
+        assert_eq!(detail.id, published_cc.id());
         assert_eq!(detail.title, "Hackathon de Inverno");
         assert_eq!(detail.max_capacity, Some(100));
 
@@ -777,7 +769,7 @@ mod tests {
                 Request::builder()
                     .uri(format!(
                         "/api/v1/events/{}?ca_id={ca_cc}",
-                        published_fisica.id
+                        published_fisica.id()
                     ))
                     .body(Body::empty())
                     .unwrap(),
@@ -791,7 +783,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri(format!("/api/v1/events/{}?ca_id={ca_cc}", draft_cc.id))
+                    .uri(format!("/api/v1/events/{}?ca_id={ca_cc}", draft_cc.id()))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -805,7 +797,7 @@ mod tests {
                 Request::builder()
                     .uri(format!(
                         "/api/v1/academic-centers/{ca_cc}/events/{}",
-                        pending_cc.id
+                        pending_cc.id()
                     ))
                     .body(Body::empty())
                     .unwrap(),
@@ -838,7 +830,7 @@ mod tests {
                     .method("POST")
                     .uri(format!(
                         "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
-                        published.id
+                        published.id()
                     ))
                     .header("X-User-Id", student.to_string())
                     .body(Body::empty())
@@ -851,9 +843,9 @@ mod tests {
             .await
             .unwrap();
         let registration: EventRegistrationResponse = serde_json::from_slice(&body).unwrap();
-        assert_eq!(registration.event_id, published.id);
+        assert_eq!(registration.event_id, published.id());
         assert_eq!(registration.participant_id, student);
-        assert_eq!(registration.status, RegistrationStatus::Confirmed);
+        assert_eq!(registration.status, RegistrationStatus::Registered);
         assert!(registration.cancelled_at.is_none());
 
         // 2. DELETE /api/v1/academic-centers/{ca_id}/events/{id}/registrations -> 200 OK
@@ -863,7 +855,7 @@ mod tests {
                     .method("DELETE")
                     .uri(format!(
                         "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
-                        published.id
+                        published.id()
                     ))
                     .header("X-User-Id", student.to_string())
                     .body(Body::empty())
@@ -874,7 +866,7 @@ mod tests {
         assert_eq!(cancel_res.status(), StatusCode::OK);
         let body = to_bytes(cancel_res.into_body(), usize::MAX).await.unwrap();
         let cancelled: EventRegistrationResponse = serde_json::from_slice(&body).unwrap();
-        assert_eq!(cancelled.event_id, published.id);
+        assert_eq!(cancelled.event_id, published.id());
         assert_eq!(cancelled.participant_id, student);
         assert_eq!(cancelled.status, RegistrationStatus::Cancelled);
         assert!(cancelled.cancelled_at.is_some());
@@ -894,7 +886,7 @@ mod tests {
         let pending_cc = build_event(
             ca_cc,
             "Hackathon em análise",
-            EventPublicationStatus::PendingApproval,
+            EventPublicationStatus::PendingReview,
             48,
         );
         let draft_cc = build_event(ca_cc, "Oficina Rascunho", EventPublicationStatus::Draft, 72);
@@ -914,7 +906,7 @@ mod tests {
                     .method("POST")
                     .uri(format!(
                         "/api/v1/events/{}/registrations?ca_id={ca_cc}",
-                        published_cc.id
+                        published_cc.id()
                     ))
                     .header("X-User-Id", student.to_string())
                     .body(Body::empty())
@@ -932,7 +924,7 @@ mod tests {
                     .method("POST")
                     .uri(format!(
                         "/api/v1/events/{}/registrations?ca_id={ca_cc}",
-                        published_cc.id
+                        published_cc.id()
                     ))
                     .header("X-User-Id", student.to_string())
                     .body(Body::empty())
@@ -956,7 +948,7 @@ mod tests {
                         .method("POST")
                         .uri(format!(
                             "/api/v1/events/{}/registrations?ca_id={ca_cc}",
-                            unpublished.id
+                            unpublished.id()
                         ))
                         .header("X-User-Id", student.to_string())
                         .body(Body::empty())
@@ -977,7 +969,7 @@ mod tests {
                     .method("POST")
                     .uri(format!(
                         "/api/v1/academic-centers/{ca_fisica}/events/{}/registrations",
-                        published_cc.id
+                        published_cc.id()
                     ))
                     .header("X-User-Id", student.to_string())
                     .body(Body::empty())
@@ -1010,7 +1002,7 @@ mod tests {
                     .method("DELETE")
                     .uri(format!(
                         "/api/v1/events/{}/registrations?ca_id={ca_cc}",
-                        published.id
+                        published.id()
                     ))
                     .header("X-User-Id", student.to_string())
                     .body(Body::empty())
@@ -1030,37 +1022,37 @@ mod tests {
         let starts_at = now + Duration::hours(24);
         let ends_at = starts_at + Duration::hours(2);
 
-        let limited_event = Event {
-            id: Uuid::new_v4(),
-            academic_center_id: ca_cc,
-            author_id: Uuid::new_v4(),
-            title: "Palestra de IA".to_string(),
-            description: "Evento com 2 vagas".to_string(),
-            location: "Auditório 1".to_string(),
+        let limited_event = Event::new(
+            Uuid::new_v4(),
+            ca_cc,
+            Uuid::new_v4(),
+            "Palestra de IA".to_string(),
+            "Evento com 2 vagas".to_string(),
+            "Auditório 1".to_string(),
             starts_at,
             ends_at,
-            status: EventPublicationStatus::Published,
-            registration: EventRegistrationInfo::with_capacity(2).unwrap(),
-            published_at: Some(now),
-            created_at: now,
-            updated_at: now,
-        };
+            Some(2),
+            EventPublicationStatus::Published,
+            1,
+            EventRegistrationInfo::unrestricted(),
+        )
+        .unwrap();
 
-        let unlimited_event = Event {
-            id: Uuid::new_v4(),
-            academic_center_id: ca_cc,
-            author_id: Uuid::new_v4(),
-            title: "Semana Acadêmica".to_string(),
-            description: "Evento sem limite".to_string(),
-            location: "Anfiteatro".to_string(),
+        let unlimited_event = Event::new(
+            Uuid::new_v4(),
+            ca_cc,
+            Uuid::new_v4(),
+            "Semana Acadêmica".to_string(),
+            "Evento sem limite".to_string(),
+            "Anfiteatro".to_string(),
             starts_at,
             ends_at,
-            status: EventPublicationStatus::Published,
-            registration: EventRegistrationInfo::unrestricted(),
-            published_at: Some(now),
-            created_at: now,
-            updated_at: now,
-        };
+            None,
+            EventPublicationStatus::Published,
+            1,
+            EventRegistrationInfo::unrestricted(),
+        )
+        .unwrap();
 
         let repo = Arc::new(InMemoryEventRepository::with_events(vec![
             limited_event.clone(),
@@ -1080,7 +1072,7 @@ mod tests {
                     .method("POST")
                     .uri(format!(
                         "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
-                        limited_event.id
+                        limited_event.id()
                     ))
                     .header("X-User-Id", student_1.to_string())
                     .body(Body::empty())
@@ -1098,7 +1090,7 @@ mod tests {
                     .method("POST")
                     .uri(format!(
                         "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
-                        limited_event.id
+                        limited_event.id()
                     ))
                     .header("X-User-Id", student_1.to_string())
                     .body(Body::empty())
@@ -1117,7 +1109,7 @@ mod tests {
         for candidate in [student_2, student_3] {
             let router = app.clone();
             let bar = barrier.clone();
-            let event_id = limited_event.id;
+            let event_id = limited_event.id();
             handles.push(tokio::spawn(async move {
                 bar.wait().await;
                 let response = router
@@ -1163,7 +1155,7 @@ mod tests {
                     .method("DELETE")
                     .uri(format!(
                         "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
-                        limited_event.id
+                        limited_event.id()
                     ))
                     .header("X-User-Id", student_1.to_string())
                     .body(Body::empty())
@@ -1180,7 +1172,7 @@ mod tests {
                     .method("POST")
                     .uri(format!(
                         "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
-                        limited_event.id
+                        limited_event.id()
                     ))
                     .header("X-User-Id", waiting_candidate.to_string())
                     .body(Body::empty())
@@ -1199,7 +1191,7 @@ mod tests {
                         .method("POST")
                         .uri(format!(
                             "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
-                            unlimited_event.id
+                            unlimited_event.id()
                         ))
                         .header("X-User-Id", Uuid::new_v4().to_string())
                         .body(Body::empty())

@@ -6,9 +6,7 @@
 //! chegam como identidade ou referência já validada pelo chamador.
 
 use crate::modules::mentorship::domain::entities::program::MentorshipProgram;
-use crate::modules::mentorship::domain::{
-    MentorshipParticipantRole, MentorshipParticipantStatus,
-};
+use crate::modules::mentorship::domain::{MentorshipParticipantRole, MentorshipParticipantStatus};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -139,7 +137,11 @@ impl MentorshipParticipant {
             return Err(InvalidParticipant);
         }
 
-        validate_course_preference(role, include_other_courses_in_quiz, program.allow_other_courses())?;
+        validate_course_preference(
+            role,
+            include_other_courses_in_quiz,
+            program.allow_other_courses(),
+        )?;
 
         Ok(Self {
             id,
@@ -172,7 +174,11 @@ impl MentorshipParticipant {
             return Err(InvalidParticipant);
         }
 
-        validate_course_preference(self.role, include_other_courses_in_quiz, allow_other_courses)?;
+        validate_course_preference(
+            self.role,
+            include_other_courses_in_quiz,
+            allow_other_courses,
+        )?;
         self.include_other_courses_in_quiz = include_other_courses_in_quiz;
         Ok(())
     }
@@ -216,8 +222,8 @@ fn validate_course_preference(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::mentorship::domain::entities::program::ProgramConfig;
     use crate::modules::mentorship::domain::MatchingStrategy;
+    use crate::modules::mentorship::domain::entities::program::ProgramConfig;
     use chrono::TimeZone;
 
     fn at(year: i32, month: u32, day: u32) -> DateTime<Utc> {
@@ -282,7 +288,13 @@ mod tests {
         assert!(MentorshipParticipantRole::Veterano.is_mentor());
         assert!(MentorshipParticipantRole::Calouro.is_mentee());
 
-        for label in [None, Some(""), Some(" "), Some("padrinho"), Some("Veterano")] {
+        for label in [
+            None,
+            Some(""),
+            Some(" "),
+            Some("padrinho"),
+            Some("Veterano"),
+        ] {
             assert_eq!(MentorshipParticipantRole::parse(label), None);
         }
     }
@@ -454,9 +466,11 @@ mod tests {
             &[],
         );
         let mut mentee = mentee;
-        assert!(mentee
-            .set_include_other_courses_in_quiz(true, true)
-            .is_err());
+        assert!(
+            mentee
+                .set_include_other_courses_in_quiz(true, true)
+                .is_err()
+        );
         assert!(!mentee.include_other_courses_in_quiz());
 
         let mentor = enroll_ok(
@@ -485,8 +499,10 @@ mod tests {
         assert!(!mentor_own_course.include_other_courses_in_quiz());
 
         mentor_own_course.leave(at(2026, 5, 1)).unwrap();
-        assert!(mentor_own_course
-            .set_include_other_courses_in_quiz(false, true)
-            .is_err());
+        assert!(
+            mentor_own_course
+                .set_include_other_courses_in_quiz(false, true)
+                .is_err()
+        );
     }
 }

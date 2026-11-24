@@ -4,20 +4,20 @@
 //! integridade do fórum institucional vs espaço físico, restrições CHECK e histórico de status.
 
 use crate::support::TestDatabase;
+use backend::modules::demands::application::ports::DemandNotificationRepository;
 use backend::modules::demands::domain::entities::Demand;
+use backend::modules::demands::domain::entities::DemandComment;
+use backend::modules::demands::domain::entities::DemandCommentAuthorRole;
 use backend::modules::demands::domain::entities::DemandForum;
+use backend::modules::demands::domain::entities::DemandNotification;
+use backend::modules::demands::domain::entities::DemandNotificationEventType;
 use backend::modules::demands::domain::entities::DemandStatus;
 use backend::modules::demands::domain::entities::DemandStatusHistoryEntry;
+use backend::modules::demands::infrastructure::PostgresDemandNotificationRepository;
 use chrono::Utc;
 use sqlx::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
-use backend::modules::demands::domain::entities::DemandComment;
-use backend::modules::demands::domain::entities::DemandCommentAuthorRole;
-use backend::modules::demands::application::ports::DemandNotificationRepository;
-use backend::modules::demands::domain::entities::DemandNotification;
-use backend::modules::demands::domain::entities::DemandNotificationEventType;
-use backend::modules::demands::infrastructure::PostgresDemandNotificationRepository;
 /// Cria uma instituição no banco de teste.
 async fn create_test_institution(pool: &PgPool, name: &str) -> Uuid {
     let id = Uuid::new_v4();

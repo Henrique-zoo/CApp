@@ -9,7 +9,6 @@
 //! de perfil externo são uma fotografia da consulta, nunca credenciais. Falhas
 //! SQL são registradas antes da conversão para os contratos de aplicação.
 
-use uuid::Uuid;
 use crate::infrastructure::database::PgDatabase;
 use crate::modules::identity::application::error::InstitutionRepositoryError;
 use crate::modules::identity::application::error::InstitutionalVerificationRepositoryError;
@@ -17,19 +16,20 @@ use crate::modules::identity::application::error::UserRepositoryError;
 use crate::modules::identity::application::ports::InstitutionRepository;
 use crate::modules::identity::application::ports::InstitutionalVerificationRepository;
 use crate::modules::identity::application::ports::UserRepository;
+use crate::modules::identity::domain::CatalogStatus;
+use crate::modules::identity::domain::UserStatus;
 use crate::modules::identity::domain::entities::institution::Institution;
 use crate::modules::identity::domain::entities::institutional_verification::InstitutionalVerification;
 use crate::modules::identity::domain::entities::user::User;
-use std::collections::HashMap;
-use std::sync::Arc;
+use crate::modules::identity::domain::entities::user_preference::UserPreference;
+use crate::modules::identity::domain::entities::user_preference::UserPreferenceError;
 use async_trait::async_trait;
 use chrono::DateTime;
 use chrono::Utc;
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::modules::identity::domain::entities::user_preference::UserPreference;
-use crate::modules::identity::domain::entities::user_preference::UserPreferenceError;
-use crate::modules::identity::domain::CatalogStatus;
-use crate::modules::identity::domain::UserStatus;
+use uuid::Uuid;
 impl From<sqlx::Error> for InstitutionRepositoryError {
     /// Converte erro SQLx em falha técnica; a consulta registra o diagnóstico antes da conversão.
     fn from(_error: sqlx::Error) -> Self {

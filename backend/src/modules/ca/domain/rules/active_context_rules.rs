@@ -15,8 +15,8 @@ use uuid::Uuid;
 
 use crate::modules::{
     ca::domain::entities::{
-        context_center::{AcademicCenter, AcademicCenterStatus},
         active_context::{ActiveCaContext, ActiveContextError, ManagementRoleAssignment},
+        context_center::{AcademicCenter, AcademicCenterStatus},
     },
     identity::domain::entities::user_preference::UserPreference,
 };

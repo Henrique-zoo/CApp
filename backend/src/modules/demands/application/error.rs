@@ -3,10 +3,10 @@
 //! Centraliza as falhas de regras de negócio, autorização de acesso ao fórum,
 //! validações de integridade e contratos de persistência.
 
+use crate::modules::demands::domain::entities::DemandError;
 use std::error::Error;
 use std::fmt;
 use uuid::Uuid;
-use crate::modules::demands::domain::entities::DemandError;
 /// Erros decorrentes de operações de persistência de demandas.
 #[derive(Debug)]
 pub enum DemandRepositoryError {

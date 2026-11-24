@@ -3,24 +3,24 @@
 //! Os casos de uso dependem exclusivamente destas traits, sem acoplamento a SQLx,
 //! drivers de banco de dados ou detalhes de infraestrutura HTTP.
 
-use std::error::Error;
-use std::fmt;
-use async_trait::async_trait;
-use uuid::Uuid;
 use crate::modules::ca::application::error::MandateApplicationError;
+use crate::modules::ca::application::error::PollApplicationError;
 use crate::modules::ca::domain::entities::AcademicCenter;
 use crate::modules::ca::domain::entities::Mandate;
-use std::collections::HashMap;
-use chrono::DateTime;
-use chrono::Utc;
-use crate::modules::ca::application::error::PollApplicationError;
 use crate::modules::ca::domain::entities::PollVote;
 use crate::modules::ca::domain::entities::StudentPoll;
-use std::collections::HashSet;
-use thiserror::Error;
 use crate::modules::ca::domain::entities::permission::Permission;
 use crate::modules::ca::domain::entities::role::Role;
 use crate::modules::ca::domain::entities::role_assignment::RoleAssignment;
+use async_trait::async_trait;
+use chrono::DateTime;
+use chrono::Utc;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::error::Error;
+use std::fmt;
+use thiserror::Error;
+use uuid::Uuid;
 /// Erros originados nas operações de persistência de Centro Acadêmico.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcademicCenterRepositoryError {

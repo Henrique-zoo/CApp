@@ -49,44 +49,63 @@ impl IntoResponse for AuthExtractionError {
 
 impl<S> FromRequestParts<S> for AuthenticatedUser
 where
-    S: Send + Sync,
+    S: Send + Sync + 'static,
 {
     type Rejection = AuthExtractionError;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        if let Some(user_id_header) = parts
-            .headers
-            .get("X-User-Id")
-            .or_else(|| parts.headers.get("x-user-id"))
-            .or_else(|| parts.headers.get("X-Actor-Id"))
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        if let Some(state) =
+            (state as &dyn std::any::Any).downcast_ref::<crate::api::state::AppState>()
         {
-            let user_id_str = user_id_header
-                .to_str()
-                .map_err(|_| AuthExtractionError::InvalidCredentials)?;
-            let user_id = Uuid::parse_str(user_id_str.trim())
-                .map_err(|_| AuthExtractionError::InvalidCredentials)?;
-            return Ok(Self { user_id });
+            if !parts.headers.contains_key(header::AUTHORIZATION) {
+                return Err(AuthExtractionError::MissingCredentials);
+            }
+            let account =
+                super::extractors::AuthenticatedAccount::authenticate(&parts.headers, state)
+                    .await
+                    .map_err(|_| AuthExtractionError::InvalidCredentials)?;
+            return Ok(Self::new(account.account_id));
         }
 
-        if let Some(auth_header) = parts.headers.get(header::AUTHORIZATION) {
-            let auth_str = auth_header
-                .to_str()
-                .map_err(|_| AuthExtractionError::InvalidCredentials)?;
-            if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                let user_id = Uuid::parse_str(token.trim())
+        #[cfg(not(test))]
+        return Err(AuthExtractionError::MissingCredentials);
+
+        #[cfg(test)]
+        {
+            if let Some(user_id_header) = parts
+                .headers
+                .get("X-User-Id")
+                .or_else(|| parts.headers.get("x-user-id"))
+                .or_else(|| parts.headers.get("X-Actor-Id"))
+            {
+                let user_id_str = user_id_header
+                    .to_str()
+                    .map_err(|_| AuthExtractionError::InvalidCredentials)?;
+                let user_id = Uuid::parse_str(user_id_str.trim())
                     .map_err(|_| AuthExtractionError::InvalidCredentials)?;
                 return Ok(Self { user_id });
             }
-            return Err(AuthExtractionError::InvalidCredentials);
-        }
 
-        Err(AuthExtractionError::MissingCredentials)
+            if let Some(auth_header) = parts.headers.get(header::AUTHORIZATION) {
+                let auth_str = auth_header
+                    .to_str()
+                    .map_err(|_| AuthExtractionError::InvalidCredentials)?;
+                if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                    let user_id = Uuid::parse_str(token.trim())
+                        .map_err(|_| AuthExtractionError::InvalidCredentials)?;
+                    return Ok(Self { user_id });
+                }
+                return Err(AuthExtractionError::InvalidCredentials);
+            }
+
+            Err(AuthExtractionError::MissingCredentials)
+        }
     }
 }
 
 impl<S> OptionalFromRequestParts<S> for AuthenticatedUser
 where
-    S: Send + Sync,
+    S: Send + Sync + 'static,
 {
     type Rejection = AuthExtractionError;
 

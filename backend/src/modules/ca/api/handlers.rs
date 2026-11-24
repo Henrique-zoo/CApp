@@ -3,7 +3,52 @@
 //! Implementa os endpoints REST para configuração inicial e consulta
 //! de mandatos de gestão do Centro Acadêmico (Issue #296).
 
-use std::time::Duration;
+use crate::api::error::ApiError;
+use crate::api::error::ApiResult;
+use crate::api::state::AppState;
+use crate::modules::ca::api::dto::AddMandateMemberRequest;
+use crate::modules::ca::api::dto::ConfigureInitialMandateRequest;
+use crate::modules::ca::api::dto::CreatePollRequest;
+use crate::modules::ca::api::dto::MandateMemberResponse;
+use crate::modules::ca::api::dto::MandateResponse;
+use crate::modules::ca::api::dto::PollResponse;
+use crate::modules::ca::api::dto::TransitionMandateRequest;
+use crate::modules::ca::api::dto::VotePollRequest;
+use crate::modules::ca::api::dto::VoteResponse;
+use crate::modules::ca::application::commands::AddMandateMemberCommand;
+use crate::modules::ca::application::commands::ClosePollCommand;
+use crate::modules::ca::application::commands::ConcludeActiveMandateCommand;
+use crate::modules::ca::application::commands::ConfigureInitialMandateCommand;
+use crate::modules::ca::application::commands::CreatePollCommand;
+use crate::modules::ca::application::commands::DisaffiliateMandateMemberCommand;
+use crate::modules::ca::application::commands::TransitionMandateCommand;
+use crate::modules::ca::application::commands::VotePollCommand;
+use crate::modules::ca::application::commands::add_mandate_member as run_add_mandate_member;
+use crate::modules::ca::application::commands::conclude_active_mandate as run_conclude_active_mandate;
+use crate::modules::ca::application::commands::configure_initial_mandate as run_configure_initial_mandate;
+use crate::modules::ca::application::commands::disaffiliate_mandate_member as run_disaffiliate_mandate_member;
+use crate::modules::ca::application::commands::execute_close_poll;
+use crate::modules::ca::application::commands::execute_create_poll;
+use crate::modules::ca::application::commands::execute_vote_poll;
+use crate::modules::ca::application::commands::transition_mandate as run_transition_mandate;
+use crate::modules::ca::application::error::MandateApplicationError;
+use crate::modules::ca::application::error::PollApplicationError;
+use crate::modules::ca::application::ports::DefaultAcademicCenterAuthorization;
+use crate::modules::ca::application::ports::DefaultPollAuthorization;
+use crate::modules::ca::application::ports::PollRepository;
+use crate::modules::ca::application::queries::GetPollQuery;
+use crate::modules::ca::application::queries::ListPollsQuery;
+use crate::modules::ca::application::queries::execute_get_poll;
+use crate::modules::ca::application::queries::execute_list_polls;
+use crate::modules::ca::application::queries::get_current_mandate as run_get_current_mandate;
+use crate::modules::ca::application::queries::get_mandate_by_id as run_get_mandate_by_id;
+use crate::modules::ca::application::queries::get_mandates_history as run_get_mandates_history;
+use crate::modules::ca::application::queries::list_mandates as run_list_mandates;
+use crate::modules::ca::domain::entities::PollError;
+use crate::modules::identity::api::extractors::AuthenticatedInstitutionalIdentity;
+use crate::modules::identity::api::extractors::firebase_bearer_token;
+use crate::modules::identity::application::ports::IdentityTokenVerifier;
+use crate::modules::identity::application::ports::UserRepository;
 use axum::Json;
 use axum::extract::Path;
 use axum::extract::State;
@@ -11,54 +56,10 @@ use axum::extract::rejection::JsonRejection;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use chrono::Utc;
+use std::time::Duration;
 use tokio::time::timeout;
 use uuid::Uuid;
-use crate::api::error::ApiError;
-use crate::api::error::ApiResult;
-use crate::api::state::AppState;
-use crate::modules::ca::api::dto::AddMandateMemberRequest;
-use crate::modules::ca::api::dto::ConfigureInitialMandateRequest;
-use crate::modules::ca::api::dto::MandateMemberResponse;
-use crate::modules::ca::api::dto::MandateResponse;
-use crate::modules::ca::api::dto::TransitionMandateRequest;
-use crate::modules::ca::application::commands::AddMandateMemberCommand;
-use crate::modules::ca::application::commands::ConcludeActiveMandateCommand;
-use crate::modules::ca::application::commands::ConfigureInitialMandateCommand;
-use crate::modules::ca::application::commands::DisaffiliateMandateMemberCommand;
-use crate::modules::ca::application::commands::TransitionMandateCommand;
-use crate::modules::ca::application::commands::add_mandate_member as run_add_mandate_member;
-use crate::modules::ca::application::commands::conclude_active_mandate as run_conclude_active_mandate;
-use crate::modules::ca::application::commands::configure_initial_mandate as run_configure_initial_mandate;
-use crate::modules::ca::application::commands::disaffiliate_mandate_member as run_disaffiliate_mandate_member;
-use crate::modules::ca::application::commands::transition_mandate as run_transition_mandate;
-use crate::modules::ca::application::error::MandateApplicationError;
-use crate::modules::ca::application::ports::DefaultAcademicCenterAuthorization;
-use crate::modules::ca::application::queries::get_current_mandate as run_get_current_mandate;
-use crate::modules::ca::application::queries::get_mandate_by_id as run_get_mandate_by_id;
-use crate::modules::ca::application::queries::get_mandates_history as run_get_mandates_history;
-use crate::modules::ca::application::queries::list_mandates as run_list_mandates;
-use crate::modules::identity::api::extractors::firebase_bearer_token;
-use crate::modules::identity::application::ports::IdentityTokenVerifier;
-use crate::modules::identity::application::ports::UserRepository;
-use chrono::Utc;
-use crate::modules::ca::api::dto::CreatePollRequest;
-use crate::modules::ca::api::dto::PollResponse;
-use crate::modules::ca::api::dto::VotePollRequest;
-use crate::modules::ca::api::dto::VoteResponse;
-use crate::modules::ca::application::commands::ClosePollCommand;
-use crate::modules::ca::application::commands::CreatePollCommand;
-use crate::modules::ca::application::commands::VotePollCommand;
-use crate::modules::ca::application::commands::execute_close_poll;
-use crate::modules::ca::application::commands::execute_create_poll;
-use crate::modules::ca::application::commands::execute_vote_poll;
-use crate::modules::ca::application::error::PollApplicationError;
-use crate::modules::ca::application::ports::PollRepository;
-use crate::modules::ca::application::queries::GetPollQuery;
-use crate::modules::ca::application::queries::ListPollsQuery;
-use crate::modules::ca::application::queries::execute_get_poll;
-use crate::modules::ca::application::queries::execute_list_polls;
-use crate::modules::ca::domain::entities::PollError;
-use crate::modules::identity::api::extractors::AuthenticatedInstitutionalIdentity;
 /// Converte um erro de aplicação de mandato para a resposta [`ApiError`] apropriada.
 fn map_mandate_application_error(error: MandateApplicationError) -> ApiError {
     match error {
@@ -588,7 +589,7 @@ pub(crate) async fn create_poll(
     let poll = execute_create_poll(
         &state.pg_database,
         &state.pg_database,
-        &DefaultAcademicCenterAuthorization,
+        &DefaultPollAuthorization,
         cmd,
     )
     .await
@@ -668,7 +669,7 @@ pub(crate) async fn vote_poll(
     let vote = execute_vote_poll(
         &state.pg_database,
         &state.pg_database,
-        &DefaultAcademicCenterAuthorization,
+        &DefaultPollAuthorization,
         cmd,
     )
     .await
@@ -701,7 +702,7 @@ pub(crate) async fn close_poll(
     let closed_poll = execute_close_poll(
         &state.pg_database,
         &state.pg_database,
-        &DefaultAcademicCenterAuthorization,
+        &DefaultPollAuthorization,
         cmd,
     )
     .await

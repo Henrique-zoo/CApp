@@ -3,8 +3,8 @@
 pub mod get_demand;
 pub mod list_demands;
 pub use get_demand::GetDemandQuery;
-pub use list_demands::ListDemandsQuery;
 pub use list_comments::ListDemandCommentsQuery;
+pub use list_demands::ListDemandsQuery;
 pub use list_notifications::ListDemandNotificationsQuery;
 pub mod list_comments;
 pub mod list_notifications;

@@ -130,6 +130,8 @@ pub fn create_router(state: AppState, app_check: AppCheckVerifier) -> Router {
         .route_layer(middleware::from_fn_with_state(app_check, require_app_check))
         .merge(elections_api::public_board_routes())
         .layer(crate::api::trace::create_trace_layer())
-        .layer(middleware::from_fn(crate::api::request_id::request_id_middleware))
+        .layer(middleware::from_fn(
+            crate::api::request_id::request_id_middleware,
+        ))
         .with_state(state)
 }

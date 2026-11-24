@@ -3,12 +3,6 @@
 //! Encapsula o modelo de demanda acadêmica, histórico de alterações de status,
 //! fóruns de atuação (Institucional e Espaço Físico do CA) e suas invariantes.
 
-use std::error::Error;
-use std::fmt;
-use std::str::FromStr;
-use chrono::DateTime;
-use chrono::Utc;
-use uuid::Uuid;
 use crate::modules::demands::domain::rules::validate_description;
 use crate::modules::demands::domain::rules::validate_optional_category;
 use crate::modules::demands::domain::rules::validate_optional_comment;
@@ -16,6 +10,12 @@ use crate::modules::demands::domain::rules::validate_optional_course_name;
 use crate::modules::demands::domain::rules::validate_optional_title;
 use crate::modules::demands::domain::rules::validate_status_transition;
 use crate::modules::demands::domain::rules::validate_timestamps;
+use chrono::DateTime;
+use chrono::Utc;
+use std::error::Error;
+use std::fmt;
+use std::str::FromStr;
+use uuid::Uuid;
 /// Erros decorrentes de violações de regras de negócio ou validação de demandas.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DemandError {

@@ -3,8 +3,8 @@
 //! [`dto`] define os contratos de transferência; [`handlers`] adapta as requisições;
 //! [`error`] traduz as falhas de aplicação para os códigos HTTP adequados.
 
-use axum::Router;
 use crate::api::state::AppState;
+use axum::Router;
 pub mod dto;
 pub mod error;
 pub mod handlers;

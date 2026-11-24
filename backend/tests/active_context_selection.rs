@@ -8,7 +8,7 @@
 
 use backend::{
     domain::{
-        context_center::{CACC_DIDACTIC_ID, CAER_DIDACTIC_ID},
+        academic_center::{CACC_DIDACTIC_ID, CAER_DIDACTIC_ID},
         active_context::{
             ActiveCaContext, ActiveContextError, ActiveContextSource, ManagementRoleAssignment,
         },
@@ -25,9 +25,9 @@ use backend::{
                 has_administrative_privileges_via_active_context,
                 is_eligible_to_vote_via_active_context,
             },
-            infrastructure::{InMemoryContextCenterRepository, InMemoryActiveContextSessionStore},
+            infrastructure::{InMemoryActiveContextSessionStore, InMemoryContextCenterRepository},
         },
-        identity::infrastructure::active_context_repository::{
+        identity::infrastructure::repository::{
             InMemoryUserPreferenceRepository, UserPreferenceRepository,
         },
     },

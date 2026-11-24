@@ -11,8 +11,8 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::modules::ca::domain::entities::{
-    context_center::{AcademicCenter, AcademicCenterError, AcademicCenterStatus},
     active_context::{ActiveCaContext, ActiveContextError},
+    context_center::{AcademicCenter, AcademicCenterError, AcademicCenterStatus},
 };
 
 /// Contrato assíncrono para manipulação do contexto ativo de navegação em sessão/memória.

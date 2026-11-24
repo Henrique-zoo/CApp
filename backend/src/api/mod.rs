@@ -10,8 +10,8 @@
 //! controlado com drenagem de conexões e liberação de recursos.
 
 mod app_check;
-pub mod error;
 pub mod auth;
+pub mod error;
 pub mod router;
 pub mod shutdown;
 pub mod state;

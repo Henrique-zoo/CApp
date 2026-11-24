@@ -10,9 +10,7 @@ use crate::modules::mentorship::domain::entities::participant::MentorshipPartici
 use crate::modules::mentorship::domain::entities::program::MentorshipProgram;
 use crate::modules::mentorship::domain::entities::run::MatchingRun;
 use crate::modules::mentorship::domain::entities::suggestion::MatchingSuggestion;
-use crate::modules::mentorship::domain::{
-    MentorshipMatchStatus, MentorshipParticipantRole,
-};
+use crate::modules::mentorship::domain::{MentorshipMatchStatus, MentorshipParticipantRole};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -233,9 +231,10 @@ fn validate_new_match(
         return Err(InvalidMatch);
     }
 
-    if active_matches.iter().any(|m| {
-        m.is_active() && m.mentor_id == mentor.id() && m.mentee_id == mentee.id()
-    }) {
+    if active_matches
+        .iter()
+        .any(|m| m.is_active() && m.mentor_id == mentor.id() && m.mentee_id == mentee.id())
+    {
         return Err(InvalidMatch);
     }
 
@@ -321,8 +320,7 @@ mod tests {
         mentor: &MentorshipParticipant,
         mentee: &MentorshipParticipant,
     ) -> MatchingSuggestion {
-        MatchingSuggestion::propose(Uuid::new_v4(), run, mentor, mentee, Some(0.8), 1, &[])
-            .unwrap()
+        MatchingSuggestion::propose(Uuid::new_v4(), run, mentor, mentee, Some(0.8), 1, &[]).unwrap()
     }
 
     #[test]
@@ -684,16 +682,9 @@ mod tests {
         )
         .unwrap();
 
-        let mut suggestion = MatchingSuggestion::propose(
-            Uuid::new_v4(),
-            &run,
-            &mentor_b,
-            &mentee,
-            None,
-            1,
-            &[],
-        )
-        .unwrap();
+        let mut suggestion =
+            MatchingSuggestion::propose(Uuid::new_v4(), &run, &mentor_b, &mentee, None, 1, &[])
+                .unwrap();
 
         assert_eq!(
             MentorshipMatch::accept_suggestion(

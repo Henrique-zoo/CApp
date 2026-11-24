@@ -202,6 +202,19 @@ impl AppUser {
     }
 
     /// Cria uma instância do estudante calouro didático da UnB.
+    pub fn veterano_2_didactic() -> Self {
+        let reference_time = DateTime::from_timestamp(1_767_225_600, 0).unwrap_or_default();
+        Self {
+            id: VETERANO_2_DIDACTIC_ID,
+            display_name: "Estudante Veterano Secundário UnB".to_string(),
+            institutional_email: "241098765@aluno.unb.br".to_string(),
+            status: AppUserStatus::Active,
+            created_at: reference_time,
+            updated_at: reference_time,
+        }
+    }
+
+    /// Constrói o estudante calouro usado nos testes.
     pub fn calouro_didactic() -> Self {
         let reference_time = DateTime::from_timestamp(1_767_225_600, 0).unwrap_or_default();
         Self {

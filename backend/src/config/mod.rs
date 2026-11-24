@@ -430,7 +430,7 @@ pub fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duratio
 mod tests;
 
 mod server;
-pub use server::{ServerConfig, DEFAULT_BIND_ADDRESS, DEFAULT_SHUTDOWN_TIMEOUT};
+pub use server::{DEFAULT_BIND_ADDRESS, DEFAULT_SHUTDOWN_TIMEOUT, ServerConfig};
 
 mod secrets;
 pub use secrets::{AppConfig, Environment, SecretString, sanitize_connection_error};

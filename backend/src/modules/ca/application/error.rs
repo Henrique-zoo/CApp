@@ -3,16 +3,16 @@
 //! Representa as falhas de regras de orquestração, autorização,
 //! inexistência de recursos e inconsistências temporais.
 
+use crate::modules::ca::application::ports::AcademicCenterRepositoryError;
+use crate::modules::ca::application::ports::MandateRepositoryError;
+use crate::modules::ca::application::ports::PollRepositoryError;
+use crate::modules::ca::domain::entities::MandateError;
+use crate::modules::ca::domain::entities::PollError;
+use chrono::DateTime;
+use chrono::Utc;
 use std::error::Error;
 use std::fmt;
 use uuid::Uuid;
-use crate::modules::ca::application::ports::AcademicCenterRepositoryError;
-use crate::modules::ca::application::ports::MandateRepositoryError;
-use crate::modules::ca::domain::entities::MandateError;
-use chrono::DateTime;
-use chrono::Utc;
-use crate::modules::ca::application::ports::PollRepositoryError;
-use crate::modules::ca::domain::entities::PollError;
 /// Erros emitidos pelos casos de uso de mandato do Centro Acadêmico.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MandateApplicationError {

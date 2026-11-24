@@ -3,31 +3,31 @@
 //! Contém implementações PostgreSQL e em memória para Centros Acadêmicos
 //! e Mandatos de gestão, garantindo isolamento entre dados relacionais e domínio.
 
-use std::collections::HashMap;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::sync::RwLock;
-use async_trait::async_trait;
-use chrono::DateTime;
-use chrono::NaiveDate;
-use chrono::Utc;
-use uuid::Uuid;
 use crate::infrastructure::database::PgDatabase;
 use crate::modules::ca::application::ports::AcademicCenterRepository;
 use crate::modules::ca::application::ports::AcademicCenterRepositoryError;
 use crate::modules::ca::application::ports::MandateRepository;
 use crate::modules::ca::application::ports::MandateRepositoryError;
+use crate::modules::ca::application::ports::PollRepository;
+use crate::modules::ca::application::ports::PollRepositoryError;
 use crate::modules::ca::domain::entities::AcademicCenter;
 use crate::modules::ca::domain::entities::AcademicCenterStatus;
 use crate::modules::ca::domain::entities::Mandate;
 use crate::modules::ca::domain::entities::MandateMember;
 use crate::modules::ca::domain::entities::MandateStatus;
-use crate::modules::ca::application::ports::PollRepository;
-use crate::modules::ca::application::ports::PollRepositoryError;
 use crate::modules::ca::domain::entities::PollOption;
 use crate::modules::ca::domain::entities::PollStatus;
 use crate::modules::ca::domain::entities::PollVote;
 use crate::modules::ca::domain::entities::StudentPoll;
+use async_trait::async_trait;
+use chrono::DateTime;
+use chrono::NaiveDate;
+use chrono::Utc;
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::RwLock;
+use uuid::Uuid;
 /// Estrutura de mapeamento relacional (Row) da tabela `academic_center`.
 #[derive(Debug, sqlx::FromRow)]
 pub struct AcademicCenterRow {

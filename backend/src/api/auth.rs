@@ -167,6 +167,12 @@ pub trait HasAuthorizationService: Send + Sync {
     fn authorization_service(&self) -> Arc<dyn AuthorizationServicePort>;
 }
 
+impl HasAuthorizationService for crate::api::state::AppState {
+    fn authorization_service(&self) -> Arc<dyn AuthorizationServicePort> {
+        self.authorization.clone()
+    }
+}
+
 impl HasAuthorizationService for Arc<dyn AuthorizationServicePort> {
     fn authorization_service(&self) -> Arc<dyn AuthorizationServicePort> {
         Arc::clone(self)

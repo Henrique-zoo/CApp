@@ -123,7 +123,7 @@ async fn should_load_and_validate_didactic_fixture_data() {
 #[test]
 fn should_verify_migration_sql_foreign_keys_and_constraints() {
     let migration_user_preference =
-        include_str!("../migrations/20261008000003_create_user_preference_table.sql");
+        include_str!("../migrations/20261124230001_create_user_preference_table.sql");
 
     // Verifica integridade referencial com chaves estrangeiras
     assert!(
