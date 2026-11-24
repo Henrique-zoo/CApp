@@ -1,4 +1,5 @@
-//! Espaço reservado para serviços de aplicação do módulo de notícias.
-//!
-//! Ainda não possui serviços. Sua responsabilidade prevista é coordenar
-//! regras de domínio, persistência e integrações durante os casos de uso.
+//! Serviços de aplicação do módulo de notícias.
+
+pub mod news_service;
+
+pub use news_service::NewsService;

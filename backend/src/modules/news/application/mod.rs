@@ -1,8 +1,21 @@
-//! Camada de casos de uso prevista para o módulo de notícias.
+//! Camada de aplicação do módulo de notícias.
 //!
-//! [`commands`] agrupará alterações de estado, [`queries`] consultas e
-//! [`services`] a coordenação dessas operações. Ainda não há implementações.
+//! Organiza os casos de uso de alteração de estado ([`commands`]),
+//! consultas ([`queries`]), contratos abstratos ([`ports`]) e
+//! a coordenação desses fluxos ([`services`]).
 
 pub mod commands;
+pub mod ports;
 pub mod queries;
 pub mod services;
+
+pub use commands::{
+    CreateNewsArticleCommand, CreateNewsArticleHandler, UpdateNewsArticleCommand,
+    UpdateNewsArticleHandler,
+};
+pub use ports::{NewsAuthorizationPort, NewsRepository};
+pub use queries::{
+    GetNewsArticleHandler, GetNewsArticleQuery, ListNewsArticlesByCaHandler,
+    ListNewsArticlesByCaQuery,
+};
+pub use services::NewsService;

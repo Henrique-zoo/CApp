@@ -110,6 +110,7 @@
 //! A automação dos cenários Gherkin é uma suíte separada; cenários marcados como
 //! pendentes não validam autenticação por terem sido compilados.
 
+/// Camada de API HTTP e extractors de identidade.
 pub mod api;
 pub mod application;
 pub mod domain;

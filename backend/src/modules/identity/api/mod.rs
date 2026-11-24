@@ -15,10 +15,8 @@ use axum::routing::post;
 use crate::api::state::AppState;
 pub use extractor::AuthExtractionError;
 pub use extractor::AuthenticatedUser;
-pub mod dto;
 pub mod error;
 pub mod extractors;
-pub mod handlers;
 /// Constrói as rotas de identidade, ainda dependentes do estado.
 ///
 /// # Rotas
