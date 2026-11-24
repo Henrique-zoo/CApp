@@ -33,6 +33,8 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../modules/elections/elections_widgets.dart';
+import '../modules/faq/faq.dart';
+import '../modules/faq/faq_widgets.dart';
 import 'app_dependencies.dart';
 import 'capp.dart';
 import 'session_lifecycle_observer.dart';
@@ -63,6 +65,9 @@ class AppRoot extends StatefulWidget {
     required this.dependencies,
     this.electionId = '',
     this.manifestHash = '',
+    this.academicCenterId = '',
+    this.academicCenterName = '',
+    this.canManageFaq = false,
   });
 
   /// Composição utilizada pela interface e pertencente a este proprietário.
@@ -77,6 +82,15 @@ class AppRoot extends StatefulWidget {
   /// Âncora independente usada para conferir o manifesto servido pela API.
   final String manifestHash;
 
+  /// Identificador (UUID) do Centro Acadêmico ativo para consulta ao FAQ.
+  final String academicCenterId;
+
+  /// Nome exibível do Centro Acadêmico ativo, quando informado na composição.
+  final String academicCenterName;
+
+  /// Indica se a sessão atual possui permissão de gestão no FAQ do CA ativo.
+  final bool canManageFaq;
+
   /// Cria o estado responsável pela montagem e pelo descarte da composição.
   @override
   State<AppRoot> createState() => _AppRootState();
@@ -88,6 +102,34 @@ class AppRoot extends StatefulWidget {
 /// são acompanhados por [_disposeDependencies], que encaminha suas falhas
 /// ao mecanismo de diagnóstico do Flutter.
 class _AppRootState extends State<AppRoot> {
+  late FaqController _faqController;
+
+  UuidValue? _resolvedAcademicCenterId() {
+    if (!Uuid.isValidUUIDFormat(fromString: widget.academicCenterId)) {
+      return null;
+    }
+    return UuidValue.withFormatValidation(
+      widget.academicCenterId.toLowerCase(),
+    );
+  }
+
+  String? _resolvedAcademicCenterName() {
+    final trimmed = widget.academicCenterName.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  FaqController _buildFaqController() => widget.dependencies.createFaqController(
+    academicCenterId: _resolvedAcademicCenterId(),
+    academicCenterName: _resolvedAcademicCenterName(),
+    canManage: widget.canManageFaq,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _faqController = _buildFaqController();
+  }
+
   /// Encerra a composição anterior quando sua instância é substituída.
   ///
   /// [oldWidget] contém a configuração anteriormente associada a este estado.
@@ -108,7 +150,19 @@ class _AppRootState extends State<AppRoot> {
       _localManifestHash = null;
     }
     if (!identical(oldWidget.dependencies, widget.dependencies)) {
+      unawaited(_faqController.dispose());
+      _faqController = _buildFaqController();
       unawaited(_disposeDependencies(oldWidget.dependencies));
+    } else if (oldWidget.academicCenterId != widget.academicCenterId ||
+        oldWidget.academicCenterName != widget.academicCenterName ||
+        oldWidget.canManageFaq != widget.canManageFaq) {
+      unawaited(
+        _faqController.setAcademicCenter(
+          _resolvedAcademicCenterId(),
+          academicCenterName: _resolvedAcademicCenterName(),
+          canManage: widget.canManageFaq,
+        ),
+      );
     }
   }
 
@@ -226,6 +280,7 @@ class _AppRootState extends State<AppRoot> {
       controller: widget.dependencies.sessionController,
       child: CApp(
         electionHome: Builder(builder: _buildElectionHome),
+        faqHome: FaqPage(controller: _faqController),
         sessionController: widget.dependencies.sessionController,
         backendReadinessController:
             widget.dependencies.backendReadinessController,
@@ -244,6 +299,7 @@ class _AppRootState extends State<AppRoot> {
   /// operações correspondentes, sem depender deste método.
   @override
   void dispose() {
+    unawaited(_faqController.dispose());
     unawaited(_disposeDependencies(widget.dependencies));
 
     super.dispose();

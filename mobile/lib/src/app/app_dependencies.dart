@@ -55,6 +55,8 @@ import '../modules/elections/infrastructure/backend/voter_registration_gateway.d
 import '../modules/elections/infrastructure/device_voter_keys.dart';
 import '../modules/elections/infrastructure/election_failure_adapter.dart';
 import '../modules/elections/infrastructure/secret_voting.dart';
+import '../modules/faq/faq.dart';
+import '../modules/faq/infrastructure/backend_faq_gateway.dart';
 import '../modules/identity/application/institutional_auth_service.dart';
 import '../modules/identity/identity.dart';
 import '../modules/identity/infrastructure/backend/backend_institutional_identity_gateway.dart';
@@ -114,6 +116,21 @@ final class AppDependencies {
     _voterRegistrationGateway,
     _currentAccount,
     _preferences,
+  );
+
+  /// Gateway de acesso ao módulo de FAQ no backend CApp.
+  late final FaqGateway faqGateway = BackendFaqGateway(_backendApi.faq);
+
+  /// Cria um controlador de FAQ vinculado ao Centro Acadêmico ativo.
+  FaqController createFaqController({
+    UuidValue? academicCenterId,
+    String? academicCenterName,
+    bool canManage = false,
+  }) => FaqController(
+    gateway: faqGateway,
+    academicCenterId: academicCenterId,
+    academicCenterName: academicCenterName,
+    canManage: canManage,
   );
 
   /// Coordenação exposta à interface pela API pública do módulo.

@@ -32,6 +32,7 @@ import 'auth/firebase_bearer_interceptor.dart';
 import 'auth/firebase_app_check_interceptor.dart';
 import 'elections/ballot_api.dart';
 import 'elections/registration_api.dart';
+import 'faq/faq.dart';
 import 'identity/identity.dart';
 import 'monitoring/monitoring.dart';
 import 'tls/backend_trust_stub.dart'
@@ -128,6 +129,9 @@ final class BackendApi {
 
   late final RegistrationApi voterRegistration = RegistrationApi(_dio);
   late final BallotApi ballots = BallotApi(_dio);
+
+  /// Operações de consulta, busca e gestão do FAQ por Centro Acadêmico.
+  late final FaqApi faq = FaqApi(_dio);
 
   /// Verificações públicas de saúde e prontidão do backend.
   /// A composição consulta prontidão na abertura, sem bloquear login ou cache.
