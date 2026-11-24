@@ -840,8 +840,12 @@ paths:
                 title: "Gestão 2026-2027"
                 startDate: "2026-01-01"
                 endDate: "2026-12-31"
+                startsAt: "2026-01-01T00:00:00Z"
+                endsAt: "2026-12-31T23:59:59Z"
+                concludedAt: null
                 status: active
                 durationInDays: 364
+                members: []
                 createdAt: "2026-11-22T14:00:00Z"
                 updatedAt: "2026-11-22T14:00:00Z"
         "400":
@@ -941,8 +945,12 @@ paths:
                   title: "Gestão 2026-2027"
                   startDate: "2026-01-01"
                   endDate: "2026-12-31"
+                  startsAt: "2026-01-01T00:00:00Z"
+                  endsAt: "2026-12-31T23:59:59Z"
+                  concludedAt: null
                   status: active
                   durationInDays: 364
+                  members: []
                   createdAt: "2026-11-22T14:00:00Z"
                   updatedAt: "2026-11-22T14:00:00Z"
         "400":
@@ -1008,8 +1016,12 @@ paths:
                 title: "Gestão 2026-2027"
                 startDate: "2026-01-01"
                 endDate: "2026-12-31"
+                startsAt: "2026-01-01T00:00:00Z"
+                endsAt: "2026-12-31T23:59:59Z"
+                concludedAt: null
                 status: active
                 durationInDays: 364
+                members: []
                 createdAt: "2026-11-22T14:00:00Z"
                 updatedAt: "2026-11-22T14:00:00Z"
         "400":
@@ -3094,6 +3106,536 @@ paths:
         "503":
           $ref: "#/components/responses/AccountServiceUnavailable"
 
+  /academic-centers/{id}/mandates/history:
+    get:
+      operationId: getAcademicCenterMandatesHistory
+      tags: [Centros Acadêmicos]
+      summary: Consultar histórico de gestões concluídas do Centro Acadêmico
+      description: |
+        Retorna o histórico de mandatos anteriores (concluídos ou arquivados) do Centro Acadêmico,
+        ordenados cronologicamente decrescente por data de início. Permite consulta pública e transparente
+        das composições anteriores de gestão.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador único do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+            example: "018f0000-0000-7000-8000-000000000002"
+      responses:
+        "200":
+          description: Histórico de gestões do Centro Acadêmico retornado com sucesso.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MandateResponse"
+              example:
+                - id: "018f0000-0000-7000-8000-000000000001"
+                  academicCenterId: "018f0000-0000-7000-8000-000000000002"
+                  createdById: "018f0000-0000-7000-8000-000000000003"
+                  title: "Gestão 2025-2026"
+                  startDate: "2025-01-01"
+                  endDate: "2025-12-31"
+                  startsAt: "2025-01-01T00:00:00Z"
+                  endsAt: "2025-12-31T23:59:59Z"
+                  concludedAt: "2025-12-31T23:59:59Z"
+                  status: concluded
+                  durationInDays: 364
+                  members:
+                    - id: "018f0000-0000-7000-8000-000000000004"
+                      userId: "018f0000-0000-7000-8000-000000000003"
+                      name: "Maria Silva"
+                      role: "Presidente"
+                      isActive: true
+                      joinedAt: "2025-01-01T00:00:00Z"
+                      leftAt: null
+                  createdAt: "2025-01-01T00:00:00Z"
+                  updatedAt: "2025-12-31T23:59:59Z"
+        "400":
+          description: UUID do CA inválido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: bad_request
+                  message: Requisição inválida
+                  details: null
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "404":
+          description: Centro Acadêmico não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: ca_not_found
+                  message: Centro Acadêmico não encontrado
+                  details: null
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
+  /academic-centers/{id}/mandates/conclude:
+    post:
+      operationId: concludeActiveMandate
+      tags: [Centros Acadêmicos]
+      summary: Encerrar e preservar o mandato de gestão ativo
+      description: |
+        Conclui o mandato vigente da gestão, registrando a data de encerramento (`concludedAt`)
+        e preservando o histórico de integrantes e períodos de forma imutável. Exige permissão
+        de gestão do Centro Acadêmico.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador único do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+            example: "018f0000-0000-7000-8000-000000000002"
+      responses:
+        "200":
+          description: Mandato concluído com sucesso e preservado no histórico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MandateResponse"
+              example:
+                id: "018f0000-0000-7000-8000-000000000001"
+                academicCenterId: "018f0000-0000-7000-8000-000000000002"
+                createdById: "018f0000-0000-7000-8000-000000000003"
+                title: "Gestão 2026-2027"
+                startDate: "2026-01-01"
+                endDate: "2026-12-31"
+                startsAt: "2026-01-01T00:00:00Z"
+                endsAt: "2026-12-31T23:59:59Z"
+                concludedAt: "2026-11-23T14:00:00Z"
+                status: concluded
+                durationInDays: 364
+                members: []
+                createdAt: "2026-11-22T14:00:00Z"
+                updatedAt: "2026-11-23T14:00:00Z"
+        "400":
+          description: UUID do CA inválido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: bad_request
+                  message: Requisição inválida
+                  details: null
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: Usuário não possui permissão para gerenciar este Centro Acadêmico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: user_not_permitted_in_ca
+                  message: Usuário não possui permissão para gerenciar este Centro Acadêmico
+                  details: null
+        "404":
+          description: Centro Acadêmico não encontrado ou sem mandato ativo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: no_active_mandate
+                  message: Não existe gestão vigente registrada para este Centro Acadêmico
+                  details: null
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
+  /academic-centers/{id}/mandates/transition:
+    post:
+      operationId: transitionMandate
+      tags: [Centros Acadêmicos]
+      summary: Realizar transição de gestão (conclui o mandato vigente e cria o novo mandato)
+      description: |
+        Conclui o mandato de gestão ativo atual e registra o novo mandato da gestão sucessora,
+        garantindo que o mandato antecessor seja preservado imutavelmente no histórico de gestões.
+        Exige permissão de gestão no Centro Acadêmico.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador único do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+            example: "018f0000-0000-7000-8000-000000000002"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransitionMandateRequest"
+            example:
+              startDate: "2027-01-01"
+              endDate: "2027-12-31"
+              title: "Gestão 2027-2028"
+      responses:
+        "201":
+          description: Transição concluída com sucesso e novo mandato ativo criado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MandateResponse"
+              example:
+                id: "018f0000-0000-7000-8000-000000000005"
+                academicCenterId: "018f0000-0000-7000-8000-000000000002"
+                createdById: "018f0000-0000-7000-8000-000000000003"
+                title: "Gestão 2027-2028"
+                startDate: "2027-01-01"
+                endDate: "2027-12-31"
+                startsAt: "2027-01-01T00:00:00Z"
+                endsAt: "2027-12-31T23:59:59Z"
+                concludedAt: null
+                status: active
+                durationInDays: 364
+                members: []
+                createdAt: "2026-11-23T14:00:00Z"
+                updatedAt: "2026-11-23T14:00:00Z"
+        "400":
+          description: JSON malformado ou UUID do CA inválido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: bad_request
+                  message: Requisição inválida
+                  details: null
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: Usuário não possui permissão para gerenciar este Centro Acadêmico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: user_not_permitted_in_ca
+                  message: Usuário não possui permissão para gerenciar este Centro Acadêmico
+                  details: null
+        "404":
+          description: Centro Acadêmico não encontrado ou sem mandato ativo para transicionar.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: no_active_mandate
+                  message: Não existe gestão vigente registrada para este Centro Acadêmico
+                  details: null
+        "422":
+          description: Datas inconsistentes do novo mandato.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: invalid_mandate_dates
+                  message: A data de término deve ser estritamente posterior à data de início
+                  details: null
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
+  /academic-centers/{id}/mandates/{mandateId}:
+    get:
+      operationId: getMandateById
+      tags: [Centros Acadêmicos]
+      summary: Consultar detalhes de um mandato específico
+      description: |
+        Retorna os detalhes completos de um mandato de gestão por seu identificador, incluindo integrantes
+        e status de atividade/conclusão.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador único do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+            example: "018f0000-0000-7000-8000-000000000002"
+        - name: mandateId
+          in: path
+          required: true
+          description: Identificador único do mandato.
+          schema:
+            type: string
+            format: uuid
+            example: "018f0000-0000-7000-8000-000000000001"
+      responses:
+        "200":
+          description: Mandato retornado com sucesso.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MandateResponse"
+              example:
+                id: "018f0000-0000-7000-8000-000000000001"
+                academicCenterId: "018f0000-0000-7000-8000-000000000002"
+                createdById: "018f0000-0000-7000-8000-000000000003"
+                title: "Gestão 2026-2027"
+                startDate: "2026-01-01"
+                endDate: "2026-12-31"
+                startsAt: "2026-01-01T00:00:00Z"
+                endsAt: "2026-12-31T23:59:59Z"
+                concludedAt: null
+                status: active
+                durationInDays: 364
+                members: []
+                createdAt: "2026-11-22T14:00:00Z"
+                updatedAt: "2026-11-22T14:00:00Z"
+        "400":
+          description: UUID inválido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: bad_request
+                  message: Requisição inválida
+                  details: null
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "404":
+          description: Centro Acadêmico ou mandato não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: mandate_not_found
+                  message: Mandato não encontrado
+                  details: null
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
+  /academic-centers/{id}/mandates/{mandateId}/members:
+    post:
+      operationId: addMandateMember
+      tags: [Centros Acadêmicos]
+      summary: Adicionar integrante ao mandato de gestão
+      description: |
+        Cadastra um novo membro na gestão do mandato especificado.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador único do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+            example: "018f0000-0000-7000-8000-000000000002"
+        - name: mandateId
+          in: path
+          required: true
+          description: Identificador único do mandato.
+          schema:
+            type: string
+            format: uuid
+            example: "018f0000-0000-7000-8000-000000000001"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddMandateMemberRequest"
+            example:
+              userId: "018f0000-0000-7000-8000-000000000003"
+              name: "Maria Silva"
+              role: "Presidente"
+      responses:
+        "201":
+          description: Integrante adicionado com sucesso.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MandateMemberResponse"
+              example:
+                id: "018f0000-0000-7000-8000-000000000004"
+                userId: "018f0000-0000-7000-8000-000000000003"
+                name: "Maria Silva"
+                role: "Presidente"
+                isActive: true
+                joinedAt: "2026-01-01T00:00:00Z"
+                leftAt: null
+        "400":
+          description: Dados inválidos ou UUID malformado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: bad_request
+                  message: Requisição inválida
+                  details: null
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: Usuário não possui permissão para gerenciar este Centro Acadêmico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: user_not_permitted_in_ca
+                  message: Usuário não possui permissão para gerenciar este Centro Acadêmico
+                  details: null
+        "404":
+          description: Centro Acadêmico ou mandato não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: mandate_not_found
+                  message: Mandato não encontrado
+                  details: null
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
+  /academic-centers/{id}/mandates/{mandateId}/members/{memberId}/disaffiliate:
+    post:
+      operationId: disaffiliateMandateMember
+      tags: [Centros Acadêmicos]
+      summary: Registrar desligamento de integrante da gestão
+      description: |
+        Registra a saída ou desfiliação de um integrante da gestão (`isActive = false`, `leftAt`),
+        preservando o histórico da sua atuação anterior de forma imutável.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador único do Centro Acadêmico.
+          schema:
+            type: string
+            format: uuid
+            example: "018f0000-0000-7000-8000-000000000002"
+        - name: mandateId
+          in: path
+          required: true
+          description: Identificador único do mandato.
+          schema:
+            type: string
+            format: uuid
+            example: "018f0000-0000-7000-8000-000000000001"
+        - name: memberId
+          in: path
+          required: true
+          description: Identificador único do integrante.
+          schema:
+            type: string
+            format: uuid
+            example: "018f0000-0000-7000-8000-000000000004"
+      responses:
+        "200":
+          description: Desligamento registrado com sucesso.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MandateMemberResponse"
+              example:
+                id: "018f0000-0000-7000-8000-000000000004"
+                userId: "018f0000-0000-7000-8000-000000000003"
+                name: "Maria Silva"
+                role: "Presidente"
+                isActive: false
+                joinedAt: "2026-01-01T00:00:00Z"
+                leftAt: "2026-06-01T12:00:00Z"
+        "400":
+          description: UUID malformado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: bad_request
+                  message: Requisição inválida
+                  details: null
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: Usuário não possui permissão para gerenciar este Centro Acadêmico.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: user_not_permitted_in_ca
+                  message: Usuário não possui permissão para gerenciar este Centro Acadêmico
+                  details: null
+        "404":
+          description: Centro Acadêmico, mandato ou integrante não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: member_not_found
+                  message: Integrante não encontrado
+                  details: null
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/AccountServiceUnavailable"
+
 components:
   parameters:
     ElectionId:
@@ -3549,8 +4091,11 @@ components:
         - createdById
         - startDate
         - endDate
+        - startsAt
+        - endsAt
         - status
         - durationInDays
+        - members
         - createdAt
         - updatedAt
       properties:
@@ -3583,6 +4128,21 @@ components:
           format: date
           description: Data de término do período do mandato (AAAA-MM-DD).
           example: "2026-12-31"
+        startsAt:
+          type: string
+          format: date-time
+          description: Instante UTC de início da vigência do mandato.
+          example: "2026-01-01T00:00:00Z"
+        endsAt:
+          type: string
+          format: date-time
+          description: Instante UTC previsto para encerramento do mandato.
+          example: "2026-12-31T23:59:59Z"
+        concludedAt:
+          type: [string, "null"]
+          format: date-time
+          description: Instante UTC de encerramento efetivo do mandato, quando concluído.
+          example: null
         status:
           type: string
           enum: [active, concluded, archived]
@@ -3592,6 +4152,11 @@ components:
           type: integer
           description: Duração total do mandato calculada em dias a partir das datas persistidas.
           example: 364
+        members:
+          type: array
+          description: Lista de integrantes da gestão e seus respectivos cargos e períodos.
+          items:
+            $ref: "#/components/schemas/MandateMemberResponse"
         createdAt:
           type: string
           format: date-time
@@ -3964,3 +4529,82 @@ components:
           type: [string, "null"]
           maxLength: 100
           description: Nova categoria temática opcional (máximo 100 caracteres).
+    MandateMemberResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - role
+        - isActive
+        - joinedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único do membro da gestão.
+          example: "018f0000-0000-7000-8000-000000000004"
+        userId:
+          type: [string, "null"]
+          format: uuid
+          description: Identificador único do usuário no CApp, quando vinculado.
+          example: "018f0000-0000-7000-8000-000000000003"
+        name:
+          type: string
+          description: Nome completo do integrante da gestão.
+          example: "Maria Silva"
+        role:
+          type: string
+          description: Cargo ou função exercida na gestão (ex. Presidente, Diretor Financeiro).
+          example: "Presidente"
+        isActive:
+          type: boolean
+          description: Indica se o integrante permanece ativo nesta gestão ou se foi desligado.
+          example: true
+        joinedAt:
+          type: string
+          format: date-time
+          description: Data e hora UTC de ingresso na gestão.
+          example: "2026-01-01T00:00:00Z"
+        leftAt:
+          type: [string, "null"]
+          format: date-time
+          description: Data e hora UTC de desligamento da gestão, quando aplicável.
+          example: null
+    TransitionMandateRequest:
+      type: object
+      additionalProperties: false
+      required: [startDate, endDate]
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Data de início do novo mandato da gestão (AAAA-MM-DD).
+          example: "2027-01-01"
+        endDate:
+          type: string
+          format: date
+          description: Data de término do novo mandato da gestão (AAAA-MM-DD).
+          example: "2027-12-31"
+        title:
+          type: [string, "null"]
+          description: Título ou nome opcional da nova chapa ou gestão.
+          example: "Gestão 2027-2028"
+    AddMandateMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [name, role]
+      properties:
+        userId:
+          type: [string, "null"]
+          format: uuid
+          description: Identificador do usuário no CApp caso possua conta.
+          example: "018f0000-0000-7000-8000-000000000003"
+        name:
+          type: string
+          description: Nome completo do novo integrante da gestão.
+          example: "Maria Silva"
+        role:
+          type: string
+          description: Cargo ou função a ser exercida.
+          example: "Presidente"

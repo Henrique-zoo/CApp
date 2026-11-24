@@ -12,6 +12,54 @@ use crate::modules::ca::domain::entities::{MandateError, MandateStatus};
 /// Comprimento máximo permitido para o título descritivo do mandato/gestão.
 pub const MAX_MANDATE_TITLE_LENGTH: usize = 120;
 
+/// Comprimento máximo permitido para o nome de um integrante da gestão.
+pub const MAX_MEMBER_NAME_LENGTH: usize = 150;
+
+/// Comprimento máximo permitido para o cargo de um integrante da gestão.
+pub const MAX_MEMBER_ROLE_LENGTH: usize = 100;
+
+/// Valida o nome de um integrante da gestão.
+pub fn validate_member_name(name: &str) -> Result<String, MandateError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(MandateError::EmptyMemberName);
+    }
+    if trimmed.chars().count() > MAX_MEMBER_NAME_LENGTH {
+        return Err(MandateError::MemberNameTooLong {
+            max: MAX_MEMBER_NAME_LENGTH,
+        });
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Valida o cargo de um integrante da gestão.
+pub fn validate_member_role(role: &str) -> Result<String, MandateError> {
+    let trimmed = role.trim();
+    if trimmed.is_empty() {
+        return Err(MandateError::EmptyMemberRole);
+    }
+    if trimmed.chars().count() > MAX_MEMBER_ROLE_LENGTH {
+        return Err(MandateError::MemberRoleTooLong {
+            max: MAX_MEMBER_ROLE_LENGTH,
+        });
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Valida a coerência cronológica das datas de vinculação e desvinculação de um integrante.
+pub fn validate_member_dates(
+    joined_at: DateTime<Utc>,
+    left_at: Option<DateTime<Utc>>,
+) -> Result<(), MandateError> {
+    if let Some(left) = left_at.filter(|&left| left < joined_at) {
+        return Err(MandateError::InconsistentMemberDates {
+            joined_at,
+            left_at: left,
+        });
+    }
+    Ok(())
+}
+
 /// Valida o título descritivo opcional da chapa ou gestão.
 ///
 /// Espaços nas extremidades são removidos. Caso o texto resultante seja vazio,
@@ -186,6 +234,57 @@ mod tests {
             MandateError::InvalidStatusTransition {
                 from: MandateStatus::Archived,
                 to: MandateStatus::Active,
+            }
+        );
+    }
+
+    #[test]
+    fn should_validate_member_name_and_role() {
+        assert_eq!(validate_member_name("  Ana Silva  ").unwrap(), "Ana Silva");
+        assert_eq!(
+            validate_member_name("   ").unwrap_err(),
+            MandateError::EmptyMemberName
+        );
+
+        let long_name = "a".repeat(MAX_MEMBER_NAME_LENGTH + 1);
+        assert_eq!(
+            validate_member_name(&long_name).unwrap_err(),
+            MandateError::MemberNameTooLong {
+                max: MAX_MEMBER_NAME_LENGTH
+            }
+        );
+
+        assert_eq!(
+            validate_member_role("  Presidente  ").unwrap(),
+            "Presidente"
+        );
+        assert_eq!(
+            validate_member_role("   ").unwrap_err(),
+            MandateError::EmptyMemberRole
+        );
+
+        let long_role = "r".repeat(MAX_MEMBER_ROLE_LENGTH + 1);
+        assert_eq!(
+            validate_member_role(&long_role).unwrap_err(),
+            MandateError::MemberRoleTooLong {
+                max: MAX_MEMBER_ROLE_LENGTH
+            }
+        );
+    }
+
+    #[test]
+    fn should_validate_member_dates() {
+        let now = Utc::now();
+        let later = now + chrono::Duration::hours(2);
+        let earlier = now - chrono::Duration::hours(2);
+
+        assert!(validate_member_dates(now, None).is_ok());
+        assert!(validate_member_dates(now, Some(later)).is_ok());
+        assert_eq!(
+            validate_member_dates(now, Some(earlier)).unwrap_err(),
+            MandateError::InconsistentMemberDates {
+                joined_at: now,
+                left_at: earlier
             }
         );
     }

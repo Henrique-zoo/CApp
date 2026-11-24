@@ -7,7 +7,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::modules::ca::domain::entities::Mandate;
+use crate::modules::ca::domain::entities::{Mandate, MandateMember};
 
 /// Corpo da requisição de configuração inicial do mandato da gestão.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -22,7 +22,67 @@ pub struct ConfigureInitialMandateRequest {
     pub title: Option<String>,
 }
 
-/// Resposta pública contendo as informações e duração do mandato de gestão.
+/// Corpo da requisição para transição de gestão com preservação do histórico.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TransitionMandateRequest {
+    /// Data de início do novo mandato (AAAA-MM-DD).
+    pub start_date: NaiveDate,
+    /// Data de término do novo mandato (AAAA-MM-DD).
+    pub end_date: NaiveDate,
+    /// Título opcional representativo da nova chapa ou gestão.
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+/// Corpo da requisição para vincular um integrante à gestão.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AddMandateMemberRequest {
+    /// Nome do integrante.
+    pub name: String,
+    /// Cargo exercido na gestão.
+    pub role: String,
+    /// Identificador opcional da conta de usuário correspondente no sistema.
+    #[serde(default)]
+    pub user_id: Option<Uuid>,
+}
+
+/// Resposta pública representando um integrante da gestão e sua participação histórica.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MandateMemberResponse {
+    /// Identificador único do vínculo do integrante.
+    pub id: Uuid,
+    /// Identificador opcional da conta de usuário no aplicativo.
+    pub user_id: Option<Uuid>,
+    /// Nome do integrante.
+    pub name: String,
+    /// Cargo exercido na gestão.
+    pub role: String,
+    /// Indica se o vínculo do integrante permanece ativo na gestão.
+    pub is_active: bool,
+    /// Instante UTC de início da vinculação.
+    pub joined_at: DateTime<Utc>,
+    /// Instante UTC de encerramento do vínculo, se aplicável.
+    pub left_at: Option<DateTime<Utc>>,
+}
+
+impl From<MandateMember> for MandateMemberResponse {
+    fn from(member: MandateMember) -> Self {
+        Self {
+            id: member.id(),
+            user_id: member.user_id(),
+            name: member.name().to_string(),
+            role: member.role().to_string(),
+            is_active: member.is_active(),
+            joined_at: member.joined_at(),
+            left_at: member.left_at(),
+        }
+    }
+}
+
+/// Resposta pública contendo as informações, duração e integrantes do mandato de gestão.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MandateResponse {
@@ -38,10 +98,21 @@ pub struct MandateResponse {
     pub start_date: NaiveDate,
     /// Data de término do período do mandato (AAAA-MM-DD).
     pub end_date: NaiveDate,
+    /// Alias para a data de início (AAAA-MM-DD).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starts_at: Option<NaiveDate>,
+    /// Alias para a data de término (AAAA-MM-DD).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ends_at: Option<NaiveDate>,
     /// Situação operacional do mandato ('active', 'concluded', 'archived').
     pub status: String,
+    /// Instante UTC de encerramento/conclusão da gestão, se houver.
+    pub concluded_at: Option<DateTime<Utc>>,
     /// Duração do mandato em dias calculada a partir das datas persistidas.
     pub duration_in_days: i64,
+    /// Composição de integrantes e cargos associados ao mandato.
+    #[serde(default)]
+    pub members: Vec<MandateMemberResponse>,
     /// Instante UTC de criação do registro.
     pub created_at: DateTime<Utc>,
     /// Instante UTC da última modificação do registro.
@@ -50,15 +121,28 @@ pub struct MandateResponse {
 
 impl From<Mandate> for MandateResponse {
     fn from(mandate: Mandate) -> Self {
+        let start = mandate.start_date();
+        let end = mandate.end_date();
+        let members = mandate
+            .members()
+            .iter()
+            .cloned()
+            .map(MandateMemberResponse::from)
+            .collect();
+
         Self {
             id: mandate.id(),
             academic_center_id: mandate.academic_center_id(),
             created_by_id: mandate.created_by_id(),
             title: mandate.title().map(String::from),
-            start_date: mandate.start_date(),
-            end_date: mandate.end_date(),
+            start_date: start,
+            end_date: end,
+            starts_at: Some(start),
+            ends_at: Some(end),
             status: mandate.status().as_str().to_string(),
+            concluded_at: mandate.concluded_at(),
             duration_in_days: mandate.duration_in_days(),
+            members,
             created_at: mandate.created_at(),
             updated_at: mandate.updated_at(),
         }

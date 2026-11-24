@@ -38,6 +38,12 @@ pub enum MandateApplicationError {
     /// Não foi encontrado mandato ativo para o Centro Acadêmico.
     ActiveMandateNotFound(Uuid),
 
+    /// O mandato informado não foi encontrado.
+    MandateNotFound(Uuid),
+
+    /// O integrante informado não foi encontrado na gestão.
+    MemberNotFound(Uuid),
+
     /// Violação de invariante de negócio do domínio.
     Domain(MandateError),
 
@@ -78,8 +84,14 @@ impl fmt::Display for MandateApplicationError {
             Self::ActiveMandateNotFound(id) => {
                 write!(
                     f,
-                    "não existe mandato ativo registrado para o Centro Acadêmico '{id}'"
+                    "não existe gestão vigente registrada para o Centro Acadêmico '{id}'"
                 )
+            }
+            Self::MandateNotFound(id) => {
+                write!(f, "mandato '{id}' não encontrado")
+            }
+            Self::MemberNotFound(id) => {
+                write!(f, "integrante '{id}' não encontrado na gestão")
             }
             Self::Domain(err) => write!(f, "violação de regra de negócio: {err}"),
             Self::Repository(msg) => write!(f, "erro de persistência: {msg}"),

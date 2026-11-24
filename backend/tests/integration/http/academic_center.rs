@@ -472,5 +472,265 @@ async fn academic_center_mandate_http_flows_with_real_database() {
     assert_eq!(list.len(), 1);
     assert_eq!(list[0]["id"], mandate_id.to_string());
 
+    // -----------------------------------------------------------------------
+    // 15. Cenário: Consulta do histórico de gestões concluídas quando há apenas mandato ativo (deve retornar vazio [])
+    // -----------------------------------------------------------------------
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/academic-centers/{caer_id}/mandates/history"),
+        &jwt_a,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let history = body.as_array().expect("deve ser array");
+    assert!(
+        history.is_empty(),
+        "histórico de gestões concluídas deve ser vazio enquanto só houver mandato ativo"
+    );
+
+    // -----------------------------------------------------------------------
+    // 16. Cenário: Gestor autorizado adiciona integrantes ao mandato vigente
+    // -----------------------------------------------------------------------
+    let (status, body_member_1) = request(
+        &app,
+        "POST",
+        &format!("/academic-centers/{caer_id}/mandates/{mandate_id}/members"),
+        &jwt_a,
+        Some(json!({
+            "name": "Maria Silva",
+            "role": "Presidente",
+            "userId": user_a_id
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body_member_1}");
+    let member_1_id = Uuid::parse_str(body_member_1["id"].as_str().unwrap()).unwrap();
+    assert_eq!(body_member_1["name"], "Maria Silva");
+    assert_eq!(body_member_1["role"], "Presidente");
+    assert_eq!(body_member_1["isActive"], true);
+    assert_eq!(body_member_1["userId"], user_a_id.to_string());
+
+    let (status, body_member_2) = request(
+        &app,
+        "POST",
+        &format!("/academic-centers/{caer_id}/mandates/{mandate_id}/members"),
+        &jwt_a,
+        Some(json!({
+            "name": "João Souza",
+            "role": "Diretor Financeiro",
+            "userId": null
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body_member_2}");
+    let member_2_id = Uuid::parse_str(body_member_2["id"].as_str().unwrap()).unwrap();
+    assert_eq!(body_member_2["isActive"], true);
+
+    // -----------------------------------------------------------------------
+    // 17. Cenário: Usuário sem permissão não pode adicionar integrantes (403 user_not_permitted_in_ca)
+    // -----------------------------------------------------------------------
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("/academic-centers/{caer_id}/mandates/{mandate_id}/members"),
+        &jwt_b,
+        Some(json!({
+            "name": "Intruso",
+            "role": "Vice-Presidente"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["error"]["code"], "user_not_permitted_in_ca");
+
+    // -----------------------------------------------------------------------
+    // 18. Cenário: Desfiliação de integrante da gestão preserva o registro histórico
+    // -----------------------------------------------------------------------
+    let (status, body_disaffiliate) = request(
+        &app,
+        "POST",
+        &format!(
+            "/academic-centers/{caer_id}/mandates/{mandate_id}/members/{member_2_id}/disaffiliate"
+        ),
+        &jwt_a,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body_disaffiliate}");
+    assert_eq!(body_disaffiliate["id"], member_2_id.to_string());
+    assert_eq!(body_disaffiliate["isActive"], false);
+    assert!(body_disaffiliate["leftAt"].is_string());
+
+    // -----------------------------------------------------------------------
+    // 19. Cenário: Estudante (inclusive user_b sem permissão de gestão) consulta detalhes do mandato por ID (transparência pública)
+    // -----------------------------------------------------------------------
+    let (status, body_detail) = request(
+        &app,
+        "GET",
+        &format!("/academic-centers/{caer_id}/mandates/{mandate_id}"),
+        &jwt_b,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body_detail}");
+    assert_eq!(body_detail["id"], mandate_id.to_string());
+    let members = body_detail["members"]
+        .as_array()
+        .expect("deve ter lista de membros");
+    assert_eq!(members.len(), 2);
+    let m1 = members
+        .iter()
+        .find(|m| m["id"] == member_1_id.to_string())
+        .unwrap();
+    assert_eq!(m1["isActive"], true);
+    let m2 = members
+        .iter()
+        .find(|m| m["id"] == member_2_id.to_string())
+        .unwrap();
+    assert_eq!(m2["isActive"], false);
+    assert!(m2["leftAt"].is_string());
+
+    // -----------------------------------------------------------------------
+    // 20. Cenário: Transição de mandato (conclui o mandato ativo e cria novo mandato)
+    // -----------------------------------------------------------------------
+    let (status, body_transition) = request(
+        &app,
+        "POST",
+        &format!("/academic-centers/{caer_id}/mandates/transition"),
+        &jwt_a,
+        Some(json!({
+            "startDate": "2027-01-01",
+            "endDate": "2027-12-31",
+            "title": "Gestão 2027-2028 Renovação"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body_transition}");
+    let new_mandate_id = Uuid::parse_str(body_transition["id"].as_str().unwrap()).unwrap();
+    assert_ne!(new_mandate_id, mandate_id);
+    assert_eq!(body_transition["status"], "active");
+    assert_eq!(body_transition["title"], "Gestão 2027-2028 Renovação");
+
+    // -----------------------------------------------------------------------
+    // 21. Cenário: Consulta do mandato vigente agora retorna a nova gestão
+    // -----------------------------------------------------------------------
+    let (status, body_current) = request(
+        &app,
+        "GET",
+        &format!("/academic-centers/{caer_id}/mandates/current"),
+        &jwt_a,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body_current["id"], new_mandate_id.to_string());
+    assert_eq!(body_current["status"], "active");
+
+    // -----------------------------------------------------------------------
+    // 22. Cenário: Consulta do histórico de gestões agora retorna a gestão anterior concluída
+    // -----------------------------------------------------------------------
+    let (status, body_history) = request(
+        &app,
+        "GET",
+        &format!("/academic-centers/{caer_id}/mandates/history"),
+        &jwt_b, // Estudante comum pode consultar
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let history = body_history.as_array().expect("deve ser array");
+    assert_eq!(
+        history.len(),
+        1,
+        "deve conter 1 gestão no histórico anterior"
+    );
+    assert_eq!(history[0]["id"], mandate_id.to_string());
+    assert_eq!(history[0]["status"], "concluded");
+    assert!(history[0]["concludedAt"].is_string());
+    assert_eq!(history[0]["members"].as_array().unwrap().len(), 2);
+
+    // -----------------------------------------------------------------------
+    // 23. Cenário: Consulta de listagem geral retorna ambos os mandatos ordenados decrescente
+    // -----------------------------------------------------------------------
+    let (status, body_all) = request(
+        &app,
+        "GET",
+        &format!("/academic-centers/{caer_id}/mandates"),
+        &jwt_a,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let all = body_all.as_array().expect("deve ser array");
+    assert_eq!(all.len(), 2);
+    assert_eq!(
+        all[0]["id"],
+        new_mandate_id.to_string(),
+        "novo mandato deve vir primeiro"
+    );
+    assert_eq!(
+        all[1]["id"],
+        mandate_id.to_string(),
+        "mandato anterior deve vir em segundo"
+    );
+
+    // -----------------------------------------------------------------------
+    // 24. Cenário: Concluir o mandato ativo restante via /conclude
+    // -----------------------------------------------------------------------
+    let (status, body_conclude) = request(
+        &app,
+        "POST",
+        &format!("/academic-centers/{caer_id}/mandates/conclude"),
+        &jwt_a,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body_conclude["id"], new_mandate_id.to_string());
+    assert_eq!(body_conclude["status"], "concluded");
+
+    // Agora histórico tem 2 gestões concluídas ordenadas cronologicamente
+    let (status, body_history_after) = request(
+        &app,
+        "GET",
+        &format!("/academic-centers/{caer_id}/mandates/history"),
+        &jwt_a,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let history_after = body_history_after.as_array().unwrap();
+    assert_eq!(history_after.len(), 2);
+    assert_eq!(history_after[0]["id"], new_mandate_id.to_string());
+    assert_eq!(history_after[1]["id"], mandate_id.to_string());
+
+    // -----------------------------------------------------------------------
+    // 25. Cenário: Isolamento entre Centros Acadêmicos e validações 404
+    // -----------------------------------------------------------------------
+    let fake_ca = Uuid::new_v4();
+    let (status, body_fake_ca) = request(
+        &app,
+        "GET",
+        &format!("/academic-centers/{fake_ca}/mandates/history"),
+        &jwt_a,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body_fake_ca["error"]["code"], "ca_not_found");
+
+    let (status, body_fake_mandate) = request(
+        &app,
+        "GET",
+        &format!("/academic-centers/{caer_id}/mandates/{}", Uuid::new_v4()),
+        &jwt_a,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body_fake_mandate["error"]["code"], "mandate_not_found");
+
     database.close().await;
 }
