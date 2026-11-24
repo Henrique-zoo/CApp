@@ -47,7 +47,6 @@ use backend::{
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use sqlx::postgres::PgPoolOptions;
-use tracing_subscriber::EnvFilter;
 
 const HTTPS_ADDRESS: &str = "0.0.0.0:3000";
 
@@ -74,11 +73,7 @@ const HTTPS_ADDRESS: &str = "0.0.0.0:3000";
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
+    api::logging::init_logging()?;
 
     let (tls_config, tls_public_key) = tls::load_from_env()?;
     let election_signer = load_election_signer(&tls_public_key).await?;
