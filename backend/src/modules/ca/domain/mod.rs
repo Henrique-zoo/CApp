@@ -28,3 +28,5 @@ pub use rules::has_administrative_privileges_via_active_context;
 pub use rules::is_eligible_to_vote_via_active_context;
 pub use rules::is_visitor_in_active_context;
 pub use rules::validate_active_context_switch;
+pub use entities::*;
+pub use rules::*;

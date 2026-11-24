@@ -7,3 +7,5 @@ pub mod repository;
 pub use repository::*;
 pub mod active_context_repository;
 pub use active_context_repository::{ActiveContextSessionStore, InMemoryActiveContextSessionStore, InMemoryContextCenterRepository};
+
+pub mod role_repository;

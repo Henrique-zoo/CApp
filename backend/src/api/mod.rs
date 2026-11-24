@@ -8,5 +8,11 @@
 
 mod app_check;
 pub mod error;
+pub mod auth;
 pub mod router;
 pub mod state;
+
+pub use auth::{
+    ActiveCaContext, AuthorizationErrorResponse, HasAuthorizationService, PermissionRequirement,
+    RequirePermission, require_permission_middleware,
+};

@@ -74,6 +74,7 @@ pub struct AppState {
 
     /// Clientes externos compartilhados, sem credenciais de usuários armazenadas.
     pub clients: Clients,
+    pub authorization: Arc<dyn crate::modules::ca::application::ports::AuthorizationServicePort>,
     pub news_repository: Arc<dyn NewsRepositoryPort>,
     pub news_authorization: Arc<dyn NewsAuthorizationPort>,
 
@@ -136,6 +137,7 @@ impl AppState {
         Self {
             pg_database,
             clients,
+            authorization: Arc::new(crate::modules::ca::application::services::authorization_service::AuthorizationService::with_in_memory()),
             news_repository,
             news_authorization: Arc::new(AllowAllNewsAuthorization),
             election_signer: None,

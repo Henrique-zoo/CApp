@@ -7,6 +7,10 @@ use axum::Router;
 use axum::routing::get;
 use axum::routing::post;
 use crate::api::state::AppState;
+pub use crate::api::auth::ActiveCaContext;
+pub use crate::api::auth::AuthorizationErrorResponse;
+pub use crate::api::auth::RequirePermission;
+pub use crate::api::auth::require_permission_middleware;
 pub mod dto;
 pub mod handlers;
 /// Monta o roteador Axum com os endpoints de Centros Acadêmicos e mandatos de gestão.

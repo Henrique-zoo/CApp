@@ -70,7 +70,6 @@ path = "tests/cucumber/bdd_infrastructure.rs"
 harness = false
 
 [[test]]
-<<<<<<< HEAD
 name = "scenario_filters"
 path = "tests/cucumber/scenario_filters.rs"
 
@@ -86,19 +85,13 @@ path = "tests/data_retention_policy_test.rs"
 name = "user_preference_persistence"
 path = "tests/user_preference_persistence.rs"
 
-=======
-name = "user_preference_persistence"
-path = "tests/user_preference_persistence.rs"
-
 [[test]]
 name = "active_context_selection"
 path = "tests/active_context_selection.rs"
 
-
->>>>>>> origin/pr/331
 [[test]]
-name = "active_context_selection"
-path = "tests/active_context_selection.rs"
+name = "authorization_control"
+path = "tests/authorization_control.rs"
 
 [lints.rust]
 missing_docs = "warn"
