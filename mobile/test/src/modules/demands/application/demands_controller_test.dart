@@ -13,7 +13,9 @@ void main() {
   const caId = UuidValue.raw('00000000-0000-0000-0000-000000000001');
   const userId = UuidValue.raw('00000000-0000-0000-0000-000000000010');
 
-  test('alterna fóruns e limpa status exclusivo ao ir para espaço físico', () async {
+  test(
+    'alterna fóruns e limpa status exclusivo ao ir para espaço físico',
+    () async {
     final gateway = FakeDemandsGateway(
       initialDemands: [
         sampleDemand(
@@ -48,7 +50,9 @@ void main() {
     expect(controller.visibleDemands.single.title, 'Reparo da porta');
   });
 
-  test('marca fórum institucional proibido em 403 sem impedir troca de fórum', () async {
+  test(
+    'marca fórum institucional proibido em 403 sem impedir troca de fórum',
+    () async {
     final gateway = FakeDemandsGateway(
       forbidInstitutional: true,
       initialDemands: [
@@ -115,7 +119,9 @@ void main() {
     expect(controller.visibleDemands.single.title, 'Demanda espaço físico');
   });
 
-  test('criação, comentário e atualização de status mantêm estado sincronizado', () async {
+  test(
+    'criação, comentário e atualização de status mantêm estado sincronizado',
+    () async {
     final gateway = FakeDemandsGateway();
     final controller = DemandsController(
       gateway: gateway,

@@ -139,7 +139,9 @@ final class BackendDemandsGateway implements DemandsGateway {
     );
   }
 
-  DemandStatusHistoryEntry _mapHistoryEntry(DemandStatusHistoryResponseDto dto) {
+  DemandStatusHistoryEntry _mapHistoryEntry(
+    DemandStatusHistoryResponseDto dto,
+  ) {
     return DemandStatusHistoryEntry(
       id: dto.id,
       demandId: dto.demandId,

@@ -17,9 +17,9 @@ void main() {
   Widget wrapWithTheme(Widget child) =>
       MaterialApp(theme: createDarkTheme(), home: child);
 
-  testWidgets('alterna entre fórum institucional e espaço físico e filtra demandas', (
-    tester,
-  ) async {
+  testWidgets(
+    'alterna entre fórum institucional e espaço físico e filtra demandas',
+    (tester) async {
     final gateway = FakeDemandsGateway(
       initialDemands: [
         sampleDemand(
@@ -89,9 +89,9 @@ void main() {
     expect(find.text('Reparo da porta'), findsNothing);
   });
 
-  testWidgets('exibe aviso claro de 403 no institucional sem quebrar navegação', (
-    tester,
-  ) async {
+  testWidgets(
+    'exibe aviso claro de 403 no institucional sem quebrar navegação',
+    (tester) async {
     final gateway = FakeDemandsGateway(
       forbidInstitutional: true,
       initialDemands: [
@@ -175,9 +175,9 @@ void main() {
     expect(find.text('Tentar novamente'), findsOneWidget);
   });
 
-  testWidgets('cria demanda e navega para detalhes com histórico, comentário e status', (
-    tester,
-  ) async {
+  testWidgets(
+    'cria demanda e navega para detalhes com histórico, comentário e status',
+    (tester) async {
     final gateway = FakeDemandsGateway(actorIsManager: true);
     final controller = DemandsController(
       gateway: gateway,

@@ -32,7 +32,7 @@ void main() {
     'status': status,
     'createdAt': '2026-11-20T12:00:00Z',
     'updatedAt': '2026-11-20T13:00:00Z',
-    if (statusHistory != null) 'statusHistory': statusHistory,
+    'statusHistory': ?statusHistory,
   };
 
   test('listDemands envia query params e desserializa lista', () async {
@@ -146,7 +146,9 @@ void main() {
     expect(updated.status, 'in_analysis');
   });
 
-  test('listComments e createComment respeitam contrato de comentários', () async {
+  test(
+    'listComments e createComment respeitam contrato de comentários',
+    () async {
     final commentJson = {
       'id': commentId.uuid,
       'demandId': demandId.uuid,
@@ -182,7 +184,9 @@ void main() {
 
   test('rejeita resposta incompatível com FormatException', () async {
     final api = DemandsApi(
-      createTestDio(FakeHttpAdapter((_) => jsonTestResponse({'invalid': true}))),
+      createTestDio(
+        FakeHttpAdapter((_) => jsonTestResponse({'invalid': true})),
+      ),
     );
 
     await expectLater(
@@ -206,7 +210,11 @@ void main() {
     await expectLater(
       api.listDemands(academicCenterId: caId, forum: 'institutional'),
       throwsA(
-        isA<DioException>().having((e) => e.response?.statusCode, 'status', 403),
+        isA<DioException>().having(
+          (e) => e.response?.statusCode,
+          'status',
+          403,
+        ),
       ),
     );
   });

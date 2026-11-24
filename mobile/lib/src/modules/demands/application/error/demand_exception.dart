@@ -61,5 +61,6 @@ final class DemandException implements Exception {
 
   @override
   String toString() =>
-      'DemandException(kind: $kind, backendCode: $backendCode, publicMessage: $publicMessage)';
+      'DemandException(kind: $kind, backendCode: $backendCode, '
+      'publicMessage: $publicMessage)';
 }

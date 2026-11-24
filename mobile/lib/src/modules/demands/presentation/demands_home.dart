@@ -277,8 +277,9 @@ class _DemandsHomeState extends State<DemandsHome> {
                 child: const Text('Tentar novamente'),
               ),
               FilledButton.icon(
-                onPressed: () =>
-                    unawaited(controller.selectForum(DemandForum.physicalSpace)),
+                onPressed: () => unawaited(
+                  controller.selectForum(DemandForum.physicalSpace),
+                ),
                 icon: const Icon(Icons.meeting_room_outlined),
                 label: const Text('Ir para Espaço Físico'),
               ),

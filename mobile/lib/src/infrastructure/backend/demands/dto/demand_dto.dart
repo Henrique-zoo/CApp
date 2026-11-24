@@ -54,9 +54,9 @@ final class CreateDemandRequestDto {
   Map<String, Object?> toJson() => {
     'forum': forum,
     'description': description,
-    if (title != null) 'title': title,
-    if (category != null) 'category': category,
-    if (courseName != null) 'courseName': courseName,
+    'title': ?title,
+    'category': ?category,
+    'courseName': ?courseName,
   };
 }
 

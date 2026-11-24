@@ -296,7 +296,8 @@ class _DemandHeaderCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               'Por ${formatDemandAuthor(demand.authorId, currentUserId)} · '
-              'Criada em ${formatDemandDate(demand.createdAt, includeTime: true)}',
+              'Criada em '
+              '${formatDemandDate(demand.createdAt, includeTime: true)}',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colors.onSurfaceVariant,
               ),
@@ -430,6 +431,12 @@ class _HistoryTimelineTile extends StatelessWidget {
         ? 'Registro inicial: ${entry.toStatus.label}'
         : '${entry.fromStatus!.label} → ${entry.toStatus.label}';
     final roleFallback = entry.fromStatus == null ? 'Autor' : 'Gestão';
+    final author = formatDemandAuthor(
+      entry.changedById,
+      currentUserId,
+      fallbackRole: roleFallback,
+    );
+    final date = formatDemandDate(entry.createdAt, includeTime: true);
 
     return Padding(
       padding: EdgeInsets.only(bottom: isLast ? 0 : 14),
@@ -465,8 +472,7 @@ class _HistoryTimelineTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${formatDemandAuthor(entry.changedById, currentUserId, fallbackRole: roleFallback)} · '
-                  '${formatDemandDate(entry.createdAt, includeTime: true)}',
+                  '$author · $date',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colors.onSurfaceVariant,
                   ),
@@ -647,6 +653,7 @@ class _CommentTile extends StatelessWidget {
       currentUserId,
       fallbackRole: isManagement ? 'Gestão' : 'Estudante',
     );
+    final date = formatDemandDate(comment.createdAt, includeTime: true);
 
     return Card(
       margin: EdgeInsets.zero,
@@ -689,7 +696,7 @@ class _CommentTile extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '$authorLabel · ${formatDemandDate(comment.createdAt, includeTime: true)}',
+                    '$authorLabel · $date',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: colors.onSurfaceVariant,
                     ),

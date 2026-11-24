@@ -127,9 +127,9 @@ final class FakeDemandsGateway implements DemandsGateway {
     required CreateDemandInput input,
   }) async {
     if (createError != null) throw createError!;
-    final id = UuidValue.fromString(
-      '00000000-0000-0000-0000-${(_nextId++).toString().padLeft(12, '0')}',
-    );
+    final idSeq = (_nextId++).toString().padLeft(12, '0');
+    final historySeq = (_nextId++).toString().padLeft(12, '0');
+    final id = UuidValue.fromString('00000000-0000-0000-0000-$idSeq');
     final now = DateTime.utc(2026, 11, 24, 15);
     final created = Demand(
       id: id,
@@ -145,9 +145,7 @@ final class FakeDemandsGateway implements DemandsGateway {
       updatedAt: now,
       statusHistory: [
         DemandStatusHistoryEntry(
-          id: UuidValue.fromString(
-            '00000000-0000-0000-0001-${(_nextId++).toString().padLeft(12, '0')}',
-          ),
+          id: UuidValue.fromString('00000000-0000-0000-0001-$historySeq'),
           demandId: id,
           fromStatus: null,
           toStatus: DemandStatus.open,

@@ -43,11 +43,11 @@ final class DemandsApi {
     final response = await _dio.get<Object?>(
       '/api/v1/academic-centers/$caId/demands',
       queryParameters: {
-        if (forum != null) 'forum': forum,
-        if (status != null) 'status': status,
-        if (mine != null) 'mine': mine,
-        if (limit != null) 'limit': limit,
-        if (offset != null) 'offset': offset,
+        'forum': ?forum,
+        'status': ?status,
+        'mine': ?mine,
+        'limit': ?limit,
+        'offset': ?offset,
       },
       options: _options(expectedStatus: 200),
       cancelToken: cancelToken,

@@ -161,7 +161,8 @@ class _UpdateDemandStatusSheetState extends State<UpdateDemandStatusSheet> {
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'Informe o parecer ou justificativa da alteração.';
+                        return 'Informe o parecer ou justificativa '
+                            'da alteração.';
                       }
                       return null;
                     },

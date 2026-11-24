@@ -26,7 +26,8 @@ final class CreateDemandInput {
     }
     if (trimmedDescription.length > maxDemandDescriptionLength) {
       throw const FormatException(
-        'A descrição excede o limite de $maxDemandDescriptionLength caracteres.',
+        'A descrição excede o limite de '
+        '$maxDemandDescriptionLength caracteres.',
       );
     }
 
@@ -59,7 +60,8 @@ final class CreateDemandInput {
     if (trimmedCourse != null &&
         trimmedCourse.length > maxDemandCourseNameLength) {
       throw const FormatException(
-        'O nome do curso excede o limite de $maxDemandCourseNameLength caracteres.',
+        'O nome do curso excede o limite de '
+        '$maxDemandCourseNameLength caracteres.',
       );
     }
 

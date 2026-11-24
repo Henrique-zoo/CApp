@@ -36,7 +36,8 @@ enum DemandStatus {
   /// Filtros de status exibidos na listagem para cada fórum.
   ///
   /// O status `forwardedToCoordination` é exclusivo do fórum institucional.
-  static List<DemandStatus> filterOptionsFor(DemandForum forum) => switch (forum) {
+  static List<DemandStatus> filterOptionsFor(DemandForum forum) =>
+      switch (forum) {
     DemandForum.institutional => const [
       DemandStatus.open,
       DemandStatus.inAnalysis,
