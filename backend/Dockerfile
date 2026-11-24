@@ -5,6 +5,7 @@ FROM rust:1-bookworm AS builder
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock build.rs ./
+COPY patches ./patches
 COPY src ./src
 COPY migrations ./migrations
 COPY tests ./tests
