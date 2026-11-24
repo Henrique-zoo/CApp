@@ -13,3 +13,4 @@ pub mod services;
 mod tests;
 pub use error::*;
 pub use ports::*;
+pub use services::ActiveContextService;
