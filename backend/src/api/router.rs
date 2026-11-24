@@ -95,6 +95,7 @@ use crate::{
 pub fn create_router(state: AppState, app_check: AppCheckVerifier) -> Router {
     Router::new()
         .merge(identity_api::router())
+        .merge(crate::modules::news::api::news_routes())
         .merge(ca_api::router())
         .merge(elections_api::protected_json_routes())
         .merge(events_api::router())

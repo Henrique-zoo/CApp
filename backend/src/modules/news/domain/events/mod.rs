@@ -1,61 +1,49 @@
 //! Eventos de domínio do módulo de notícias.
 //!
-//! Reúne os fatos relevantes e imutáveis ocorridos no ciclo de vida
-//! editorial das notícias.
+//! Representam fatos de negócio imutáveis ocorridos no ciclo de vida editorial,
+//! úteis para notificação, integração e auditoria.
 
-pub mod news_events;
-pub use news_events::NewsArchived;
-pub use news_events::NewsContentUpdated;
-pub use news_events::NewsCreated;
-pub use news_events::NewsDomainEvent;
-pub use news_events::NewsPublished;
-pub use news_events::NewsRejected;
-pub use news_events::NewsSubmittedForReview;
-use chrono::DateTime;
-use chrono::Utc;
-use serde::Deserialize;
-use serde::Serialize;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::modules::news::domain::entities::status::NewsStatus;
-/// Fato relevante: artigo de notícia criado.
+
+/// Evento disparado quando um artigo de notícia é submetido para revisão da gestão.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NewsArticleCreated {
-    /// Identificador do artigo criado.
-    pub article_id: Uuid,
-    /// Identificador do Centro Acadêmico.
+pub struct NewsArticleSubmittedForReviewEvent {
+    /// Identificador único da notícia submetida.
+    pub news_id: Uuid,
+    /// Centro Acadêmico contextual da notícia.
     pub ca_id: Uuid,
-    /// Identificador do autor da notícia.
+    /// Usuário autor que submeteu o artigo.
     pub author_id: Uuid,
-    /// Status inicial da notícia.
-    pub status: NewsStatus,
-    /// Instante em que o evento ocorreu.
+    /// Versão da revisão submetida.
+    pub revision: i32,
+    /// Instante do evento.
     pub occurred_at: DateTime<Utc>,
 }
-/// Fato relevante: artigo de notícia atualizado.
+
+/// Evento disparado quando um artigo de notícia é publicado no mural.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NewsArticleUpdated {
-    /// Identificador do artigo atualizado.
-    pub article_id: Uuid,
-    /// Nova revisão resultante da edição.
-    pub revision: u32,
-    /// Status resultante da edição.
-    pub status: NewsStatus,
-    /// Instante em que o evento ocorreu.
-    pub occurred_at: DateTime<Utc>,
-}
-/// Fato relevante: artigo de notícia publicado.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NewsArticlePublished {
-    /// Identificador do artigo publicado.
-    pub article_id: Uuid,
-    /// Instante em que o artigo foi publicado.
+pub struct NewsArticlePublishedEvent {
+    /// Identificador único da notícia publicada.
+    pub news_id: Uuid,
+    /// Centro Acadêmico contextual da notícia.
+    pub ca_id: Uuid,
+    /// Usuário com papel de gestão responsável pela publicação.
+    pub published_by: Uuid,
+    /// Instante oficial da publicação.
     pub published_at: DateTime<Utc>,
 }
-/// Fato relevante: artigo de notícia arquivado.
+
+/// Evento disparado quando um artigo de notícia é arquivado.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NewsArticleArchived {
-    /// Identificador do artigo arquivado.
-    pub article_id: Uuid,
-    /// Instante em que o artigo foi arquivado.
+pub struct NewsArticleArchivedEvent {
+    /// Identificador único da notícia arquivada.
+    pub news_id: Uuid,
+    /// Centro Acadêmico contextual da notícia.
+    pub ca_id: Uuid,
+    /// Usuário que realizou a ação de arquivamento.
+    pub archived_by: Uuid,
+    /// Instante oficial do arquivamento.
     pub archived_at: DateTime<Utc>,
 }

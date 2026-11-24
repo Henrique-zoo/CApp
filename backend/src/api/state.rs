@@ -11,6 +11,13 @@ use crate::{
     infrastructure::database::PgDatabase,
     modules::{
         elections::crypto_wire::ServerSigner,
+        news::{
+            application::{
+                ports::{NewsAuthorizationPort, NewsRepositoryPort},
+                services::NewsApplicationService,
+            },
+            infrastructure::{AllowAllNewsAuthorization, PgNewsRepository},
+        },
         identity::infrastructure::{
             firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
         },
@@ -67,6 +74,8 @@ pub struct AppState {
 
     /// Clientes externos compartilhados, sem credenciais de usuários armazenadas.
     pub clients: Clients,
+    pub news_repository: Arc<dyn NewsRepositoryPort>,
+    pub news_authorization: Arc<dyn NewsAuthorizationPort>,
 
     /// Assinador fornecido pela instalação para as operações eleitorais que usam a chave do servidor.
     pub(crate) election_signer: Option<Arc<ServerSigner>>,
@@ -123,9 +132,12 @@ impl AppState {
     /// # }
     /// ```
     pub fn new(pg_database: PgDatabase, clients: Clients) -> Self {
+        let news_repository = Arc::new(PgNewsRepository::new(pg_database.pool.clone()));
         Self {
             pg_database,
             clients,
+            news_repository,
+            news_authorization: Arc::new(AllowAllNewsAuthorization),
             election_signer: None,
         }
     }
@@ -134,5 +146,14 @@ impl AppState {
     pub fn with_election_signer(mut self, signer: Arc<ServerSigner>) -> Self {
         self.election_signer = Some(signer);
         self
+    }
+
+    pub fn news_service(
+        &self,
+    ) -> NewsApplicationService<dyn NewsRepositoryPort, dyn NewsAuthorizationPort> {
+        NewsApplicationService::new(
+            Arc::clone(&self.news_repository),
+            Arc::clone(&self.news_authorization),
+        )
     }
 }

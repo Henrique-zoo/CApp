@@ -1,29 +1,17 @@
-//! Módulo de notícias do CApp.
+//! Estrutura do módulo de notícias do mural administrado.
 //!
-//! Fornece recursos para publicação, homologação, edição, consulta e
-//! compartilhamento de notícias entre Centros Acadêmicos.
+//! O escopo abrange proposição, homologação, publicação, arquivamento e compartilhamento
+//! de notícias entre Centros Acadêmicos.
 //!
-//! # Arquitetura
-//!
-//! - [`domain`]: modelos puros de negócio ([`domain::NewsArticle`], [`domain::NewsStatus`]),
-//!   regras de validação e eventos de domínio.
-//! - [`application`]: casos de uso de escrita ([`application::CreateNewsArticleCommand`],
-//!   [`application::UpdateNewsArticleCommand`]), consultas, portas abstratas
-//!   ([`application::NewsRepository`], [`application::NewsAuthorizationPort`])
-//!   e o serviço orquestrador ([`application::NewsService`]).
-//! - [`infrastructure`]: implementações concretas de persistência
-//!   ([`infrastructure::InMemoryNewsRepository`], [`infrastructure::PgNewsRepository`])
-//!   e adaptadores de autorização.
-//! - [`api`]: contratos de transporte HTTP ([`api::dto`]), manipuladores de rotas
-//!   ([`api::handlers`]) e montagem do roteador ([`api::news_router`]).
+//! As camadas estão estruturadas conforme a arquitetura limpa:
+//! - [`domain`]: entidades centrais ([`domain::NewsArticle`], [`domain::NewsStatus`]), invariantes e eventos.
+//! - [`application`]: casos de uso, comandos, consultas e portas de persistência e autorização.
+//! - [`infrastructure`]: adaptadores em memória e PostgreSQL para dados e controle de acesso.
+//! - [`api`]: rotas HTTP, controladores (handlers) e DTOs de transferência.
 
 pub mod api;
 pub mod application;
 pub mod domain;
 pub mod infrastructure;
 
-pub use application::{
-    CreateNewsArticleCommand, CreateNewsArticleHandler, NewsAuthorizationPort, NewsRepository,
-    NewsService, UpdateNewsArticleCommand, UpdateNewsArticleHandler,
-};
-pub use domain::{NewsArticle, NewsError, NewsStatus};
+pub use domain::{NewsArticle, NewsStatus};

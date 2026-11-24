@@ -1,7 +1,11 @@
-//! Camada de infraestrutura e persistência do módulo de notícias.
+//! Camada de infraestrutura do módulo de notícias.
+//!
+//! Contém os repositórios em memória e PostgreSQL, bem como os adaptadores
+//! para resolução de permissões e governança nos Centros Acadêmicos.
 
-pub mod authorization;
 pub mod repository;
 
-pub use authorization::InMemoryNewsAuthorizationService;
-pub use repository::{InMemoryNewsRepository, PgNewsRepository};
+pub use repository::{
+    AllowAllNewsAuthorization, InMemoryNewsRepository, PgNewsRepository,
+    StaticRoleNewsAuthorization,
+};
