@@ -66,6 +66,7 @@ impl Clients {
 /// As identidades autenticadas pertencem às requisições, não a este estado.
 #[derive(Clone)]
 pub struct AppState {
+    shutting_down: Arc<std::sync::atomic::AtomicBool>,
     /// Adaptador PostgreSQL compartilhado pelos repositórios de identidade e eleições.
     ///
     /// Serviços recebem referências às traits implementadas por esse adaptador.
@@ -136,6 +137,7 @@ impl AppState {
         let news_repository = Arc::new(PgNewsRepository::new(pg_database.pool.clone()));
         Self {
             pg_database,
+            shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             clients,
             authorization: Arc::new(crate::modules::ca::application::services::authorization_service::AuthorizationService::with_in_memory()),
             news_repository,
@@ -157,5 +159,13 @@ impl AppState {
             Arc::clone(&self.news_repository),
             Arc::clone(&self.news_authorization),
         )
+    }
+
+    pub fn is_shutting_down(&self) -> bool {
+        self.shutting_down.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn mark_shutting_down(&self) {
+        self.shutting_down.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }

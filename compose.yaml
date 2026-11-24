@@ -20,6 +20,7 @@ services:
       retries: 5
 
   backend:
+    stop_grace_period: 30s
     profiles:
       - backend
     build:
@@ -27,6 +28,7 @@ services:
       dockerfile: Dockerfile
     user: "${BACKEND_UID:-1000}:${BACKEND_GID:-1000}"
     environment:
+      SHUTDOWN_TIMEOUT_SECS: ${SHUTDOWN_TIMEOUT_SECS:-15}
       DATABASE_URL: postgres://${POSTGRES_USER:-capp}:${POSTGRES_PASSWORD:-capp}@postgres:5432/${POSTGRES_DB:-capp}
       RUST_LOG: ${RUST_LOG:-info}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}

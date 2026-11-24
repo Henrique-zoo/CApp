@@ -47,8 +47,6 @@ use backend::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use sqlx::postgres::PgPoolOptions;
 
-const HTTPS_ADDRESS: &str = "0.0.0.0:3000";
-
 /// Inicializa logs, TLS, clientes externos, PostgreSQL, migrations e a API.
 ///
 /// O pool usa as opções padrão de [`PgPoolOptions`]. A conexão inicial precisa
@@ -74,6 +72,8 @@ async fn main() -> anyhow::Result<()> {
 
     api::logging::init_logging()?;
 
+    let server_config = backend::config::ServerConfig::from_env()?;
+    let https_address = &server_config.bind_address;
     let config = backend::config::Config::from_env().context("Configuração inválida")?;
     let (tls_config, tls_public_key) = tls::load_from_env()?;
     let election_signer = load_election_signer(&tls_public_key).await?;
@@ -128,8 +128,8 @@ async fn main() -> anyhow::Result<()> {
         Clients::new(firebase, microsoft),
     );
 
-    let listener = TcpListener::bind(HTTPS_ADDRESS)
-        .with_context(|| format!("Não foi possível abrir o socket HTTPS em {HTTPS_ADDRESS}"))?;
+    let listener = TcpListener::bind(https_address)
+        .with_context(|| format!("Não foi possível abrir o socket HTTPS em {https_address}"))?;
 
     let server = axum_server::from_tcp_rustls(listener, tls_config)
         .context("Não foi possível configurar a escuta HTTPS")?;
@@ -143,9 +143,19 @@ async fn main() -> anyhow::Result<()> {
         None => (state, None),
     };
 
-    tracing::info!(address = HTTPS_ADDRESS, "Backend HTTPS ouvindo");
+    tracing::info!(address = https_address, "Backend HTTPS ouvindo");
 
-    let result = server
+    let handle = axum_server::Handle::new();
+    let shutdown_state = state.clone();
+    let shutdown_handle = handle.clone();
+    let timeout = server_config.shutdown_timeout;
+    let shutdown = tokio::spawn(async move {
+        api::shutdown::wait_for_shutdown_signal().await;
+        shutdown_state.mark_shutting_down();
+        shutdown_handle.graceful_shutdown(Some(timeout));
+    });
+    let pg_pool = state.pg_database.pool.clone();
+    let result = server.handle(handle)
         .serve(api::router::create_router(state, app_check).into_make_service())
         .await;
 
@@ -153,6 +163,8 @@ async fn main() -> anyhow::Result<()> {
         clock.abort();
     }
 
+    shutdown.abort();
+    pg_pool.close().await;
     result.context("Falha no servidor HTTPS")
 }
 

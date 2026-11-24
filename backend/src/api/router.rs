@@ -105,6 +105,9 @@ pub fn create_router(state: AppState, app_check: AppCheckVerifier) -> Router {
         .route(
             "/ready",
             get(|State(state): State<AppState>| async move {
+                if state.is_shutting_down() {
+                    return StatusCode::SERVICE_UNAVAILABLE;
+                }
                 let result = timeout(
                     Duration::from_secs(2),
                     sqlx::query("SELECT 1 AS ok").fetch_one(&state.pg_database.pool),
