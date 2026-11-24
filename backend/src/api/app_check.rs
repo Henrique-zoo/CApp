@@ -5,11 +5,8 @@
 //! Esta proteção comprova a origem do app; não substitui Authorization nem
 //! altera a identidade ou as permissões de uma pessoa.
 
-use super::{
-    error::{ApiError, ApiResult},
-    state::AppState,
-};
-use crate::modules::identity::infrastructure::firebase::AppCheckError;
+use super::error::{ApiError, ApiResult};
+use crate::modules::identity::infrastructure::firebase::{AppCheckError, AppCheckVerifier};
 use axum::{
     extract::{Request, State},
     http::{HeaderMap, Method},
@@ -18,7 +15,7 @@ use axum::{
 };
 
 pub(super) async fn require_app_check(
-    State(state): State<AppState>,
+    State(app_check): State<AppCheckVerifier>,
     mut request: Request,
     next: Next,
 ) -> ApiResult<Response> {
@@ -29,20 +26,15 @@ pub(super) async fn require_app_check(
     }
 
     let token = app_check_token(request.headers())?;
-    let app = state
-        .clients
-        .app_check
-        .verify(token)
-        .await
-        .map_err(|error| match error {
-            AppCheckError::Invalid => invalid(),
-            AppCheckError::Unavailable => ApiError::new(
-                axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                "app_check_unavailable",
-                "Não foi possível verificar o aplicativo. Tente novamente.",
-                None,
-            ),
-        })?;
+    let app = app_check.verify(token).await.map_err(|error| match error {
+        AppCheckError::Invalid => invalid(),
+        AppCheckError::Unavailable => ApiError::new(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "app_check_unavailable",
+            "Não foi possível verificar o aplicativo. Tente novamente.",
+            None,
+        ),
+    })?;
 
     request.extensions_mut().insert(app);
     Ok(next.run(request).await)

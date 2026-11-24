@@ -10,10 +10,10 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use backend::infrastructure::database::PgDatabase;
 use backend::modules::elections::{
     application::services::board as board_service,
     crypto_wire::{BallotContext, object_digest, verify_record},
-    infrastructure::PgElectionBoardRepository,
 };
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
@@ -40,7 +40,7 @@ async fn three_distinct_voters_can_verify_their_receipts_in_submission_order() {
         .iter()
         .map(|o| serde_json::from_value(o["id"].clone()).unwrap())
         .collect();
-    let store = PgElectionBoardRepository::new(db.pool.clone());
+    let store = PgDatabase::new(db.pool.clone());
     board_service::publish(&store, &*signer, origin.frozen(false))
         .await
         .unwrap();

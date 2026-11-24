@@ -9,6 +9,7 @@ use serde_json::Value;
 use sqlx::{PgConnection, Postgres, Transaction};
 use uuid::Uuid;
 
+use crate::infrastructure::database::PgDatabase;
 use crate::modules::elections::{
     application::{
         board::{BoardError, BoardSnapshot},
@@ -24,8 +25,6 @@ use crate::modules::elections::{
         identifiers::{AccountId, AuthorityId, ElectionId},
     },
 };
-
-use super::repository::PgElectionBoardRepository;
 
 impl TallyVerifier for ServerSigner {
     type Context = VerifiedTally;
@@ -98,7 +97,7 @@ pub struct PgTallyTransaction {
 }
 
 #[async_trait::async_trait]
-impl TallyRepository for PgElectionBoardRepository {
+impl TallyRepository for PgDatabase {
     type Transaction = PgTallyTransaction;
 
     async fn read_tally(&self, election: ElectionId) -> Result<TallyEvidence, BoardError> {

@@ -32,7 +32,8 @@ use backend::{
     },
     infrastructure::database::{MIGRATOR, PgDatabase},
     modules::identity::infrastructure::{
-        firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
+        firebase::{AppCheckVerifier, FirebaseTokenVerifier},
+        microsoft::MicrosoftGraphClient,
     },
 };
 use futures::lock::Mutex;
@@ -127,8 +128,11 @@ pub(super) struct SuiteDatabase {
     /// Mutex que serializa os comandos de clonagem da base-modelo.
     template_ddl: Mutex<()>,
 
-    /// Clientes reutilizados pelos routers da suíte.
+    /// Clientes de identidade reutilizados pelos routers da suíte.
     clients: Clients,
+
+    /// Verificador reutilizado pelo middleware dos routers da suíte.
+    app_check: AppCheckVerifier,
 }
 
 /// Monta as opções de conexão do PostgreSQL descartável, sem abrir conexão.
@@ -285,23 +289,22 @@ impl DatabaseServer {
         let firebase = FirebaseTokenVerifier::new(project_id, http.clone())
             .expect("configuração do Firebase deve ser válida");
 
-        let app_check =
-            backend::modules::identity::infrastructure::firebase::AppCheckVerifier::new(
-                "1234567890".into(),
-                vec!["1:1234567890:android:capp".into()],
-                http.clone(),
-            )
-            .unwrap();
+        let app_check = AppCheckVerifier::new(
+            "1234567890".into(),
+            vec!["1:1234567890:android:capp".into()],
+            http.clone(),
+        )
+        .unwrap();
         let microsoft = MicrosoftGraphClient::new(http);
 
-        let clients = Clients::new(firebase, microsoft, app_check);
+        let clients = Clients::new(firebase, microsoft);
 
         let shared_pool = connect_pool(&host, port, POSTGRES_SHARED_DB, 16).await;
 
-        let shared_app = api::router::create_router(AppState::new(
-            PgDatabase::new(shared_pool.clone()),
-            clients.clone(),
-        ));
+        let shared_app = api::router::create_router(
+            AppState::new(PgDatabase::new(shared_pool.clone()), clients.clone()),
+            app_check.clone(),
+        );
 
         let suite = Arc::new(SuiteDatabase {
             host,
@@ -312,6 +315,7 @@ impl DatabaseServer {
             next_database: AtomicU64::new(1),
             template_ddl: Mutex::new(()),
             clients,
+            app_check,
         });
 
         Self { container, suite }
@@ -400,10 +404,10 @@ impl SuiteDatabase {
 
         let pool = connect_pool(&self.host, self.port, &database_name, 5).await;
 
-        let app = api::router::create_router(AppState::new(
-            PgDatabase::new(pool.clone()),
-            self.clients.clone(),
-        ));
+        let app = api::router::create_router(
+            AppState::new(PgDatabase::new(pool.clone()), self.clients.clone()),
+            self.app_check.clone(),
+        );
 
         (
             TestDatabase {

@@ -4,8 +4,9 @@
 //! lida junto da associação de cursos do CA e permanece estável até o commit.
 
 use chrono::{DateTime, Utc};
-use sqlx::{PgConnection, PgPool, Postgres, Transaction};
+use sqlx::{PgConnection, Postgres, Transaction};
 
+use crate::infrastructure::database::PgDatabase;
 use crate::modules::elections::{
     application::{
         error::RegistrationError,
@@ -15,24 +16,9 @@ use crate::modules::elections::{
     domain::identifiers::{AccountId, ElectionId},
 };
 
-/// Adaptador PostgreSQL para o cadastro privado da chave eleitoral.
-///
-/// Clones compartilham o mesmo pool de conexões.
-#[derive(Clone)]
-pub struct PgVoterRegistrationRepository {
-    pool: PgPool,
-}
-
 impl From<sqlx::Error> for RegistrationError {
     fn from(error: sqlx::Error) -> Self {
         Self::Storage(Box::new(error))
-    }
-}
-
-impl PgVoterRegistrationRepository {
-    /// Usa o pool compartilhado com o quadro e o módulo de identidade.
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
     }
 }
 
@@ -44,7 +30,7 @@ pub struct PgRegistrationTransaction {
 }
 
 #[async_trait::async_trait]
-impl VoterRegistrationRepository for PgVoterRegistrationRepository {
+impl VoterRegistrationRepository for PgDatabase {
     type Transaction = PgRegistrationTransaction;
 
     async fn status(

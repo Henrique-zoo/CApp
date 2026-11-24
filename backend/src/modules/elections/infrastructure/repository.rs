@@ -9,7 +9,7 @@
 use chrono::{DateTime, Utc};
 use crypto_bigint::U2048;
 use serde_json::Value;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{Postgres, Transaction};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
@@ -47,12 +47,6 @@ impl From<sqlx::Error> for BoardError {
     fn from(value: sqlx::Error) -> Self {
         Self::Storage(Box::new(value))
     }
-}
-
-/// Persistência dos votos e do quadro eleitoral no mesmo pool PostgreSQL.
-#[derive(Clone)]
-pub struct PgElectionBoardRepository {
-    pub(super) pool: PgPool,
 }
 
 /// Quantidade máxima de registros carregados por página da exportação HTTP.
@@ -113,13 +107,6 @@ impl StoredVote {
             receipt: self.signed_receipt,
             recovered,
         }
-    }
-}
-
-impl PgElectionBoardRepository {
-    /// Usa o pool compartilhado com os leitores e o cadastro eleitoral.
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
     }
 }
 
@@ -203,7 +190,7 @@ async fn read_accepted_vote<'c>(
 }
 
 #[async_trait::async_trait]
-impl ElectionBoardRepository for PgElectionBoardRepository {
+impl ElectionBoardRepository for PgDatabase {
     type Transaction = PgBoardClosureTransaction;
 
     async fn publish(&self, board: BoardPublication) -> Result<BoardSnapshot, BoardError> {
@@ -363,7 +350,7 @@ pub struct PgVoteTransaction {
 }
 
 #[async_trait::async_trait]
-impl VoteRepository for PgElectionBoardRepository {
+impl VoteRepository for PgDatabase {
     type Transaction = PgVoteTransaction;
 
     async fn ballot_context(

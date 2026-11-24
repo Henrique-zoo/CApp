@@ -12,7 +12,10 @@ use tokio::time::timeout;
 
 use crate::{
     api::{app_check::require_app_check, state::AppState},
-    modules::{elections::api as elections_api, identity::api as identity_api},
+    modules::{
+        elections::api as elections_api,
+        identity::{api as identity_api, infrastructure::firebase::AppCheckVerifier},
+    },
 };
 
 /// Monta as rotas globais e de identidade, ainda dependentes de [`AppState`].
@@ -35,6 +38,11 @@ use crate::{
 /// `tracing` no nível `warn`, sem devolver o diagnóstico SQL ao cliente.
 /// A consulta verifica comunicação com o banco, não a existência das tabelas,
 /// a versão do esquema nem a disponibilidade das demais integrações.
+///
+/// # Parâmetros
+///
+/// - `state`: recursos compartilhados pelos handlers e extratores de identidade.
+/// - `app_check`: verificador compartilhado pelo middleware de atestado do aplicativo.
 ///
 /// # Retorno
 ///
@@ -71,9 +79,9 @@ use crate::{
 /// let app_check = backend::modules::identity::infrastructure::firebase::AppCheckVerifier::new(
 ///     "1234567890".into(), vec!["1:1234567890:android:capp".into()], reqwest::Client::new())?;
 /// let state = AppState::new(
-///     PgDatabase::new(pool.clone()), Clients::new(firebase, microsoft, app_check),
+///     PgDatabase::new(pool.clone()), Clients::new(firebase, microsoft),
 /// );
-/// let app = create_router(state);
+/// let app = create_router(state, app_check);
 /// let response = app
 ///     .oneshot(Request::builder().uri("/health").body(Body::empty())?)
 ///     .await?;
@@ -82,7 +90,7 @@ use crate::{
 /// # Ok(())
 /// # }
 /// ```
-pub fn create_router(state: AppState) -> Router {
+pub fn create_router(state: AppState, app_check: AppCheckVerifier) -> Router {
     Router::new()
         .merge(identity_api::router())
         .merge(elections_api::protected_json_routes())
@@ -109,10 +117,7 @@ pub fn create_router(state: AppState) -> Router {
                 }
             }),
         )
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            require_app_check,
-        ))
+        .route_layer(middleware::from_fn_with_state(app_check, require_app_check))
         .merge(elections_api::public_board_routes())
         .with_state(state)
 }

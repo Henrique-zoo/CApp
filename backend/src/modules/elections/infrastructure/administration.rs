@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, Postgres, Transaction};
 use uuid::Uuid;
 
+use crate::infrastructure::database::PgDatabase;
 use crate::modules::elections::{
     application::{
         administration::{AdministrationState, BoardCancellation},
@@ -16,7 +17,7 @@ use crate::modules::elections::{
     },
 };
 
-use super::{registration::database_now, repository::PgElectionBoardRepository};
+use super::registration::database_now;
 
 pub(super) async fn read_cancellation(
     connection: &mut PgConnection,
@@ -46,7 +47,7 @@ pub struct PgAdministrationTransaction {
 }
 
 #[async_trait::async_trait]
-impl ElectionAdministrationRepository for PgElectionBoardRepository {
+impl ElectionAdministrationRepository for PgDatabase {
     type Transaction = PgAdministrationTransaction;
 
     async fn lock_administration(

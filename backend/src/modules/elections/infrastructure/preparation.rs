@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
+use crate::infrastructure::database::PgDatabase;
 use crate::modules::elections::{
     application::{
         board::{BoardError, FrozenBoard},
@@ -30,7 +31,7 @@ use crate::modules::elections::{
 
 use super::{
     registration::database_now,
-    repository::{PgElectionBoardRepository, insert_publication, mark_published},
+    repository::{insert_publication, mark_published},
 };
 
 impl PreparationSigner for ServerSigner {
@@ -159,7 +160,7 @@ pub struct PgPreparationTransaction {
 }
 
 #[async_trait::async_trait]
-impl PreparationRepository for PgElectionBoardRepository {
+impl PreparationRepository for PgDatabase {
     type Transaction = PgPreparationTransaction;
 
     async fn assignment(

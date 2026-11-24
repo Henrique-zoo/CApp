@@ -853,9 +853,11 @@ components:
       name: X-Firebase-AppCheck
       description: |
         JWT Firebase App Check emitido para um App ID permitido do mesmo projeto.
-        Comprova o aplicativo, independentemente do usuário. Não enviar o token de
-        depuração do Console neste cabeçalho; o SDK o troca por um JWT App Check.
-        Obrigatório nas rotas autenticadas. Saúde, prontidão e leituras do quadro são públicos.
+        Nas rotas autenticadas, envie exatamente um cabeçalho. A ausência retorna
+        403 com app_check_required. Um cabeçalho duplicado ou um JWT recusado
+        retorna 403 com app_check_invalid.
+        O SDK troca o token de depuração do Console pelo JWT exigido pela API.
+        Saúde, prontidão, quadro eleitoral, checkpoint e apuração são públicos.
     FirebaseIdToken:
       type: http
       scheme: bearer

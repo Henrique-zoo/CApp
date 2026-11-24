@@ -1,13 +1,12 @@
 //! Exercita a política de cadastro e a associação do curso no CA com PostgreSQL.
 
+use backend::infrastructure::database::PgDatabase;
 use backend::modules::elections::{
     application::{
         board::BoardError, error::RegistrationError, ports::VoterKeyProofVerifier,
         services::board as board_service, services::voter_registration,
     },
-    infrastructure::{
-        PgElectionBoardRepository, PgVoterRegistrationRepository, RsaPssVoterKeyProofVerifier,
-    },
+    infrastructure::RsaPssVoterKeyProofVerifier,
 };
 use chrono::{Duration, Utc};
 use serde_json::json;
@@ -19,28 +18,27 @@ use crate::support::TestDatabase;
 async fn registration_uses_the_authenticated_account_and_the_courses_of_the_center() {
     let db = TestDatabase::new().await;
     let signer = server();
-    let board = PgElectionBoardRepository::new(db.pool.clone());
-    let registry = PgVoterRegistrationRepository::new(db.pool.clone());
+    let database = PgDatabase::new(db.pool.clone());
     let verifier = RsaPssVoterKeyProofVerifier;
     let voter = Voter::new(&db.pool, "valid/ballot-0").await;
     let other = Voter::new(&db.pool, "valid/ballot-1").await;
     let now = Utc::now();
     let origin = Origin::scheduled(&signer, now + Duration::hours(1), now + Duration::hours(2));
-    board_service::publish(&board, &*signer, origin.frozen(true))
+    board_service::publish(&database, &*signer, origin.frozen(true))
         .await
         .unwrap();
     let election = origin.election;
     let proof = voter.registration_proof(election);
 
     let status =
-        voter_registration::status(&registry, election_id(election), account_id(voter.account))
+        voter_registration::status(&database, election_id(election), account_id(voter.account))
             .await
             .unwrap();
     assert!(status.requires_registration);
     assert!(status.public_key.is_none());
     assert!(matches!(
         voter_registration::register(
-            &registry,
+            &database,
             &verifier,
             election_id(election),
             other.admitted(),
@@ -59,7 +57,7 @@ async fn registration_uses_the_authenticated_account_and_the_courses_of_the_cent
     .unwrap();
     assert!(matches!(
         voter_registration::register(
-            &registry,
+            &database,
             &verifier,
             election_id(election),
             voter.admitted(),
@@ -89,7 +87,7 @@ async fn registration_uses_the_authenticated_account_and_the_courses_of_the_cent
     .await;
 
     let accepted = voter_registration::register(
-        &registry,
+        &database,
         &verifier,
         election_id(election),
         voter.admitted(),
@@ -104,7 +102,7 @@ async fn registration_uses_the_authenticated_account_and_the_courses_of_the_cent
     renewed.microsoft_object_id = None;
     assert_eq!(
         voter_registration::register(
-            &registry,
+            &database,
             &verifier,
             election_id(election),
             renewed,
@@ -121,29 +119,28 @@ async fn registration_uses_the_authenticated_account_and_the_courses_of_the_cent
 async fn board_requires_the_registered_key_only_when_that_policy_is_selected() {
     let db = TestDatabase::new().await;
     let signer = server();
-    let board = PgElectionBoardRepository::new(db.pool.clone());
-    let registry = PgVoterRegistrationRepository::new(db.pool.clone());
+    let database = PgDatabase::new(db.pool.clone());
     let verifier = RsaPssVoterKeyProofVerifier;
     let voter = Voter::new(&db.pool, "valid/ballot-0").await;
     let other = Voter::new(&db.pool, "valid/ballot-1").await;
     let origin = Origin::during(&signer, Utc::now() + Duration::hours(1));
     let election = origin.election;
-    board_service::publish(&board, &*signer, origin.frozen(true))
+    board_service::publish(&database, &*signer, origin.frozen(true))
         .await
         .unwrap();
     let ballot = voter.sign(&origin, voter.payload.clone());
 
     assert!(matches!(
-        board_service::publish(&board, &*signer, origin.frozen(false)).await,
+        board_service::publish(&database, &*signer, origin.frozen(false)).await,
         Err(BoardError::AlreadyExists)
     ));
     assert!(matches!(
-        submit_vote(&board, election, voter.admitted(), &ballot).await,
+        submit_vote(&database, election, voter.admitted(), &ballot).await,
         Err(BoardError::RegistrationRequired)
     ));
     assert!(matches!(
         voter_registration::register(
-            &registry,
+            &database,
             &verifier,
             election_id(election),
             voter.admitted(),
@@ -174,7 +171,7 @@ async fn board_requires_the_registered_key_only_when_that_policy_is_selected() {
 
     assert!(matches!(
         submit_vote(
-            &board,
+            &database,
             election,
             voter.admitted(),
             &other.sign(&origin, voter.payload.clone())
@@ -190,7 +187,7 @@ async fn board_requires_the_registered_key_only_when_that_policy_is_selected() {
     .await
     .unwrap();
     assert!(matches!(
-        submit_vote(&board, election, voter.admitted(), &ballot).await,
+        submit_vote(&database, election, voter.admitted(), &ballot).await,
         Err(BoardError::NotEligible)
     ));
     sqlx::query("UPDATE institutional_verification SET course_name = $2 WHERE user_id = $1")
@@ -199,7 +196,7 @@ async fn board_requires_the_registered_key_only_when_that_policy_is_selected() {
         .execute(&db.pool)
         .await
         .unwrap();
-    let accepted = submit_vote(&board, election, voter.admitted(), &ballot)
+    let accepted = submit_vote(&database, election, voter.admitted(), &ballot)
         .await
         .unwrap();
     assert_eq!(
