@@ -20,6 +20,8 @@
 /// BACKEND_BASE_URL é recebido por --dart-define. O padrão
 /// https://10.0.2.2:8443 atende ao emulador Android; outros ambientes precisam
 /// informar um endereço alcançável pelo dispositivo.
+/// BACKEND_TLS_TRUST_PEM_BASE64 acrescenta o certificado público do backend
+/// de demonstração às raízes confiáveis do transporte nativo.
 /// MSAL_CLIENT_ID e MSAL_ANDROID_REDIRECT_URI também são recebidos por --dart-define
 /// e são obrigatórios na composição Android atual. A URI precisa corresponder
 /// ao registro Microsoft e ao filtro de redirecionamento do AndroidManifest.xml.

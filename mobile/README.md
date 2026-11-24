@@ -510,22 +510,14 @@ valores vazios interrompem a inicialização. A composição MSAL atual ainda n�
 configura as outras plataformas.
 
 Para a demonstração local, o endereço padrão do emulador Android é
-`https://10.0.2.2:8443`. Exporte o certificado **público** da CA do Caddy
-para `capp-demo-root.crt` no diretório temporário do computador, conforme o
-[roteiro HTTPS](../deploy/https/README.md). No PowerShell, execute a partir de
-`mobile`:
+`https://10.0.2.2:8443`. Passe o PEM público do backend, codificado em
+base64, em `BACKEND_TLS_TRUST_PEM_BASE64`. Essa confiança adicional vale
+para o transporte do backend, que continua validando o endereço, o prazo
+e a cadeia do certificado. Para um servidor com certificado público
+confiável pela plataforma, omita esse parâmetro.
 
-~~~powershell
-$demoCa = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $env:TEMP 'capp-demo-root.crt')))
-flutter run --debug --dart-define=MSAL_CLIENT_ID='<application-client-id>' --dart-define=MSAL_ANDROID_REDIRECT_URI='<redirect-uri-do-registro-android>' "--dart-define=CAPP_DEMO_CA_PEM_BASE64=$demoCa"
-~~~
-
-Em Bash, obtenha o mesmo valor com `base64 < "${TMPDIR:-/tmp}/capp-demo-root.crt" | tr -d '\r\n'`.
-A CA adicional vale somente para o transporte do backend no build de debug.
-O cliente confere a cadeia, a validade e o nome do certificado e inicia as
-requisições diretamente em HTTPS. Em um Android físico, use em
-`BACKEND_BASE_URL` um nome ou IP alcançável pelo aparelho e presente no
-certificado do servidor.
+O [roteiro HTTPS](../deploy/https/README.md#executar-no-android) contém o
+comando completo e os endereços para emulador, Android físico via USB e Wi-Fi.
 
 ### Eleição no Início
 

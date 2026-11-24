@@ -37,7 +37,7 @@ void main() {
   });
 
   test('a URL HTTP é rejeitada antes da consulta de tokens e da rede', () {
-    expect(() => backend('http://10.0.2.2:3000'), throwsArgumentError);
+    expect(() => backend('http://10.0.2.2:8443'), throwsArgumentError);
     expect(tokenRequests, 0);
     expect(adapter.requests, isEmpty);
   });

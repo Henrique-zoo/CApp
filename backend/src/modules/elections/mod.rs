@@ -199,20 +199,15 @@
 //!
 //! # Transporte HTTPS
 //!
-//! HTTPS é obrigatório entre aplicativo e backend, tanto na votação secreta quanto
-//! na identificada. A integração do protocolo na issue #385 deve terminar TLS no
-//! Caddy e encaminhar HTTP ao backend:3000 pela rede privada do Compose, no mesmo host.
-//! A porta HTTP do backend não fica exposta externamente. O aplicativo inicia as
-//! requisições diretamente em HTTPS; redirecionar uma chamada HTTP depois de enviar
-//! credenciais não protege os dados da primeira requisição.
+//! HTTPS é obrigatório entre aplicativo e backend na votação secreta e na
+//! identificada. O backend termina TLS diretamente com Rustls. O aplicativo
+//! inicia as requisições em HTTPS e valida a confiança, a validade e o nome do
+//! certificado antes de transmitir os tokens.
 //!
-//! Em produção, usar certificado de uma CA pública, com emissão e renovação
-//! automáticas pelo Caddy. Em desenvolvimento, uma CA local ou certificado
-//! autoassinado exige confiança explícita no cliente. Instalar a CA no computador
-//! do servidor não a torna automaticamente confiável no aplicativo do celular.
-//! O app valida cadeia/confiança, validade e nome do servidor; não aceita qualquer
-//! certificado nem desabilita essa validação. Chaves privadas TLS ficam no proxy,
-//! fora do repositório, e são distintas dos segredos eleitorais.
+//! O certificado autoassinado da demonstração é configurado explicitamente no
+//! cliente Android. Uma implantação pública pode usar um certificado de CA
+//! pública. A chave privada TLS fica no servidor e é distinta das chaves
+//! eleitorais.
 //!
 //! TLS protege o canal; Firebase Auth identifica a conta e App Check verifica a
 //! atestação do aplicativo. Nenhum deles substitui os demais ou comprova o conteúdo
@@ -246,8 +241,7 @@
 //! [RFC 3526](https://www.rfc-editor.org/rfc/rfc3526.html),
 //! [RFC 8017](https://www.rfc-editor.org/rfc/rfc8017.html),
 //! [RFC 8235](https://www.rfc-editor.org/rfc/rfc8235.html),
-//! [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446.html) e
-//! [HTTPS automático no Caddy](https://caddyserver.com/docs/automatic-https).
+//! [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446.html).
 
 pub mod api;
 pub mod application;

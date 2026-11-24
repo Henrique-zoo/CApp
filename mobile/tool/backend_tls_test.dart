@@ -18,11 +18,13 @@ void main() {
 
   BackendApi connect(
     String url, {
-    String ca = const String.fromEnvironment('CAPP_DEMO_CA_PEM_BASE64'),
+    String anchors = const String.fromEnvironment(
+      'BACKEND_TLS_TRUST_PEM_BASE64',
+    ),
   }) {
     final backend = BackendApi(
       baseUrl: url,
-      demoCaPemBase64: ca,
+      trustedBackendCertPemBase64: anchors,
       getFirebaseIdToken: () async => 'test-id',
       getFirebaseAppCheckToken: () async => 'test-check',
     );
@@ -41,6 +43,10 @@ void main() {
   for (final (label, url) in [
     ('CA desconhecida', const String.fromEnvironment('TLS_UNKNOWN')),
     ('certificado expirado', const String.fromEnvironment('TLS_EXPIRED')),
+    (
+      'certificado autoassinado expirado mesmo com confiança explícita',
+      const String.fromEnvironment('TLS_EXPIRED_SELF_SIGNED'),
+    ),
     (
       'nome de servidor incorreto',
       const String.fromEnvironment('TLS_MISMATCH'),
@@ -79,13 +85,27 @@ void main() {
     );
   });
 
-  const caddyUrl = String.fromEnvironment('TLS_CADDY');
-  if (caddyUrl.isNotEmpty) {
-    test('alcança o backend da demonstração através do Caddy', () async {
-      await connect(
-        caddyUrl,
-        ca: const String.fromEnvironment('TLS_CADDY_CA'),
-      ).monitoring.getReadiness();
+  const backendUrl = String.fromEnvironment('TLS_BACKEND');
+  const backendCert = String.fromEnvironment('TLS_BACKEND_CERT');
+  if (backendUrl.isNotEmpty) {
+    test('alcança diretamente o backend Rust por HTTPS', () async {
+      await connect(backendUrl, anchors: backendCert).monitoring.getReadiness();
+    });
+
+    test('o backend HTTPS ainda exige App Check na sessão', () async {
+      final backend = connect(backendUrl, anchors: backendCert);
+      await expectLater(
+        backend.identity.restoreSession(),
+        throwsA(
+          isA<DioException>()
+              .having((error) => error.response?.statusCode, 'status', 403)
+              .having(
+                (error) => (error.response?.data as Map?)?['error']?['code'],
+                'código',
+                'app_check_invalid',
+              ),
+        ),
+      );
     });
   }
 }

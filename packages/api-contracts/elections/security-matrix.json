@@ -162,13 +162,13 @@
     {
       "name": "Transporte",
       "mechanisms": [
-        "HTTPS com terminação TLS no Caddy",
+        "HTTPS com terminação TLS no backend Rust",
         "Validação de confiança, validade e nome do servidor no app",
         "Firebase Auth e App Check para requisições de negócio"
       ],
       "premises": [
         "Cliente confia explicitamente na CA/certificado correto; não aceita certificados arbitrários.",
-        "HTTP entre proxy e backend permanece restrito à rede privada do Compose no mesmo host; a porta do backend não é exposta externamente.",
+        "O backend aceita conexões somente por HTTPS; o Compose mantém o PostgreSQL na rede privada.",
         "Chamadas com credenciais começam diretamente em HTTPS."
       ],
       "limits": [

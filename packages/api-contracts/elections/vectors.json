@@ -3639,7 +3639,7 @@
       "assumptionViolation": false
     }
   ],
-  "profileSha256": "e6c8461e51f4ac84d93f5ea55055d40133265b9f6af7ffbd4af20cf1ee2001a1",
+  "profileSha256": "51b63ab8433048e05e73565dbc28e3df83be7ab4641f46734ff040b689c1d208",
   "periods": {
     "single-slate": {
       "startsAt": "2026-11-21T12:00:00Z",

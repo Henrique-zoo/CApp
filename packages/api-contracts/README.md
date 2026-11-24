@@ -18,9 +18,13 @@ não uma versão de URL nem a versão do pacote Rust do backend.
 
 `elections/` contém o protocolo v1 da issue #377: perfil de parâmetros,
 schemas dos objetos compartilhados, interfaces entre implementações,
-matriz de segurança e vetores públicos. Chapa única é permitida; o fluxo
-usa as contas Firebase do CApp. O diretório não declara endpoints já
-implementados e não altera a versão atual do OpenAPI.
+matriz de segurança e vetores públicos. O fluxo admite chapa única e usa as
+contas Firebase do CApp. O OpenAPI referencia os schemas deste diretório.
+
+O OpenAPI 5.0.0 usa `SignedBallotSubmission` para enviar o voto. A API inclui
+a eleição da rota e a conta autenticada ao reconstruir o objeto `Ballot`
+coberto pela assinatura. O quadro continua publicando o envelope completo.
+App e backend devem ser atualizados juntos nesta mudança de desenvolvimento.
 
 A especificação do fluxo, responsabilidades, codificação e limites está no
 [Rustdoc do módulo eleitoral](../../backend/src/modules/elections/mod.rs).
@@ -28,10 +32,9 @@ Os vetores usam parâmetros de grupo reais e material sintético de teste;
 nenhuma chave privada é versionada. O validador de fixtures não substitui
 o servidor de votação ou o auditor independente do produto.
 
-O transporte entre app e backend deve usar HTTPS, com terminação TLS no
-Caddy e validação do certificado pelo aplicativo. Essa configuração pertence
-à integração; os contratos e vetores não configuram o proxy nem testam TLS.
-O Rustdoc detalha a confiança nos certificados em produção e desenvolvimento.
+O app se conecta diretamente ao backend Rust por HTTPS e valida o certificado
+do servidor. O [roteiro HTTPS](../../deploy/https/README.md) descreve a
+configuração e os testes do transporte.
 
 Instale `requirements-ci.txt` em um ambiente virtual e mantenha OpenSSL no
 PATH. Da raiz do repositório, execute:
@@ -48,6 +51,21 @@ A CI executa os mesmos testes. Consumidores Rust/Dart devem usar os vetores
 versionados para conferir seus próprios bytes e verificações. Alterar o
 protocolo exige revisar perfil, schemas, vetores e consumidores afetados;
 não regenerar expectativas automaticamente durante a validação.
+
+## Contrato eleitoral
+
+O [perfil criptográfico](elections/profile.json) fixa os prefixos por `kind`.
+Cada prefixo termina com um byte NUL. A assinatura, o hash de uma evidência e
+o desafio de uma prova usam o prefixo correspondente seguido do payload em
+UTF-8 JCS (RFC 8785). Os [schemas eleitorais](elections/schemas.json) são
+referenciados pelo OpenAPI, e o Rust, o Flutter e o auditor Python conferem os
+mesmos [vetores](elections/vectors.json).
+
+A [submissão HTTP](examples/election-ballot-submission.json) contém o hash do manifesto,
+a chave pública, as cifras e a assinatura. O backend recupera `electionId`
+da rota e `accountId` da conta autenticada e reconstitui a cédula pública sem
+`version` nem `kind`, usando o domínio criptográfico específico da cédula. O registro público contém
+essa cédula completa, e a resposta distingue primeiro aceite e reenvio.
 
 ## Versionamento
 

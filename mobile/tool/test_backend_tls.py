@@ -32,9 +32,9 @@ def certificate(label, now, issuer=None, address=None, expired=False):
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - timedelta(days=2))
         .not_valid_after(now + timedelta(days=-1 if expired else 1))
-        .add_extension(x509.BasicConstraints(ca=issuer is None, path_length=None), critical=True)
+        .add_extension(x509.BasicConstraints(ca=address is None, path_length=None), critical=True)
     )
-    if issuer is not None:
+    if address is not None:
         builder = builder.add_extension(x509.SubjectAlternativeName([address]), critical=False)
         builder = builder.add_extension(
             x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False
@@ -90,11 +90,11 @@ def serve(stack, tmp, label, cert=None, redirect=None):
 def main():
     args = argparse.ArgumentParser(description=__doc__)
     args.add_argument("--device", help="Android emulator ID as shown by flutter devices")
-    args.add_argument("--caddy-url", help="optional HTTPS base URL for the running demo")
-    args.add_argument("--caddy-ca", type=Path, help="public PEM of the demo root CA")
+    args.add_argument("--backend-url", help="optional HTTPS base URL for the running backend")
+    args.add_argument("--backend-cert", type=Path, help="public PEM trusted for the running backend")
     opts = args.parse_args()
-    if bool(opts.caddy_url) != bool(opts.caddy_ca):
-        args.error("supply --caddy-url and --caddy-ca together")
+    if bool(opts.backend_url) != bool(opts.backend_cert):
+        args.error("supply --backend-url and --backend-cert together")
     flutter = shutil.which("flutter")
     if not flutter:
         args.error("flutter is missing from PATH")
@@ -109,24 +109,30 @@ def main():
         clear_url = f"http://{host}:{clear.server_port}"
         config = {
             "TLS_CLEAR": clear_url,
-            "CAPP_DEMO_CA_PEM_BASE64": base64.b64encode(
-                trusted[1].public_bytes(serialization.Encoding.PEM)
-            ).decode(),
         }
+        expired_self_signed = certificate("expired self-signed server", now, address=address, expired=True)
+        config["BACKEND_TLS_TRUST_PEM_BASE64"] = base64.b64encode(
+            trusted[1].public_bytes(serialization.Encoding.PEM)
+            + expired_self_signed[1].public_bytes(serialization.Encoding.PEM)
+        ).decode()
         servers = {}
         for label, issuer, san, expired in [
             ("VALID", trusted, address, False),
             ("UNKNOWN", foreign, address, False),
             ("EXPIRED", trusted, address, True),
+            ("EXPIRED_SELF_SIGNED", None, address, True),
             ("MISMATCH", trusted, x509.DNSName("other.invalid"), False),
         ]:
-            cert = certificate(label, now, issuer, san, expired)
+            cert = (
+                expired_self_signed if label == "EXPIRED_SELF_SIGNED"
+                else certificate(label, now, issuer, san, expired)
+            )
             server = serve(stack, tmp, label, cert, clear_url + "/auth/session")
             servers[label] = server
             config["TLS_" + label] = f"https://{host}:{server.server_port}"
-        if opts.caddy_url:
-            config["TLS_CADDY"] = opts.caddy_url
-            config["TLS_CADDY_CA"] = base64.b64encode(opts.caddy_ca.read_bytes()).decode()
+        if opts.backend_url:
+            config["TLS_BACKEND"] = opts.backend_url
+            config["TLS_BACKEND_CERT"] = base64.b64encode(opts.backend_cert.read_bytes()).decode()
         defines = tmp / "settings.json"
         defines.write_text(json.dumps(config), encoding="utf-8")
         command = [

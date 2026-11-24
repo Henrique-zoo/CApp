@@ -7,8 +7,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-capp}
       POSTGRES_USER: ${POSTGRES_USER:-capp}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-capp}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -27,29 +25,48 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    user: "${BACKEND_UID:-1000}:${BACKEND_GID:-1000}"
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-capp}:${POSTGRES_PASSWORD:-capp}@postgres:5432/${POSTGRES_DB:-capp}
       RUST_LOG: ${RUST_LOG:-info}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       FIREBASE_PROJECT_NUMBER: ${FIREBASE_PROJECT_NUMBER:-}
       FIREBASE_APP_CHECK_APP_IDS: ${FIREBASE_APP_CHECK_APP_IDS:-}
+      BACKEND_TLS_CERT_FILE: /run/capp-tls/server.crt
+      BACKEND_TLS_KEY_FILE: /run/capp-tls/server.key
+      BACKEND_TLS_HEALTH_HOST: ${BACKEND_TLS_HEALTH_HOST:-localhost}
+    volumes:
+      - type: bind
+        source: ${BACKEND_TLS_CERT_FILE:-./.tls/backend.crt}
+        target: /run/capp-tls/server.crt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BACKEND_TLS_KEY_FILE:-./.tls/backend.key}
+        target: /run/capp-tls/server.key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BACKEND_TLS_HEALTH_CA_FILE:-${BACKEND_TLS_CERT_FILE:-./.tls/backend.crt}}
+        target: /run/capp-tls/health-ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
-      - "${BACKEND_PORT:-3000}:3000"
+      - "${CAPP_HTTPS_BIND:-127.0.0.1}:${BACKEND_PORT:-8443}:3000"
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
       test:
-        [
-          "CMD",
-          "curl",
-          "--fail",
-          "--silent",
-          "--show-error",
-          "--max-time",
-          "3",
-          "http://127.0.0.1:3000/ready",
-        ]
+        - CMD-SHELL
+        - >-
+          curl --noproxy '*' --fail --silent --show-error --max-time 3
+          --cacert /run/capp-tls/health-ca.pem
+          --resolve "$${BACKEND_TLS_HEALTH_HOST}:3000:127.0.0.1"
+          "https://$${BACKEND_TLS_HEALTH_HOST}:3000/ready"
       interval: 10s
       timeout: 5s
       retries: 5
