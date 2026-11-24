@@ -149,6 +149,46 @@ pub async fn create_event_handler(
         Err(error) => map_application_error(error),
     }
 }
+async fn response_event<R: EventRepository>(
+    repo: &R,
+    event: crate::modules::events::domain::Event,
+) -> Result<EventResponse, EventApplicationError> {
+    let count = repo
+        .list_registrations_by_event(event.id())
+        .await?
+        .iter()
+        .filter(|registration| registration.is_active())
+        .count();
+    Ok(EventDetailResponse::with_registration_count(
+        event,
+        u32::try_from(count).unwrap_or(u32::MAX),
+    ))
+}
+
+async fn respond_events<R: EventRepository>(
+    repo: &R,
+    events: Vec<crate::modules::events::domain::Event>,
+) -> Response {
+    let mut response = Vec::with_capacity(events.len());
+    for event in events {
+        match response_event(repo, event).await {
+            Ok(event) => response.push(event),
+            Err(error) => return map_application_error(error),
+        }
+    }
+    Json(response).into_response()
+}
+
+async fn respond_event<R: EventRepository>(
+    repo: &R,
+    event: crate::modules::events::domain::Event,
+) -> Response {
+    match response_event(repo, event).await {
+        Ok(event) => Json(event).into_response(),
+        Err(error) => map_application_error(error),
+    }
+}
+
 /// Handler `GET /api/v1/events?ca_id={ca_id}` para listar eventos publicados filtrados pelo CA ativo.
 pub async fn list_published_events_handler(
     State(state): State<AppState>,
@@ -172,23 +212,15 @@ async fn execute_list_published_events<R: EventRepository>(
     };
 
     if params.should_filter_only_published() {
-        let use_case = ListPublishedEventsByCaUseCase::new(repo);
+        let use_case = ListPublishedEventsByCaUseCase::new(Arc::clone(&repo));
         let query = ListPublishedEventsByCaQuery::new(ca_id);
         match use_case.execute(query).await {
-            Ok(events) => {
-                let response: Vec<EventResponse> =
-                    events.into_iter().map(EventResponse::from).collect();
-                (StatusCode::OK, Json(response)).into_response()
-            }
+            Ok(events) => respond_events(repo.as_ref(), events).await,
             Err(error) => map_application_error(error),
         }
     } else {
         match repo.list_by_academic_center(ca_id, false).await {
-            Ok(events) => {
-                let response: Vec<EventResponse> =
-                    events.into_iter().map(EventResponse::from).collect();
-                (StatusCode::OK, Json(response)).into_response()
-            }
+            Ok(events) => respond_events(repo.as_ref(), events).await,
             Err(error) => map_application_error(error),
         }
     }
@@ -206,7 +238,7 @@ pub async fn get_event_handler(
     let repo = repository(&state);
     execute_get_event_by_id(repo, id, &params, &headers).await
 }
-async fn execute_get_event_by_id<R: EventRepository>(
+async fn execute_get_event_by_id<R: EventRepository + Clone>(
     repo: R,
     id: Uuid,
     params: &ListEventsQueryParams,
@@ -216,24 +248,24 @@ async fn execute_get_event_by_id<R: EventRepository>(
     let only_published = params.should_filter_only_published();
 
     if only_published {
-        let use_case = GetPublishedEventDetailUseCase::new(Arc::new(repo));
+        let use_case = GetPublishedEventDetailUseCase::new(Arc::new(repo.clone()));
         let query = match active_ca_id {
             Some(ca_id) => GetPublishedEventDetailQuery::for_academic_center(id, ca_id),
             None => GetPublishedEventDetailQuery::new(id),
         };
         match use_case.execute(query).await {
-            Ok(event) => (StatusCode::OK, Json(EventDetailResponse::from(event))).into_response(),
+            Ok(event) => respond_event(&repo, event).await,
             Err(error) => map_application_error(error),
         }
     } else {
-        let service = EventService::new(repo);
+        let service = EventService::new(repo.clone());
         let query = GetEventByIdQuery {
             event_id: id,
             academic_center_id: active_ca_id,
             only_published: false,
         };
         match service.get_event_by_id(query).await {
-            Ok(event) => (StatusCode::OK, Json(EventDetailResponse::from(event))).into_response(),
+            Ok(event) => respond_event(&repo, event).await,
             Err(error) => map_application_error(error),
         }
     }
@@ -262,7 +294,7 @@ pub async fn update_event_handler(
 
         let capacity = if payload.max_capacity.is_some() {
             match payload.capacity() {
-                Ok(capacity) => Some(capacity),
+                Ok(capacity) => capacity,
                 Err(error) => {
                     return map_application_error(EventApplicationError::Domain(error));
                 }
@@ -335,35 +367,27 @@ pub async fn list_ca_events_handler(
     let repo = repository(&state);
     execute_list_ca_events(repo, ca_id, &params).await
 }
-async fn execute_list_ca_events<R: EventRepository>(
+async fn execute_list_ca_events<R: EventRepository + Clone>(
     repo: R,
     ca_id: Uuid,
     params: &ListEventsQueryParams,
 ) -> Response {
     let only_published = params.should_filter_only_published();
     if only_published {
-        let use_case = ListPublishedEventsByCaUseCase::new(Arc::new(repo));
+        let use_case = ListPublishedEventsByCaUseCase::new(Arc::new(repo.clone()));
         let query = ListPublishedEventsByCaQuery::new(ca_id);
         match use_case.execute(query).await {
-            Ok(events) => {
-                let response: Vec<EventResponse> =
-                    events.into_iter().map(EventResponse::from).collect();
-                (StatusCode::OK, Json(response)).into_response()
-            }
+            Ok(events) => respond_events(&repo, events).await,
             Err(error) => map_application_error(error),
         }
     } else {
-        let service = EventService::new(repo);
+        let service = EventService::new(repo.clone());
         let query = ListCaEventsQuery {
             academic_center_id: ca_id,
             only_published: false,
         };
         match service.list_ca_events(query).await {
-            Ok(events) => {
-                let response: Vec<EventResponse> =
-                    events.into_iter().map(EventResponse::from).collect();
-                (StatusCode::OK, Json(response)).into_response()
-            }
+            Ok(events) => respond_events(&repo, events).await,
             Err(error) => map_application_error(error),
         }
     }
@@ -381,11 +405,11 @@ async fn execute_get_ca_event_detail<R: EventRepository>(
     ca_id: Uuid,
     id: Uuid,
 ) -> Response {
-    let use_case = GetPublishedEventDetailUseCase::new(repo);
+    let use_case = GetPublishedEventDetailUseCase::new(Arc::clone(&repo));
     let query = GetPublishedEventDetailQuery::for_academic_center(id, ca_id);
 
     match use_case.execute(query).await {
-        Ok(event) => (StatusCode::OK, Json(EventDetailResponse::from(event))).into_response(),
+        Ok(event) => respond_event(repo.as_ref(), event).await,
         Err(error) => map_application_error(error),
     }
 }

@@ -309,7 +309,7 @@ mod tests {
         };
         let status = std::process::Command::new(exe)
             .arg("--exact")
-            .arg("config::tests::helper_subprocess_env")
+            .arg("config::server::tests::helper_subprocess_env")
             .arg("--nocapture")
             .env("__CAPP_SUBPROCESS_CONFIG_TEST", "1")
             .env("BACKEND_BIND_ADDRESS", "127.0.0.1:4500")

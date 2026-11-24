@@ -75,7 +75,8 @@ pub struct UpdateEventRequest {
     /// Atualização opcional da necessidade de inscrição.
     pub requires_registration: Option<bool>,
     /// Atualização opcional do limite máximo de participantes.
-    pub max_capacity: Option<u32>,
+    #[serde(default, deserialize_with = "deserialize_capacity_update")]
+    pub max_capacity: Option<Option<u32>>,
     /// Atualização opcional do instante de abertura das inscrições.
     pub registration_opens_at: Option<DateTime<Utc>>,
     /// Atualização opcional do prazo de inscrição.
@@ -91,8 +92,8 @@ impl UpdateEventRequest {
     }
 
     /// Converte o limite HTTP (`u32`) para a capacidade de domínio (`i32`).
-    pub fn capacity(&self) -> Result<Option<i32>, EventDomainError> {
-        map_capacity(self.max_capacity)
+    pub fn capacity(&self) -> Result<Option<Option<i32>>, EventDomainError> {
+        self.max_capacity.map(map_capacity).transpose()
     }
 
     /// Constrói a política de inscrição a partir dos campos enviados e da política atual.
@@ -108,6 +109,13 @@ impl UpdateEventRequest {
         )
     }
 }
+fn deserialize_capacity_update<'de, D>(deserializer: D) -> Result<Option<Option<u32>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<u32>::deserialize(deserializer).map(Some)
+}
+
 /// Corpo opcional para a ação de publicação direta de um rascunho de evento.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PublishEventRequest {
@@ -214,7 +222,13 @@ pub struct EventResponse {
 pub type EventDetailResponse = EventResponse;
 impl From<Event> for EventResponse {
     fn from(event: Event) -> Self {
-        let registered_count = 0;
+        Self::with_registration_count(event, 0)
+    }
+}
+
+impl EventResponse {
+    /// Calcula vagas com base nas inscrições confirmadas no armazenamento.
+    pub fn with_registration_count(event: Event, registered_count: u32) -> Self {
         let remaining_spots = event.remaining_spots(registered_count);
         let has_available_spots = event.has_available_spots(registered_count);
         let capacity = event.capacity().and_then(|value| u32::try_from(value).ok());

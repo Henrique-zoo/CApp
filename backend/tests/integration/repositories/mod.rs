@@ -5,3 +5,5 @@ mod demand;
 mod election_board;
 mod faq;
 mod identity;
+
+mod functional_delivery;
