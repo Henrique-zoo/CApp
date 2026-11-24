@@ -5,8 +5,8 @@
 //! [`PgDatabase`] encapsula o pool e recebe implementações de traits de repositório
 //! nos módulos de negócio. Cada chamador administra seu próprio pool.
 
-use sqlx::{PgPool, migrate::Migrator};
-
+use sqlx::PgPool;
+use sqlx::migrate::Migrator;
 /// Migrations versionadas do backend, embutidas no binário.
 ///
 /// A declaração não acessa o banco. O chamador deve executar [`Migrator::run`]
@@ -38,7 +38,6 @@ use sqlx::{PgPool, migrate::Migrator};
 /// # }
 /// ```
 pub static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
-
 /// Acesso PostgreSQL compartilhado pelas implementações de repositório.
 ///
 /// Clonar este tipo compartilha o mesmo pool de conexões.
@@ -47,7 +46,6 @@ pub struct PgDatabase {
     /// Pool utilizado pelos adaptadores de persistência do backend.
     pub(crate) pool: PgPool,
 }
-
 impl PgDatabase {
     /// Encapsula um pool existente sem abrir conexões nem aplicar migrations.
     ///
@@ -86,7 +84,6 @@ impl PgDatabase {
         &self.pool
     }
 }
-
 #[async_trait::async_trait]
 impl crate::modules::demands::application::ports::DemandRepository for PgDatabase {
     async fn create(
@@ -135,7 +132,6 @@ impl crate::modules::demands::application::ports::DemandRepository for PgDatabas
         repo.update(demand).await
     }
 }
-
 #[async_trait::async_trait]
 impl crate::modules::demands::application::ports::AcademicAffiliationPort for PgDatabase {
     async fn get_affiliation(
@@ -152,7 +148,6 @@ impl crate::modules::demands::application::ports::AcademicAffiliationPort for Pg
         repo.get_affiliation(author_id, academic_center_id).await
     }
 }
-
 #[async_trait::async_trait]
 impl crate::modules::demands::application::ports::DemandCommentRepository for PgDatabase {
     async fn create(
@@ -176,5 +171,61 @@ impl crate::modules::demands::application::ports::DemandCommentRepository for Pg
             self.pool.clone(),
         );
         repo.list_by_demand_id(demand_id).await
+    }
+}
+#[async_trait::async_trait]
+impl crate::modules::demands::application::ports::DemandNotificationRepository for PgDatabase {
+    async fn create(
+        &self,
+        notification: &crate::modules::demands::domain::entities::DemandNotification,
+    ) -> Result<(), crate::modules::demands::application::error::DemandRepositoryError> {
+        let repo =
+            crate::modules::demands::infrastructure::PostgresDemandNotificationRepository::new(
+                self.pool.clone(),
+            );
+        repo.create(notification).await
+    }
+
+    async fn find_by_id(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<
+        Option<crate::modules::demands::domain::entities::DemandNotification>,
+        crate::modules::demands::application::error::DemandRepositoryError,
+    > {
+        let repo =
+            crate::modules::demands::infrastructure::PostgresDemandNotificationRepository::new(
+                self.pool.clone(),
+            );
+        repo.find_by_id(id).await
+    }
+
+    async fn list_by_recipient(
+        &self,
+        recipient_user_id: uuid::Uuid,
+        unread_only: bool,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<
+        Vec<crate::modules::demands::domain::entities::DemandNotification>,
+        crate::modules::demands::application::error::DemandRepositoryError,
+    > {
+        let repo =
+            crate::modules::demands::infrastructure::PostgresDemandNotificationRepository::new(
+                self.pool.clone(),
+            );
+        repo.list_by_recipient(recipient_user_id, unread_only, limit, offset)
+            .await
+    }
+
+    async fn update(
+        &self,
+        notification: &crate::modules::demands::domain::entities::DemandNotification,
+    ) -> Result<(), crate::modules::demands::application::error::DemandRepositoryError> {
+        let repo =
+            crate::modules::demands::infrastructure::PostgresDemandNotificationRepository::new(
+                self.pool.clone(),
+            );
+        repo.update(notification).await
     }
 }

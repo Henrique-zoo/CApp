@@ -61,6 +61,18 @@ impl From<DemandApplicationError> for ApiError {
                 "Parecer ou justificativa é obrigatório para alterar o status da demanda",
                 None,
             ),
+            DemandApplicationError::DemandNotificationNotFound(notification_id) => Self::new(
+                StatusCode::NOT_FOUND,
+                "notification_not_found",
+                format!("Notificação '{notification_id}' não encontrada"),
+                Some(json!({ "notification_id": notification_id })),
+            ),
+            DemandApplicationError::DemandNotificationForbidden => Self::new(
+                StatusCode::FORBIDDEN,
+                "notification_forbidden",
+                "Usuário sem permissão para acessar ou modificar esta notificação",
+                None,
+            ),
             DemandApplicationError::InvalidDemand(domain_err) => {
                 let (status, code) = match &domain_err {
                     DemandError::EmptyDescription => {
@@ -117,6 +129,28 @@ impl From<DemandApplicationError> for ApiError {
                     DemandError::InconsistentTimestamps { .. } => {
                         (StatusCode::UNPROCESSABLE_ENTITY, "inconsistent_timestamps")
                     }
+                    DemandError::EmptyNotificationTitle => {
+                        (StatusCode::UNPROCESSABLE_ENTITY, "empty_notification_title")
+                    }
+                    DemandError::NotificationTitleTooLong { .. } => (
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "notification_title_too_long",
+                    ),
+                    DemandError::EmptyNotificationMessage => (
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "empty_notification_message",
+                    ),
+                    DemandError::NotificationMessageTooLong { .. } => (
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "notification_message_too_long",
+                    ),
+                    DemandError::InvalidNotificationEventType(_) => {
+                        (StatusCode::BAD_REQUEST, "invalid_notification_event_type")
+                    }
+                    DemandError::SelfNotificationNotAllowed => (
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "self_notification_not_allowed",
+                    ),
                     _ => (StatusCode::BAD_REQUEST, "invalid_demand"),
                 };
                 Self::new(status, code, domain_err.to_string(), None)

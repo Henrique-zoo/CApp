@@ -3,71 +3,61 @@
 //! Encapsula o modelo de demanda acadêmica, histórico de alterações de status,
 //! fóruns de atuação (Institucional e Espaço Físico do CA) e suas invariantes.
 
-use std::{error::Error, fmt, str::FromStr};
-
-use chrono::{DateTime, Utc};
+use std::error::Error;
+use std::fmt;
+use std::str::FromStr;
+use chrono::DateTime;
+use chrono::Utc;
 use uuid::Uuid;
-
-use crate::modules::demands::domain::rules::{
-    validate_description, validate_optional_category, validate_optional_comment,
-    validate_optional_course_name, validate_optional_title, validate_status_transition,
-    validate_timestamps,
-};
-
+use crate::modules::demands::domain::rules::validate_description;
+use crate::modules::demands::domain::rules::validate_optional_category;
+use crate::modules::demands::domain::rules::validate_optional_comment;
+use crate::modules::demands::domain::rules::validate_optional_course_name;
+use crate::modules::demands::domain::rules::validate_optional_title;
+use crate::modules::demands::domain::rules::validate_status_transition;
+use crate::modules::demands::domain::rules::validate_timestamps;
 /// Erros decorrentes de violações de regras de negócio ou validação de demandas.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DemandError {
     /// A descrição ou conteúdo da demanda não pode ser vazio.
     EmptyDescription,
-
     /// A descrição da demanda ultrapassou o comprimento máximo permitido.
     DescriptionTooLong {
         /// Limite máximo permitido.
         max: usize,
     },
-
     /// O título da demanda não pode ser vazio quando informado.
     EmptyTitle,
-
     /// O título da demanda ultrapassou o comprimento máximo permitido.
     TitleTooLong {
         /// Limite máximo permitido.
         max: usize,
     },
-
     /// A categoria da demanda não pode ser vazia quando informada.
     EmptyCategory,
-
     /// A categoria da demanda ultrapassou o comprimento máximo permitido.
     CategoryTooLong {
         /// Limite máximo permitido.
         max: usize,
     },
-
     /// O nome do curso não pode ser vazio quando informado.
     EmptyCourseName,
-
     /// O nome do curso ultrapassou o comprimento máximo permitido.
     CourseNameTooLong {
         /// Limite máximo permitido.
         max: usize,
     },
-
     /// O comentário de alteração de status não pode ser vazio quando informado.
     EmptyComment,
-
     /// O comentário de alteração de status ultrapassou o comprimento máximo permitido.
     CommentTooLong {
         /// Limite máximo permitido.
         max: usize,
     },
-
     /// O fórum informado não é reconhecido pelo domínio.
     InvalidForum(String),
-
     /// O status informado não é reconhecido pelo domínio.
     InvalidStatus(String),
-
     /// A transição de ciclo de vida solicitada é inválida para o fórum da demanda.
     InvalidStatusTransition {
         /// Status de origem.
@@ -77,13 +67,10 @@ pub enum DemandError {
         /// Fórum da demanda.
         forum: DemandForum,
     },
-
     /// O encaminhamento à coordenação é exclusivo do fórum institucional e proibido no espaço físico.
     CoordinationForwardingNotAllowed,
-
     /// Demandas de espaço físico não podem ser vinculadas a um curso específico.
     CourseNotAllowedForPhysicalSpace,
-
     /// Os timestamps de criação e atualização violam a coerência temporal.
     InconsistentTimestamps {
         /// Instante de criação.
@@ -91,7 +78,6 @@ pub enum DemandError {
         /// Instante de atualização.
         updated_at: DateTime<Utc>,
     },
-
     /// Entrada do histórico associada a um identificador de demanda divergente.
     HistoryDemandIdMismatch {
         /// Identificador esperado da demanda.
@@ -99,20 +85,34 @@ pub enum DemandError {
         /// Identificador encontrado na entrada do histórico.
         actual: Uuid,
     },
-
     /// O conteúdo do comentário de demanda não pode ser vazio.
     EmptyCommentContent,
-
     /// O conteúdo do comentário de demanda ultrapassou o comprimento máximo permitido.
     CommentContentTooLong {
         /// Limite máximo permitido.
         max: usize,
     },
-
     /// O papel do autor do comentário informado não é reconhecido pelo domínio.
     InvalidCommentAuthorRole(String),
+    /// O título da notificação não pode ser vazio.
+    EmptyNotificationTitle,
+    /// O título da notificação ultrapassou o comprimento máximo permitido.
+    NotificationTitleTooLong {
+        /// Limite máximo permitido.
+        max: usize,
+    },
+    /// A mensagem da notificação não pode ser vazia.
+    EmptyNotificationMessage,
+    /// A mensagem da notificação ultrapassou o comprimento máximo permitido.
+    NotificationMessageTooLong {
+        /// Limite máximo permitido.
+        max: usize,
+    },
+    /// O tipo de evento de notificação informado não é reconhecido.
+    InvalidNotificationEventType(String),
+    /// Tentativa inválida de gerar notificação para o próprio autor da ação.
+    SelfNotificationNotAllowed,
 }
-
 impl fmt::Display for DemandError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -206,12 +206,37 @@ impl fmt::Display for DemandError {
                     "papel de autor de comentário inválido ou desconhecido: '{role}'"
                 )
             }
+            Self::EmptyNotificationTitle => {
+                write!(f, "o título da notificação não pode ser vazio")
+            }
+            Self::NotificationTitleTooLong { max } => {
+                write!(
+                    f,
+                    "o título da notificação excede o limite de {max} caracteres"
+                )
+            }
+            Self::EmptyNotificationMessage => {
+                write!(f, "a mensagem da notificação não pode ser vazia")
+            }
+            Self::NotificationMessageTooLong { max } => {
+                write!(
+                    f,
+                    "a mensagem da notificação excede o limite de {max} caracteres"
+                )
+            }
+            Self::InvalidNotificationEventType(t) => {
+                write!(f, "tipo de evento de notificação desconhecido: '{t}'")
+            }
+            Self::SelfNotificationNotAllowed => {
+                write!(
+                    f,
+                    "não é permitido gerar notificação para o próprio autor da ação"
+                )
+            }
         }
     }
 }
-
 impl Error for DemandError {}
-
 /// Fórum de atuação e escopo de visibilidade de uma demanda acadêmica.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DemandForum {
@@ -220,7 +245,6 @@ pub enum DemandForum {
     /// Demanda sobre a infraestrutura e instalações do espaço físico do CA, aberta a todos os usuários.
     PhysicalSpace,
 }
-
 impl DemandForum {
     /// Retorna a representação textual canônica do fórum.
     pub const fn as_str(&self) -> &'static str {
@@ -230,13 +254,11 @@ impl DemandForum {
         }
     }
 }
-
 impl fmt::Display for DemandForum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
-
 impl FromStr for DemandForum {
     type Err = DemandError;
 
@@ -249,7 +271,6 @@ impl FromStr for DemandForum {
         }
     }
 }
-
 /// Estado de andamento no ciclo de vida de uma demanda.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DemandStatus {
@@ -262,7 +283,6 @@ pub enum DemandStatus {
     /// Demanda concluída ou com solução finalizada.
     Completed,
 }
-
 impl DemandStatus {
     /// Retorna a representação textual canônica do status.
     pub const fn as_str(&self) -> &'static str {
@@ -274,13 +294,11 @@ impl DemandStatus {
         }
     }
 }
-
 impl fmt::Display for DemandStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
-
 impl FromStr for DemandStatus {
     type Err = DemandError;
 
@@ -300,7 +318,6 @@ impl FromStr for DemandStatus {
         }
     }
 }
-
 /// Registro imutável de uma alteração de status no histórico da demanda.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DemandStatusHistoryEntry {
@@ -319,7 +336,6 @@ pub struct DemandStatusHistoryEntry {
     /// Instante da alteração no tempo.
     created_at: DateTime<Utc>,
 }
-
 impl DemandStatusHistoryEntry {
     /// Constrói uma nova entrada de histórico com validação de invariantes.
     pub fn new(
@@ -386,7 +402,6 @@ impl DemandStatusHistoryEntry {
         self.created_at
     }
 }
-
 /// Entidade de domínio representando uma demanda acadêmica ou sobre o espaço físico.
 ///
 /// Todos os campos são privados e o acesso se dá via métodos observáveis.
@@ -417,7 +432,6 @@ pub struct Demand {
     /// Histórico ordenado de alterações de status.
     status_history: Vec<DemandStatusHistoryEntry>,
 }
-
 impl Demand {
     /// Cria uma nova demanda com status inicial [`DemandStatus::Open`].
     ///
@@ -718,7 +732,6 @@ impl Demand {
         &self.status_history
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

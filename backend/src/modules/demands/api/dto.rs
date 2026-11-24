@@ -3,12 +3,14 @@
 //! Encapsula os payloads JSON de requisição e resposta do módulo de demandas,
 //! mantendo o domínio estritamente livre de dependências de serialização.
 
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::DateTime;
+use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
-
-use crate::modules::demands::domain::entities::{Demand, DemandComment};
-
+use crate::modules::demands::domain::entities::Demand;
+use crate::modules::demands::domain::entities::DemandComment;
+use crate::modules::demands::domain::entities::DemandNotification;
 /// Payload de requisição para criação de uma nova demanda.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,7 +38,6 @@ pub struct CreateDemandRequest {
     #[serde(default, alias = "author_id")]
     pub author_id: Option<Uuid>,
 }
-
 /// Parâmetros de consulta via query string para listagem e filtragem de demandas.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -64,7 +65,6 @@ pub struct ListDemandsQueryParams {
     #[serde(alias = "page_size")]
     pub page_size: Option<usize>,
 }
-
 /// Payload de requisição para atualização de status de uma demanda pela gestão.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,7 +82,6 @@ pub struct UpdateDemandStatusRequest {
     )]
     pub opinion: Option<String>,
 }
-
 /// Representação serializada pública de um registro de histórico de status da demanda.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -114,7 +113,6 @@ pub struct DemandStatusHistoryResponse {
     /// Instante UTC da alteração de status.
     pub created_at: DateTime<Utc>,
 }
-
 impl From<&crate::modules::demands::domain::entities::DemandStatusHistoryEntry>
     for DemandStatusHistoryResponse
 {
@@ -131,7 +129,6 @@ impl From<&crate::modules::demands::domain::entities::DemandStatusHistoryEntry>
         }
     }
 }
-
 impl From<crate::modules::demands::domain::entities::DemandStatusHistoryEntry>
     for DemandStatusHistoryResponse
 {
@@ -139,7 +136,6 @@ impl From<crate::modules::demands::domain::entities::DemandStatusHistoryEntry>
         Self::from(&entry)
     }
 }
-
 /// Representação serializada pública de uma demanda acadêmica ou de espaço físico.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -184,7 +180,6 @@ pub struct DemandResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_history: Option<Vec<DemandStatusHistoryResponse>>,
 }
-
 impl From<&Demand> for DemandResponse {
     fn from(demand: &Demand) -> Self {
         let status_history = if demand.status_history().is_empty() {
@@ -215,13 +210,11 @@ impl From<&Demand> for DemandResponse {
         }
     }
 }
-
 impl From<Demand> for DemandResponse {
     fn from(demand: Demand) -> Self {
         Self::from(&demand)
     }
 }
-
 /// Payload de requisição para publicação de um comentário em uma demanda.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -233,7 +226,6 @@ pub struct CreateDemandCommentRequest {
     #[serde(default, alias = "author_id")]
     pub author_id: Option<Uuid>,
 }
-
 /// Representação serializada pública de um comentário ou interação na demanda.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -256,7 +248,6 @@ pub struct DemandCommentResponse {
     /// Instante de publicação em UTC.
     pub created_at: DateTime<Utc>,
 }
-
 impl From<&DemandComment> for DemandCommentResponse {
     fn from(comment: &DemandComment) -> Self {
         Self {
@@ -269,9 +260,80 @@ impl From<&DemandComment> for DemandCommentResponse {
         }
     }
 }
-
 impl From<DemandComment> for DemandCommentResponse {
     fn from(comment: DemandComment) -> Self {
         Self::from(&comment)
+    }
+}
+/// Parâmetros de consulta via query string para listagem de notificações de demandas.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ListDemandNotificationsQueryParams {
+    /// Quando verdadeiro, restringe os resultados às notificações ainda não lidas (`readAt == null`).
+    #[serde(default, alias = "unread_only")]
+    pub unread_only: Option<bool>,
+
+    /// Quantidade máxima de registros retornados (paginação).
+    pub limit: Option<usize>,
+
+    /// Deslocamento inicial de registros para paginação.
+    pub offset: Option<usize>,
+
+    /// Número da página baseada em 1 (conveniência para clientes).
+    pub page: Option<usize>,
+
+    /// Tamanho da página (alias para limite de registros).
+    #[serde(alias = "page_size")]
+    pub page_size: Option<usize>,
+}
+/// Representação serializada pública de uma notificação de demanda entregue a um estudante.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DemandNotificationResponse {
+    /// Identificador único da notificação.
+    pub id: Uuid,
+
+    /// Identificador da demanda vinculada.
+    pub demand_id: Uuid,
+
+    /// Identificador do estudante destinatário.
+    pub recipient_user_id: Uuid,
+
+    /// Identificador do Centro Acadêmico responsável pelo contexto da demanda.
+    pub academic_center_id: Uuid,
+
+    /// Tipo de evento gerador da notificação (`status_updated`, `official_response`).
+    pub event_type: String,
+
+    /// Título ou resumo da notificação.
+    pub title: String,
+
+    /// Mensagem ou conteúdo detalhado da notificação.
+    pub message: String,
+
+    /// Instante UTC de leitura pelo estudante, ou `null` caso ainda não lida.
+    pub read_at: Option<DateTime<Utc>>,
+
+    /// Instante UTC de criação da notificação.
+    pub created_at: DateTime<Utc>,
+}
+impl From<&DemandNotification> for DemandNotificationResponse {
+    fn from(n: &DemandNotification) -> Self {
+        Self {
+            id: n.id(),
+            demand_id: n.demand_id(),
+            recipient_user_id: n.recipient_user_id(),
+            academic_center_id: n.academic_center_id(),
+            event_type: n.event_type().as_str().to_string(),
+            title: n.title().to_string(),
+            message: n.message().to_string(),
+            read_at: n.read_at(),
+            created_at: n.created_at(),
+        }
+    }
+}
+impl From<DemandNotification> for DemandNotificationResponse {
+    fn from(n: DemandNotification) -> Self {
+        Self::from(&n)
     }
 }

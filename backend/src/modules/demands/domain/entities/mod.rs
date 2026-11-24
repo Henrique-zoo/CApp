@@ -5,6 +5,8 @@
 
 mod comment;
 mod demand;
+mod notification;
 
 pub use comment::*;
 pub use demand::*;
+pub use notification::*;

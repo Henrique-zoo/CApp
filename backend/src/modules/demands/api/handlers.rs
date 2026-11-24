@@ -29,7 +29,6 @@ use crate::modules::demands::application::queries::ListDemandsQuery;
 use crate::modules::demands::application::services::create_demand;
 use crate::modules::demands::application::services::get_demand;
 use crate::modules::demands::application::services::list_demands;
-use crate::modules::demands::application::services::update_demand_status;
 use crate::modules::demands::domain::entities::DemandForum;
 use crate::modules::demands::domain::entities::DemandStatus;
 use crate::modules::identity::api::extractors;
@@ -41,6 +40,13 @@ use crate::modules::demands::application::commands::PostDemandCommentCommand;
 use crate::modules::demands::application::queries::ListDemandCommentsQuery;
 use crate::modules::demands::application::services::list_demand_comments;
 use crate::modules::demands::application::services::post_demand_comment;
+use crate::modules::demands::api::dto::DemandNotificationResponse;
+use crate::modules::demands::api::dto::ListDemandNotificationsQueryParams;
+use crate::modules::demands::application::commands::MarkDemandNotificationAsReadCommand;
+use crate::modules::demands::application::queries::ListDemandNotificationsQuery;
+use crate::modules::demands::application::services::list_demand_notifications;
+use crate::modules::demands::application::services::mark_demand_notification_as_read;
+use crate::modules::demands::application::services::update_demand_status_with_notifications;
 /// Extrai e valida a identidade do chamador autenticado a partir dos cabeçalhos.
 async fn authenticate_caller(state: &AppState, headers: &HeaderMap) -> ApiResult<Uuid> {
     if let Ok(token) = extractors::firebase_bearer_token(headers) {
@@ -297,7 +303,13 @@ pub async fn handle_update_demand_status(
         opinion,
     );
 
-    let demand = update_demand_status(&state.pg_database, &state.pg_database, command).await?;
+    let demand = update_demand_status_with_notifications(
+        &state.pg_database,
+        &state.pg_database,
+        &state.pg_database,
+        command,
+    )
+    .await?;
 
     Ok((StatusCode::OK, Json(DemandResponse::from(demand))))
 }
@@ -403,4 +415,78 @@ pub async fn handle_list_comments(
         .collect();
 
     Ok((StatusCode::OK, Json(response)))
+}
+/// Consulta a lista de notificações de demandas do estudante autenticado.
+///
+/// # Rota
+///
+/// `GET /api/v1/demands/notifications`
+///
+/// # Query Params
+///
+/// - `unread_only`: Quando `true`, restringe aos avisos não lidos.
+/// - `limit`: Quantidade máxima de registros retornados.
+/// - `offset`: Quantidade de registros a pular.
+///
+/// # Respostas
+///
+/// - `200 OK`: Lista de notificações destinadas ao estudante autenticado.
+/// - `401 Unauthorized`: Credenciais ausentes ou inválidas.
+pub async fn handle_list_notifications(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<ListDemandNotificationsQueryParams>,
+) -> ApiResult<impl IntoResponse> {
+    let user_id = authenticate_caller(&state, &headers).await?;
+
+    let limit = params.limit.or(params.page_size);
+    let offset = params.offset.or_else(|| {
+        params
+            .page
+            .map(|p| p.saturating_sub(1) * limit.unwrap_or(50))
+    });
+
+    let query = ListDemandNotificationsQuery::new(
+        user_id,
+        params.unread_only.unwrap_or(false),
+        limit,
+        offset,
+    );
+
+    let notifications = list_demand_notifications(&state.pg_database, query).await?;
+
+    let response: Vec<DemandNotificationResponse> = notifications
+        .into_iter()
+        .map(DemandNotificationResponse::from)
+        .collect();
+
+    Ok((StatusCode::OK, Json(response)))
+}
+/// Marca uma notificação de demanda como lida pelo estudante destinatário.
+///
+/// # Rota
+///
+/// `PATCH /api/v1/demands/notifications/{notification_id}/read`
+///
+/// # Respostas
+///
+/// - `200 OK`: Notificação marcada como lida com sucesso.
+/// - `401 Unauthorized`: Credenciais ausentes ou inválidas.
+/// - `403 Forbidden`: Notificação pertence a outro usuário.
+/// - `404 Not Found`: Notificação inexistente.
+pub async fn handle_mark_notification_as_read(
+    State(state): State<AppState>,
+    Path(notification_id): Path<Uuid>,
+    headers: HeaderMap,
+) -> ApiResult<impl IntoResponse> {
+    let user_id = authenticate_caller(&state, &headers).await?;
+
+    let command = MarkDemandNotificationAsReadCommand::new(notification_id, user_id);
+
+    let notification = mark_demand_notification_as_read(&state.pg_database, command).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(DemandNotificationResponse::from(notification)),
+    ))
 }

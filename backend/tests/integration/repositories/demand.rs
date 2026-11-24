@@ -14,6 +14,10 @@ use sqlx::Row;
 use uuid::Uuid;
 use backend::modules::demands::domain::entities::DemandComment;
 use backend::modules::demands::domain::entities::DemandCommentAuthorRole;
+use backend::modules::demands::application::ports::DemandNotificationRepository;
+use backend::modules::demands::domain::entities::DemandNotification;
+use backend::modules::demands::domain::entities::DemandNotificationEventType;
+use backend::modules::demands::infrastructure::PostgresDemandNotificationRepository;
 /// Cria uma instituição no banco de teste.
 async fn create_test_institution(pool: &PgPool, name: &str) -> Uuid {
     let id = Uuid::new_v4();
@@ -1186,6 +1190,242 @@ async fn should_persist_and_list_comments_chronologically_in_postgres_repository
     assert_eq!(retrieved[2].id(), c3.id());
     assert_eq!(retrieved[2].author_role(), DemandCommentAuthorRole::Student);
     assert_eq!(retrieved[2].content(), "Réplica do estudante");
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_persist_and_retrieve_demand_notification_using_postgres_repository() {
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "Universidade de Brasília").await;
+    let ca_id = create_test_ca(
+        &db.pool,
+        institution_id,
+        "Centro Acadêmico de Computação",
+        "CACC",
+    )
+    .await;
+    let student_id = create_test_user(&db.pool, "student-notif-repo-1").await;
+
+    let demand_id = Uuid::new_v4();
+    let now = chrono::DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).unwrap();
+
+    sqlx::query(
+        "INSERT INTO demand (id, academic_center_id, author_id, forum, title, description, category, course_name, status, created_at, updated_at) \
+         VALUES ($1, $2, $3, 'physical_space', 'Reparo lâmpada', 'Troca de lâmpada queimada', NULL, NULL, 'open', $4, $4)",
+    )
+    .bind(demand_id)
+    .bind(ca_id)
+    .bind(student_id)
+    .bind(now)
+    .execute(&db.pool)
+    .await
+    .expect("should insert demand");
+
+    let repo = PostgresDemandNotificationRepository::new(db.pool.clone());
+    let notif_id = Uuid::new_v4();
+
+    let notification = DemandNotification::new(
+        notif_id,
+        demand_id,
+        student_id,
+        ca_id,
+        DemandNotificationEventType::StatusUpdated,
+        "Demanda em análise".to_string(),
+        "O status da sua demanda foi alterado para em análise.".to_string(),
+        now,
+    )
+    .expect("notificação válida");
+
+    repo.create(&notification)
+        .await
+        .expect("deve persistir notificação no PostgreSQL");
+
+    let retrieved = repo
+        .find_by_id(notif_id)
+        .await
+        .expect("consulta deve suceder")
+        .expect("notificação deve existir");
+
+    assert_eq!(retrieved.id(), notif_id);
+    assert_eq!(retrieved.demand_id(), demand_id);
+    assert_eq!(retrieved.recipient_user_id(), student_id);
+    assert_eq!(retrieved.academic_center_id(), ca_id);
+    assert_eq!(
+        retrieved.event_type(),
+        DemandNotificationEventType::StatusUpdated
+    );
+    assert_eq!(retrieved.title(), "Demanda em análise");
+    assert!(!retrieved.is_read());
+    assert_eq!(retrieved.read_at(), None);
+
+    // Listagem por destinatário
+    let list = repo
+        .list_by_recipient(student_id, false, None, None)
+        .await
+        .expect("deve listar notificações");
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id(), notif_id);
+
+    // Marcação de leitura
+    let mut to_update = retrieved;
+    let read_time = now + chrono::Duration::minutes(10);
+    to_update.mark_as_read(read_time);
+    repo.update(&to_update)
+        .await
+        .expect("deve atualizar notificação no banco");
+
+    let reloaded = repo
+        .find_by_id(notif_id)
+        .await
+        .unwrap()
+        .expect("deve encontrar notificação atualizada");
+    assert!(reloaded.is_read());
+    assert_eq!(reloaded.read_at(), Some(read_time));
+
+    // Filtro por não lidas deve retornar vazio agora
+    let unread_list = repo
+        .list_by_recipient(student_id, true, None, None)
+        .await
+        .expect("deve listar não lidas");
+    assert!(unread_list.is_empty());
+
+    db.close().await;
+}
+#[tokio::test]
+async fn should_enforce_database_check_constraints_and_foreign_keys_for_demand_notification() {
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "Universidade de Brasília").await;
+    let ca_id = create_test_ca(
+        &db.pool,
+        institution_id,
+        "Centro Acadêmico de Computação",
+        "CACC",
+    )
+    .await;
+    let student_id = create_test_user(&db.pool, "student-notif-chk-1").await;
+    let demand_id = Uuid::new_v4();
+
+    sqlx::query(
+        "INSERT INTO demand (id, academic_center_id, author_id, forum, title, description, category, course_name, status) \
+         VALUES ($1, $2, $3, 'physical_space', 'Título', 'Descrição', NULL, NULL, 'open')",
+    )
+    .bind(demand_id)
+    .bind(ca_id)
+    .bind(student_id)
+    .execute(&db.pool)
+    .await
+    .expect("should insert demand");
+
+    // CHECK: event_type inválido
+    let invalid_event_res = sqlx::query(
+        "INSERT INTO demand_notification (id, demand_id, recipient_user_id, academic_center_id, event_type, title, message) \
+         VALUES ($1, $2, $3, $4, 'invalid_type', 'Título', 'Mensagem')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(demand_id)
+    .bind(student_id)
+    .bind(ca_id)
+    .execute(&db.pool)
+    .await;
+    assert!(
+        invalid_event_res.is_err(),
+        "deve violar chk_demand_notification_event_type"
+    );
+
+    // CHECK: título vazio ou apenas espaços
+    let empty_title_res = sqlx::query(
+        "INSERT INTO demand_notification (id, demand_id, recipient_user_id, academic_center_id, event_type, title, message) \
+         VALUES ($1, $2, $3, $4, 'status_updated', '   ', 'Mensagem')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(demand_id)
+    .bind(student_id)
+    .bind(ca_id)
+    .execute(&db.pool)
+    .await;
+    assert!(
+        empty_title_res.is_err(),
+        "deve violar chk_demand_notification_title_not_empty"
+    );
+
+    // CHECK: mensagem vazia ou apenas espaços
+    let empty_msg_res = sqlx::query(
+        "INSERT INTO demand_notification (id, demand_id, recipient_user_id, academic_center_id, event_type, title, message) \
+         VALUES ($1, $2, $3, $4, 'status_updated', 'Título', '   ')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(demand_id)
+    .bind(student_id)
+    .bind(ca_id)
+    .execute(&db.pool)
+    .await;
+    assert!(
+        empty_msg_res.is_err(),
+        "deve violar chk_demand_notification_message_not_empty"
+    );
+
+    // CHECK: read_at anterior a created_at
+    let now = Utc::now();
+    let past = now - chrono::Duration::hours(1);
+    let inconsistent_time_res = sqlx::query(
+        "INSERT INTO demand_notification (id, demand_id, recipient_user_id, academic_center_id, event_type, title, message, read_at, created_at) \
+         VALUES ($1, $2, $3, $4, 'status_updated', 'Título', 'Mensagem', $5, $6)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(demand_id)
+    .bind(student_id)
+    .bind(ca_id)
+    .bind(past)
+    .bind(now)
+    .execute(&db.pool)
+    .await;
+    assert!(
+        inconsistent_time_res.is_err(),
+        "deve violar chk_demand_notification_read_at"
+    );
+
+    // FK: demand_id inexistente
+    let fake_demand_res = sqlx::query(
+        "INSERT INTO demand_notification (id, demand_id, recipient_user_id, academic_center_id, event_type, title, message) \
+         VALUES ($1, $2, $3, $4, 'status_updated', 'Título', 'Mensagem')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4())
+    .bind(student_id)
+    .bind(ca_id)
+    .execute(&db.pool)
+    .await;
+    assert!(fake_demand_res.is_err(), "deve violar FK com demand");
+
+    // CASCADE: deletar a demanda deve remover as notificações associadas
+    let valid_notif_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO demand_notification (id, demand_id, recipient_user_id, academic_center_id, event_type, title, message) \
+         VALUES ($1, $2, $3, $4, 'status_updated', 'Título', 'Mensagem')",
+    )
+    .bind(valid_notif_id)
+    .bind(demand_id)
+    .bind(student_id)
+    .bind(ca_id)
+    .execute(&db.pool)
+    .await
+    .expect("deve inserir notificação válida");
+
+    sqlx::query("DELETE FROM demand WHERE id = $1")
+        .bind(demand_id)
+        .execute(&db.pool)
+        .await
+        .expect("deve deletar demanda");
+
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM demand_notification WHERE id = $1")
+        .bind(valid_notif_id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        count, 0,
+        "notificação deve ser excluída em cascata ao remover a demanda"
+    );
 
     db.close().await;
 }

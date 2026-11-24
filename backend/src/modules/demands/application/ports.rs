@@ -4,12 +4,13 @@
 //! demandas e consultar vínculos acadêmicos e representatividade do CA.
 
 use uuid::Uuid;
-
-use crate::modules::demands::{
-    application::error::{AffiliationError, DemandRepositoryError},
-    domain::entities::{Demand, DemandComment, DemandForum, DemandStatus},
-};
-
+use crate::modules::demands::application::error::AffiliationError;
+use crate::modules::demands::application::error::DemandRepositoryError;
+use crate::modules::demands::domain::entities::Demand;
+use crate::modules::demands::domain::entities::DemandComment;
+use crate::modules::demands::domain::entities::DemandForum;
+use crate::modules::demands::domain::entities::DemandStatus;
+use crate::modules::demands::domain::entities::DemandNotification;
 /// Critérios de filtragem para listagem de demandas no repositório.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DemandFilter {
@@ -26,7 +27,6 @@ pub struct DemandFilter {
     /// Deslocamento inicial de registros.
     pub offset: Option<usize>,
 }
-
 /// Contrato de persistência para entidades e histórico de demandas.
 #[async_trait::async_trait]
 pub trait DemandRepository: Send + Sync {
@@ -42,7 +42,6 @@ pub trait DemandRepository: Send + Sync {
     /// Atualiza o status, data de modificação e histórico de uma demanda existente.
     async fn update(&self, demand: &Demand) -> Result<(), DemandRepositoryError>;
 }
-
 #[async_trait::async_trait]
 impl<T: DemandRepository + ?Sized> DemandRepository for &T {
     async fn create(&self, demand: &Demand) -> Result<(), DemandRepositoryError> {
@@ -61,7 +60,6 @@ impl<T: DemandRepository + ?Sized> DemandRepository for &T {
         (**self).update(demand).await
     }
 }
-
 /// Contrato de persistência para comentários e interações em demandas.
 #[async_trait::async_trait]
 pub trait DemandCommentRepository: Send + Sync {
@@ -74,7 +72,6 @@ pub trait DemandCommentRepository: Send + Sync {
         demand_id: Uuid,
     ) -> Result<Vec<DemandComment>, DemandRepositoryError>;
 }
-
 #[async_trait::async_trait]
 impl<T: DemandCommentRepository + ?Sized> DemandCommentRepository for &T {
     async fn create(&self, comment: &DemandComment) -> Result<(), DemandRepositoryError> {
@@ -88,7 +85,6 @@ impl<T: DemandCommentRepository + ?Sized> DemandCommentRepository for &T {
         (**self).list_by_demand_id(demand_id).await
     }
 }
-
 /// Representa a fotografia de vínculo do estudante e do Centro Acadêmico consultada pelos casos de uso.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcademicAffiliation {
@@ -110,7 +106,6 @@ pub struct AcademicAffiliation {
     /// Indica se o autor integra a diretoria/gestão do Centro Acadêmico em questão.
     pub is_ca_manager: bool,
 }
-
 impl AcademicAffiliation {
     /// Cria uma nova estrutura de vínculo acadêmico para o contexto do CA.
     pub fn new(
@@ -161,7 +156,6 @@ impl AcademicAffiliation {
         false
     }
 }
-
 /// Contrato para verificação de vínculo estudantil e representação do curso pelo CA.
 #[async_trait::async_trait]
 pub trait AcademicAffiliationPort: Send + Sync {
@@ -172,7 +166,6 @@ pub trait AcademicAffiliationPort: Send + Sync {
         academic_center_id: Uuid,
     ) -> Result<AcademicAffiliation, AffiliationError>;
 }
-
 #[async_trait::async_trait]
 impl<T: AcademicAffiliationPort + ?Sized> AcademicAffiliationPort for &T {
     async fn get_affiliation(
@@ -183,5 +176,94 @@ impl<T: AcademicAffiliationPort + ?Sized> AcademicAffiliationPort for &T {
         (**self)
             .get_affiliation(author_id, academic_center_id)
             .await
+    }
+}
+/// Contrato de persistência para notificações de demandas acadêmicas e de espaço físico.
+#[async_trait::async_trait]
+pub trait DemandNotificationRepository: Send + Sync {
+    /// Persiste uma nova notificação de demanda.
+    async fn create(&self, notification: &DemandNotification) -> Result<(), DemandRepositoryError>;
+
+    /// Localiza uma notificação por seu identificador único estável.
+    async fn find_by_id(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<DemandNotification>, DemandRepositoryError>;
+
+    /// Lista notificações destinadas a um estudante específico com paginação e filtro opcional por não lidas.
+    async fn list_by_recipient(
+        &self,
+        recipient_user_id: Uuid,
+        unread_only: bool,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<Vec<DemandNotification>, DemandRepositoryError>;
+
+    /// Atualiza o estado da notificação (ex.: registro de leitura).
+    async fn update(&self, notification: &DemandNotification) -> Result<(), DemandRepositoryError>;
+}
+#[async_trait::async_trait]
+impl<T: DemandNotificationRepository + ?Sized> DemandNotificationRepository for &T {
+    async fn create(&self, notification: &DemandNotification) -> Result<(), DemandRepositoryError> {
+        (**self).create(notification).await
+    }
+
+    async fn find_by_id(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<DemandNotification>, DemandRepositoryError> {
+        (**self).find_by_id(id).await
+    }
+
+    async fn list_by_recipient(
+        &self,
+        recipient_user_id: Uuid,
+        unread_only: bool,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<Vec<DemandNotification>, DemandRepositoryError> {
+        (**self)
+            .list_by_recipient(recipient_user_id, unread_only, limit, offset)
+            .await
+    }
+
+    async fn update(&self, notification: &DemandNotification) -> Result<(), DemandRepositoryError> {
+        (**self).update(notification).await
+    }
+}
+/// Implementação no-op de conveniência para casos onde notificações não são capturadas.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoopNotificationRepository;
+#[async_trait::async_trait]
+impl DemandNotificationRepository for NoopNotificationRepository {
+    async fn create(
+        &self,
+        _notification: &DemandNotification,
+    ) -> Result<(), DemandRepositoryError> {
+        Ok(())
+    }
+
+    async fn find_by_id(
+        &self,
+        _id: Uuid,
+    ) -> Result<Option<DemandNotification>, DemandRepositoryError> {
+        Ok(None)
+    }
+
+    async fn list_by_recipient(
+        &self,
+        _recipient_user_id: Uuid,
+        _unread_only: bool,
+        _limit: Option<usize>,
+        _offset: Option<usize>,
+    ) -> Result<Vec<DemandNotification>, DemandRepositoryError> {
+        Ok(Vec::new())
+    }
+
+    async fn update(
+        &self,
+        _notification: &DemandNotification,
+    ) -> Result<(), DemandRepositoryError> {
+        Ok(())
     }
 }

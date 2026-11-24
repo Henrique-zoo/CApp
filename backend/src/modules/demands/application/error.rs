@@ -79,6 +79,10 @@ pub enum DemandApplicationError {
     },
     /// O usuário não tem permissão para comentar ou interagir na demanda informada.
     UserNotPermittedToComment,
+    /// A notificação de demanda solicitada não foi encontrada.
+    DemandNotificationNotFound(Uuid),
+    /// O usuário não tem permissão para acessar ou modificar a notificação informada.
+    DemandNotificationForbidden,
 }
 impl fmt::Display for DemandApplicationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -135,6 +139,15 @@ impl fmt::Display for DemandApplicationError {
                 write!(
                     f,
                     "usuário sem permissão para interagir ou visualizar comentários desta demanda"
+                )
+            }
+            Self::DemandNotificationNotFound(id) => {
+                write!(f, "notificação de demanda '{id}' não encontrada")
+            }
+            Self::DemandNotificationForbidden => {
+                write!(
+                    f,
+                    "usuário não tem permissão para acessar ou modificar esta notificação"
                 )
             }
         }

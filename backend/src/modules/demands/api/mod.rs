@@ -51,4 +51,20 @@ pub fn router() -> Router<AppState> {
             "/academic-centers/{academic_center_id}/demands/{demand_id}/comments",
             axum::routing::post(handlers::handle_post_comment).get(handlers::handle_list_comments),
         )
+        .route(
+            "/api/v1/demands/notifications",
+            axum::routing::get(handlers::handle_list_notifications),
+        )
+        .route(
+            "/demands/notifications",
+            axum::routing::get(handlers::handle_list_notifications),
+        )
+        .route(
+            "/api/v1/demands/notifications/{notification_id}/read",
+            axum::routing::patch(handlers::handle_mark_notification_as_read),
+        )
+        .route(
+            "/demands/notifications/{notification_id}/read",
+            axum::routing::patch(handlers::handle_mark_notification_as_read),
+        )
 }
