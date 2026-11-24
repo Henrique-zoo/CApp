@@ -354,3 +354,178 @@ async fn should_enforce_database_check_constraints() {
 
     db.close().await;
 }
+
+#[tokio::test]
+async fn should_persist_and_retrieve_mandate_with_pg_database() {
+    use backend::infrastructure::database::PgDatabase;
+    use backend::modules::ca::application::ports::MandateRepository;
+    use backend::modules::ca::domain::entities::{Mandate, MandateStatus};
+    use chrono::NaiveDate;
+
+    let db = TestDatabase::new().await;
+    let institution_id = create_test_institution(&db.pool, "Universidade Mandato").await;
+    let user_id = Uuid::new_v4();
+    let ca_id = Uuid::new_v4();
+
+    // Cria app_user para FK
+    sqlx::query("INSERT INTO app_user (id, firebase_uid) VALUES ($1, $2)")
+        .bind(user_id)
+        .bind(format!("firebase-{user_id}"))
+        .execute(&db.pool)
+        .await
+        .expect("should insert app_user");
+
+    // Cria academic_center para FK
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, created_by_id, name, acronym, status) \
+         VALUES ($1, $2, $3, 'Centro Acadêmico Mandato', 'CAM', 'active')",
+    )
+    .bind(ca_id)
+    .bind(institution_id)
+    .bind(user_id)
+    .execute(&db.pool)
+    .await
+    .expect("should insert academic_center");
+
+    let pg_db = PgDatabase::new(db.pool.clone());
+    let start_date = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+    let end_date = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
+
+    let mandate = Mandate::new(ca_id, user_id, Some("Gestão 2026"), start_date, end_date)
+        .expect("valid mandate");
+
+    // Salva via trait MandateRepository
+    pg_db.save(&mandate).await.expect("should save mandate");
+
+    // Recupera por ID
+    let found = pg_db
+        .find_by_id(mandate.id())
+        .await
+        .expect("should query by id")
+        .expect("mandate should be found");
+
+    assert_eq!(found.id(), mandate.id());
+    assert_eq!(found.academic_center_id(), ca_id);
+    assert_eq!(found.created_by_id(), user_id);
+    assert_eq!(found.title(), Some("Gestão 2026"));
+    assert_eq!(found.start_date(), start_date);
+    assert_eq!(found.end_date(), end_date);
+    assert_eq!(found.status(), MandateStatus::Active);
+    assert_eq!(found.duration_in_days(), 364);
+
+    // Recupera ativo por CA ID
+    let active = pg_db
+        .find_active_by_academic_center_id(ca_id)
+        .await
+        .expect("should query active")
+        .expect("active mandate should be found");
+    assert_eq!(active.id(), mandate.id());
+
+    // Lista todos
+    let all = pg_db
+        .find_all_by_academic_center_id(ca_id)
+        .await
+        .expect("should list all");
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].id(), mandate.id());
+
+    // Testa view plural academic_center_mandates
+    let view_row = sqlx::query(
+        "SELECT COUNT(*) as cnt FROM academic_center_mandates WHERE academic_center_id = $1",
+    )
+    .bind(ca_id)
+    .fetch_one(&db.pool)
+    .await
+    .expect("should query view");
+    let count: i64 = view_row.get("cnt");
+    assert_eq!(count, 1);
+
+    db.close().await;
+}
+
+#[tokio::test]
+async fn should_enforce_mandate_database_constraints() {
+    use backend::infrastructure::database::PgDatabase;
+    use backend::modules::ca::application::ports::{MandateRepository, MandateRepositoryError};
+    use backend::modules::ca::domain::entities::Mandate;
+    use chrono::NaiveDate;
+
+    let db = TestDatabase::new().await;
+    let institution_id =
+        create_test_institution(&db.pool, "Universidade Constraints Mandato").await;
+    let user_id = Uuid::new_v4();
+    let ca_id = Uuid::new_v4();
+
+    sqlx::query("INSERT INTO app_user (id, firebase_uid) VALUES ($1, $2)")
+        .bind(user_id)
+        .bind(format!("firebase-{user_id}"))
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "INSERT INTO academic_center (id, institution_id, created_by_id, name, acronym, status) \
+         VALUES ($1, $2, $3, 'CA Constraints', 'CAC', 'active')",
+    )
+    .bind(ca_id)
+    .bind(institution_id)
+    .bind(user_id)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let pg_db = PgDatabase::new(db.pool.clone());
+
+    // 1. Constraint CHECK: end_date <= start_date no SQL
+    let invalid_dates_res = sqlx::query(
+        "INSERT INTO academic_center_mandate (academic_center_id, created_by_id, start_date, end_date, status) \
+         VALUES ($1, $2, '2026-12-31', '2026-01-01', 'active')",
+    )
+    .bind(ca_id)
+    .bind(user_id)
+    .execute(&db.pool)
+    .await;
+    assert!(
+        invalid_dates_res.is_err(),
+        "deve rejeitar end_date <= start_date via check constraint"
+    );
+
+    // 2. Constraint CHECK: status inválido
+    let invalid_status_res = sqlx::query(
+        "INSERT INTO academic_center_mandate (academic_center_id, created_by_id, start_date, end_date, status) \
+         VALUES ($1, $2, '2026-01-01', '2026-12-31', 'invalid_status')",
+    )
+    .bind(ca_id)
+    .bind(user_id)
+    .execute(&db.pool)
+    .await;
+    assert!(
+        invalid_status_res.is_err(),
+        "deve rejeitar status inválido via check constraint"
+    );
+
+    // 3. Unicidade de mandato ativo por CA (índice parcial)
+    let m1 = Mandate::new(
+        ca_id,
+        user_id,
+        Some("Primeiro Ativo"),
+        NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+        NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
+    )
+    .unwrap();
+    pg_db.save(&m1).await.unwrap();
+
+    let m2 = Mandate::new(
+        ca_id,
+        user_id,
+        Some("Segundo Ativo Conflitante"),
+        NaiveDate::from_ymd_opt(2027, 1, 1).unwrap(),
+        NaiveDate::from_ymd_opt(2027, 12, 31).unwrap(),
+    )
+    .unwrap();
+
+    let conflict_err = pg_db.save(&m2).await.unwrap_err();
+    assert!(matches!(conflict_err, MandateRepositoryError::Conflict(_)));
+
+    db.close().await;
+}
