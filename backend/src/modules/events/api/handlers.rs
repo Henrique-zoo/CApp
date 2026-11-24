@@ -6,37 +6,44 @@
 //! no respectivo Centro Acadêmico possam publicar diretamente (sem homologação) e editar eventos.
 
 use std::sync::Arc;
-
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
-};
+use axum::Json;
+use axum::extract::Path;
+use axum::extract::Query;
+use axum::extract::State;
+use axum::http::HeaderMap;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::response::Response;
 use uuid::Uuid;
-
-use super::dto::{
-    CreateEventRequest, EventDetailResponse, EventErrorResponse, EventRegistrationResponse,
-    EventResponse, ListEventsQueryParams, PublishEventRequest, UpdateEventRequest,
-};
-use crate::{
-    api::state::AppState,
-    modules::{
-        events::{
-            application::{
-                CancelEventRegistrationCommand, CancelEventRegistrationUseCase, CreateEventCommand,
-                EventApplicationError, EventRepository, EventService, GetEventByIdQuery,
-                GetPublishedEventDetailQuery, GetPublishedEventDetailUseCase, ListCaEventsQuery,
-                ListPublishedEventsByCaQuery, ListPublishedEventsByCaUseCase, PublishEventCommand,
-                RegisterInEventCommand, RegisterParticipantInEventUseCase, UpdateEventCommand,
-            },
-            domain::EventDomainError,
-            infrastructure::{PostgresEventAuthorizationService, PostgresEventRepository},
-        },
-        identity::api::AuthenticatedUser,
-    },
-};
-
+use super::dto::CreateEventRequest;
+use super::dto::EventDetailResponse;
+use super::dto::EventErrorResponse;
+use super::dto::EventRegistrationResponse;
+use super::dto::EventResponse;
+use super::dto::ListEventsQueryParams;
+use super::dto::PublishEventRequest;
+use super::dto::UpdateEventRequest;
+use crate::api::state::AppState;
+use crate::modules::events::application::CancelEventRegistrationCommand;
+use crate::modules::events::application::CancelEventRegistrationUseCase;
+use crate::modules::events::application::CreateEventCommand;
+use crate::modules::events::application::EventApplicationError;
+use crate::modules::events::application::EventRepository;
+use crate::modules::events::application::EventService;
+use crate::modules::events::application::GetEventByIdQuery;
+use crate::modules::events::application::GetPublishedEventDetailQuery;
+use crate::modules::events::application::GetPublishedEventDetailUseCase;
+use crate::modules::events::application::ListCaEventsQuery;
+use crate::modules::events::application::ListPublishedEventsByCaQuery;
+use crate::modules::events::application::ListPublishedEventsByCaUseCase;
+use crate::modules::events::application::PublishEventCommand;
+use crate::modules::events::application::RegisterInEventCommand;
+use crate::modules::events::application::RegisterParticipantInEventUseCase;
+use crate::modules::events::application::UpdateEventCommand;
+use crate::modules::events::domain::EventDomainError;
+use crate::modules::events::infrastructure::PostgresEventAuthorizationService;
+use crate::modules::events::infrastructure::PostgresEventRepository;
+use crate::modules::identity::api::AuthenticatedUser;
 /// Extrai o identificador do Centro Acadêmico ativo a partir dos parâmetros de query
 /// (`ca_id` / `academic_center_id`) ou dos cabeçalhos HTTP (`X-Academic-Center-Id`, `X-Active-Ca-Id`).
 fn extract_active_ca_id(params: &ListEventsQueryParams, headers: &HeaderMap) -> Option<Uuid> {
@@ -54,7 +61,6 @@ fn extract_active_ca_id(params: &ListEventsQueryParams, headers: &HeaderMap) -> 
 
     None
 }
-
 /// Converte um [`EventApplicationError`] em resposta HTTP com status e código semântico adequados.
 fn map_application_error(error: EventApplicationError) -> Response {
     let (status, code) = match &error {
@@ -69,6 +75,7 @@ fn map_application_error(error: EventApplicationError) -> Response {
                 (StatusCode::UNPROCESSABLE_ENTITY, "event_not_available")
             }
             _ => (StatusCode::BAD_REQUEST, "validation_error"),
+            EventDomainError::CapacityExceeded { .. } => (StatusCode::CONFLICT, "event_full"),
         },
         EventApplicationError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
         EventApplicationError::EventNotAvailableForRegistration(_) => {
@@ -84,6 +91,7 @@ fn map_application_error(error: EventApplicationError) -> Response {
         EventApplicationError::Repository(_) => {
             (StatusCode::INTERNAL_SERVER_ERROR, "internal_error")
         }
+        EventApplicationError::EventFull { .. } => (StatusCode::CONFLICT, "event_full"),
     };
 
     let body = Json(EventErrorResponse {
@@ -92,11 +100,9 @@ fn map_application_error(error: EventApplicationError) -> Response {
     });
     (status, body).into_response()
 }
-
 fn repository(state: &AppState) -> PostgresEventRepository {
     PostgresEventRepository::new(state.pg_database.pool.clone())
 }
-
 fn authorized_service(
     state: &AppState,
 ) -> EventService<PostgresEventRepository, PostgresEventAuthorizationService> {
@@ -105,7 +111,6 @@ fn authorized_service(
         PostgresEventAuthorizationService::new(state.pg_database.pool.clone()),
     )
 }
-
 /// Handler `POST /api/v1/events` para criar um novo evento (rascunho ou publicado diretamente).
 ///
 /// Verifica se o usuário autenticado (ou autor informado) possui a permissão
@@ -146,7 +151,6 @@ pub async fn create_event_handler(
         Err(error) => map_application_error(error),
     }
 }
-
 /// Handler `GET /api/v1/events?ca_id={ca_id}` para listar eventos publicados filtrados pelo CA ativo.
 pub async fn list_published_events_handler(
     State(state): State<AppState>,
@@ -156,7 +160,6 @@ pub async fn list_published_events_handler(
     let repo = Arc::new(repository(&state));
     execute_list_published_events(repo, &params, &headers).await
 }
-
 async fn execute_list_published_events<R: EventRepository>(
     repo: Arc<R>,
     params: &ListEventsQueryParams,
@@ -192,7 +195,6 @@ async fn execute_list_published_events<R: EventRepository>(
         }
     }
 }
-
 /// Handler `GET /api/v1/events/{id}` para consultar os detalhes de um evento pelo seu identificador.
 ///
 /// Respeita o isolamento por CA ativo (quando informado via query `ca_id` ou cabeçalho
@@ -206,7 +208,6 @@ pub async fn get_event_handler(
     let repo = repository(&state);
     execute_get_event_by_id(repo, id, &params, &headers).await
 }
-
 async fn execute_get_event_by_id<R: EventRepository>(
     repo: R,
     id: Uuid,
@@ -239,7 +240,6 @@ async fn execute_get_event_by_id<R: EventRepository>(
         }
     }
 }
-
 /// Handler `PUT /api/v1/events/{id}` para editar as informações de um evento existente.
 pub async fn update_event_handler(
     State(state): State<AppState>,
@@ -304,7 +304,6 @@ pub async fn update_event_handler(
         Err(error) => map_application_error(error),
     }
 }
-
 /// Handler `POST /api/v1/events/{id}/publish` para publicar diretamente um evento em rascunho.
 ///
 /// Extrai o usuário autenticado via [`AuthenticatedUser`] e verifica por meio de
@@ -330,7 +329,6 @@ pub async fn publish_event_handler(
         Err(error) => map_application_error(error),
     }
 }
-
 /// Handler `GET /api/v1/academic-centers/{ca_id}/events` para listar eventos de um Centro Acadêmico.
 pub async fn list_ca_events_handler(
     State(state): State<AppState>,
@@ -340,7 +338,6 @@ pub async fn list_ca_events_handler(
     let repo = repository(&state);
     execute_list_ca_events(repo, ca_id, &params).await
 }
-
 async fn execute_list_ca_events<R: EventRepository>(
     repo: R,
     ca_id: Uuid,
@@ -374,7 +371,6 @@ async fn execute_list_ca_events<R: EventRepository>(
         }
     }
 }
-
 /// Handler `GET /api/v1/academic-centers/{ca_id}/events/{id}` para consultar detalhes de um evento publicado de um CA específico.
 pub async fn get_ca_event_detail_handler(
     State(state): State<AppState>,
@@ -383,7 +379,6 @@ pub async fn get_ca_event_detail_handler(
     let repo = Arc::new(repository(&state));
     execute_get_ca_event_detail(repo, ca_id, id).await
 }
-
 async fn execute_get_ca_event_detail<R: EventRepository>(
     repo: Arc<R>,
     ca_id: Uuid,
@@ -397,7 +392,6 @@ async fn execute_get_ca_event_detail<R: EventRepository>(
         Err(error) => map_application_error(error),
     }
 }
-
 /// Handler `POST /api/v1/events/{id}/registrations` para inscrever o usuário autenticado em um evento publicado.
 pub async fn register_in_event_handler(
     State(state): State<AppState>,
@@ -410,7 +404,6 @@ pub async fn register_in_event_handler(
     let active_ca_id = extract_active_ca_id(&params, &headers);
     execute_register_in_event(repo, id, authenticated_user.user_id, active_ca_id).await
 }
-
 /// Handler `POST /api/v1/academic-centers/{ca_id}/events/{id}/registrations` para inscrever o usuário autenticado em um evento publicado de um CA específico.
 pub async fn register_in_ca_event_handler(
     State(state): State<AppState>,
@@ -420,7 +413,6 @@ pub async fn register_in_ca_event_handler(
     let repo = Arc::new(PostgresEventRepository::new(state.pool));
     execute_register_in_event(repo, id, authenticated_user.user_id, Some(ca_id)).await
 }
-
 async fn execute_register_in_event<R: EventRepository>(
     repo: Arc<R>,
     event_id: Uuid,
@@ -443,7 +435,6 @@ async fn execute_register_in_event<R: EventRepository>(
         Err(error) => map_application_error(error),
     }
 }
-
 /// Handler `DELETE /api/v1/events/{id}/registrations` para cancelar a inscrição ativa do usuário autenticado em um evento.
 pub async fn cancel_event_registration_handler(
     State(state): State<AppState>,
@@ -456,7 +447,6 @@ pub async fn cancel_event_registration_handler(
     let active_ca_id = extract_active_ca_id(&params, &headers);
     execute_cancel_event_registration(repo, id, authenticated_user.user_id, active_ca_id).await
 }
-
 /// Handler `DELETE /api/v1/academic-centers/{ca_id}/events/{id}/registrations` para cancelar a inscrição ativa do usuário autenticado em um evento de um CA específico.
 pub async fn cancel_ca_event_registration_handler(
     State(state): State<AppState>,
@@ -466,7 +456,6 @@ pub async fn cancel_ca_event_registration_handler(
     let repo = Arc::new(PostgresEventRepository::new(state.pool));
     execute_cancel_event_registration(repo, id, authenticated_user.user_id, Some(ca_id)).await
 }
-
 async fn execute_cancel_event_registration<R: EventRepository>(
     repo: Arc<R>,
     event_id: Uuid,
@@ -489,11 +478,9 @@ async fn execute_cancel_event_registration<R: EventRepository>(
         Err(error) => map_application_error(error),
     }
 }
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-
     use axum::{
         Router,
         body::{Body, to_bytes},
@@ -502,13 +489,11 @@ mod tests {
     };
     use chrono::{Duration, Utc};
     use tower::ServiceExt;
-
     use super::*;
     use crate::modules::events::{
         application::InMemoryEventRepository,
         domain::{Event, EventPublicationStatus, RegistrationStatus},
     };
-
     fn test_read_router(repo: Arc<InMemoryEventRepository>) -> Router {
         Router::new()
             .route(
@@ -612,7 +597,6 @@ mod tests {
             )
             .with_state(repo)
     }
-
     fn build_event(
         ca_id: Uuid,
         title: &str,
@@ -645,7 +629,6 @@ mod tests {
             updated_at: now,
         }
     }
-
     #[tokio::test]
     async fn get_events_lists_only_published_events_for_active_ca() {
         let ca_cc = Uuid::new_v4();
@@ -706,7 +689,6 @@ mod tests {
         assert_eq!(listed[1].id, published_2.id);
         assert_eq!(listed[1].title, "Torneio de Programação");
     }
-
     #[tokio::test]
     async fn get_events_returns_empty_list_when_ca_has_no_published_events() {
         let ca_cc = Uuid::new_v4();
@@ -729,7 +711,6 @@ mod tests {
         let listed: Vec<EventResponse> = serde_json::from_slice(&body).unwrap();
         assert!(listed.is_empty());
     }
-
     #[tokio::test]
     async fn get_event_details_enforces_published_status_and_ca_isolation() {
         let ca_cc = Uuid::new_v4();
@@ -833,7 +814,6 @@ mod tests {
             .unwrap();
         assert_eq!(pending_response.status(), StatusCode::NOT_FOUND);
     }
-
     #[tokio::test]
     async fn post_and_delete_event_registration_succeeds_for_published_event() {
         let ca_cc = Uuid::new_v4();
@@ -899,7 +879,6 @@ mod tests {
         assert_eq!(cancelled.status, RegistrationStatus::Cancelled);
         assert!(cancelled.cancelled_at.is_some());
     }
-
     #[tokio::test]
     async fn post_event_registration_rejects_duplicate_and_unpublished_or_other_ca() {
         let ca_cc = Uuid::new_v4();
@@ -1008,7 +987,6 @@ mod tests {
             .unwrap();
         assert_eq!(cross_ca_res.status(), StatusCode::NOT_FOUND);
     }
-
     #[tokio::test]
     async fn delete_event_registration_rejects_when_no_active_registration_exists() {
         let ca_cc = Uuid::new_v4();
@@ -1044,5 +1022,192 @@ mod tests {
         let body = to_bytes(cancel_res.into_body(), usize::MAX).await.unwrap();
         let err: EventErrorResponse = serde_json::from_slice(&body).unwrap();
         assert_eq!(err.code, "no_active_registration");
+    }
+    #[tokio::test]
+    async fn registration_endpoints_enforce_capacity_spot_release_and_concurrency() {
+        let ca_cc = Uuid::new_v4();
+        let now = Utc::now();
+        let starts_at = now + Duration::hours(24);
+        let ends_at = starts_at + Duration::hours(2);
+
+        let limited_event = Event {
+            id: Uuid::new_v4(),
+            academic_center_id: ca_cc,
+            author_id: Uuid::new_v4(),
+            title: "Palestra de IA".to_string(),
+            description: "Evento com 2 vagas".to_string(),
+            location: "Auditório 1".to_string(),
+            starts_at,
+            ends_at,
+            status: EventPublicationStatus::Published,
+            registration: EventRegistrationInfo::with_capacity(2).unwrap(),
+            published_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let unlimited_event = Event {
+            id: Uuid::new_v4(),
+            academic_center_id: ca_cc,
+            author_id: Uuid::new_v4(),
+            title: "Semana Acadêmica".to_string(),
+            description: "Evento sem limite".to_string(),
+            location: "Anfiteatro".to_string(),
+            starts_at,
+            ends_at,
+            status: EventPublicationStatus::Published,
+            registration: EventRegistrationInfo::unrestricted(),
+            published_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let repo = Arc::new(InMemoryEventRepository::with_events(vec![
+            limited_event.clone(),
+            unlimited_event.clone(),
+        ]));
+        let app = test_read_router(repo.clone());
+
+        let student_1 = Uuid::new_v4();
+        let student_2 = Uuid::new_v4();
+        let student_3 = Uuid::new_v4();
+
+        // 1. student_1 ocupa a primeira vaga
+        let res_1 = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
+                        limited_event.id
+                    ))
+                    .header("X-User-Id", student_1.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res_1.status(), StatusCode::CREATED);
+
+        // 2. Repetir inscrição de student_1 é recusado com 409 ("already_registered") sem ocupar a 2ª vaga
+        let dup_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
+                        limited_event.id
+                    ))
+                    .header("X-User-Id", student_1.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(dup_res.status(), StatusCode::CONFLICT);
+        let body = to_bytes(dup_res.into_body(), usize::MAX).await.unwrap();
+        let dup_err: EventErrorResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(dup_err.code, "already_registered");
+
+        // 3. student_2 e student_3 disputam simultaneamente a última vaga restante via HTTP
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let mut handles = Vec::new();
+        for candidate in [student_2, student_3] {
+            let router = app.clone();
+            let bar = barrier.clone();
+            let event_id = limited_event.id;
+            handles.push(tokio::spawn(async move {
+                bar.wait().await;
+                let response = router
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri(format!(
+                                "/api/v1/academic-centers/{ca_cc}/events/{event_id}/registrations"
+                            ))
+                            .header("X-User-Id", candidate.to_string())
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let status = response.status();
+                let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+                (candidate, status, bytes)
+            }));
+        }
+
+        let mut created_count = 0;
+        let mut full_candidate = None;
+        for handle in handles {
+            let (candidate, status, bytes) = handle.await.unwrap();
+            if status == StatusCode::CREATED {
+                created_count += 1;
+            } else {
+                assert_eq!(status, StatusCode::CONFLICT);
+                let err: EventErrorResponse = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(err.code, "event_full");
+                full_candidate = Some(candidate);
+            }
+        }
+        assert_eq!(created_count, 1);
+        let waiting_candidate = full_candidate.expect("um dos candidatos deve receber event_full");
+
+        // 4. Cancelamento de student_1 libera 1 vaga e permite que waiting_candidate se inscreva
+        let cancel_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
+                        limited_event.id
+                    ))
+                    .header("X-User-Id", student_1.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(cancel_res.status(), StatusCode::OK);
+
+        let retry_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
+                        limited_event.id
+                    ))
+                    .header("X-User-Id", waiting_candidate.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(retry_res.status(), StatusCode::CREATED);
+
+        // 5. Evento sem limite de vagas aceita inscrições sem bloqueio de capacidade
+        for _ in 0..5 {
+            let res_unlim = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!(
+                            "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
+                            unlimited_event.id
+                        ))
+                        .header("X-User-Id", Uuid::new_v4().to_string())
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res_unlim.status(), StatusCode::CREATED);
+        }
     }
 }

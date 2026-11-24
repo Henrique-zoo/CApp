@@ -59,6 +59,15 @@ pub enum EventApplicationError {
         participant_id: Uuid,
     },
 
+    /// O evento atingiu o limite máximo de vagas configurado e não aceita novas inscrições diretas.
+    #[error("o evento '{event_id}' atingiu o limite máximo de {max_capacity} vagas e está lotado")]
+    EventFull {
+        /// Identificador do evento lotado.
+        event_id: Uuid,
+        /// Capacidade máxima configurada para o evento.
+        max_capacity: u32,
+    },
+
     /// O usuário não possui permissão para gerenciar ou publicar eventos diretamente no Centro Acadêmico informado.
     #[error("operação recusada por falta de permissão no Centro Acadêmico")]
     PermissionDenied,
@@ -119,6 +128,25 @@ pub trait EventRepository: Send + Sync {
         &self,
         event_id: Uuid,
     ) -> Result<Vec<EventRegistration>, EventApplicationError>;
+
+    /// Registra ou reativa de forma atômica a inscrição de um participante em um evento publicado,
+    /// verificando isolamento por CA, unicidade da inscrição ativa e limite opcional de capacidade
+    /// sob controle de concorrência.
+    async fn register_participant_atomically(
+        &self,
+        event_id: Uuid,
+        participant_id: Uuid,
+        academic_center_id: Option<Uuid>,
+    ) -> Result<EventRegistration, EventApplicationError>;
+
+    /// Cancela de forma atômica a inscrição ativa de um participante em um evento,
+    /// liberando a vaga ocupada sob controle de concorrência.
+    async fn cancel_registration_atomically(
+        &self,
+        event_id: Uuid,
+        participant_id: Uuid,
+        academic_center_id: Option<Uuid>,
+    ) -> Result<EventRegistration, EventApplicationError>;
 }
 
 /// Repositório de eventos e inscrições em memória para testes unitários e de contrato HTTP.
@@ -237,6 +265,136 @@ impl EventRepository for InMemoryEventRepository {
             .filter(|item| item.event_id == event_id)
             .cloned()
             .collect())
+    }
+
+    async fn register_participant_atomically(
+        &self,
+        event_id: Uuid,
+        participant_id: Uuid,
+        academic_center_id: Option<Uuid>,
+    ) -> Result<EventRegistration, EventApplicationError> {
+        if participant_id.is_nil() {
+            return Err(EventApplicationError::Domain(
+                EventDomainError::InvalidParticipantId,
+            ));
+        }
+
+        let mut events_guard = self.events.lock().unwrap();
+        let mut registrations_guard = self.registrations.lock().unwrap();
+
+        let event = events_guard
+            .iter_mut()
+            .find(|item| item.id == event_id)
+            .ok_or(EventApplicationError::NotFound(event_id))?;
+
+        if let Some(active_ca_id) = academic_center_id
+            && event.academic_center_id != active_ca_id
+        {
+            return Err(EventApplicationError::NotFound(event_id));
+        }
+
+        if !event.is_published() {
+            return Err(EventApplicationError::EventNotAvailableForRegistration(
+                event_id,
+            ));
+        }
+
+        if let Some(existing) = registrations_guard
+            .iter()
+            .find(|item| item.event_id == event_id && item.participant_id == participant_id)
+            && existing.is_active()
+        {
+            return Err(EventApplicationError::AlreadyRegistered {
+                event_id,
+                participant_id,
+            });
+        }
+
+        let active_count = u32::try_from(
+            registrations_guard
+                .iter()
+                .filter(|item| item.event_id == event_id && item.is_active())
+                .count(),
+        )
+        .unwrap_or(u32::MAX);
+        event.registration.confirmed_registrations = active_count;
+
+        event.register_participant().map_err(|err| match err {
+            EventDomainError::CapacityExceeded { max_capacity, .. } => {
+                EventApplicationError::EventFull {
+                    event_id,
+                    max_capacity,
+                }
+            }
+            other => EventApplicationError::Domain(other),
+        })?;
+
+        if let Some(existing) = registrations_guard
+            .iter_mut()
+            .find(|item| item.event_id == event_id && item.participant_id == participant_id)
+        {
+            existing.reactivate();
+            Ok(existing.clone())
+        } else {
+            let registration = EventRegistration::new_confirmed(event_id, participant_id)?;
+            registrations_guard.push(registration.clone());
+            Ok(registration)
+        }
+    }
+
+    async fn cancel_registration_atomically(
+        &self,
+        event_id: Uuid,
+        participant_id: Uuid,
+        academic_center_id: Option<Uuid>,
+    ) -> Result<EventRegistration, EventApplicationError> {
+        if participant_id.is_nil() {
+            return Err(EventApplicationError::Domain(
+                EventDomainError::InvalidParticipantId,
+            ));
+        }
+
+        let mut events_guard = self.events.lock().unwrap();
+        let mut registrations_guard = self.registrations.lock().unwrap();
+
+        let event = events_guard
+            .iter_mut()
+            .find(|item| item.id == event_id)
+            .ok_or(EventApplicationError::NotFound(event_id))?;
+
+        if let Some(active_ca_id) = academic_center_id
+            && event.academic_center_id != active_ca_id
+        {
+            return Err(EventApplicationError::NotFound(event_id));
+        }
+
+        let cancelled = {
+            let existing = registrations_guard
+                .iter_mut()
+                .find(|item| {
+                    item.event_id == event_id
+                        && item.participant_id == participant_id
+                        && item.is_active()
+                })
+                .ok_or(EventApplicationError::ActiveRegistrationNotFound {
+                    event_id,
+                    participant_id,
+                })?;
+            existing.cancel();
+            existing.clone()
+        };
+
+        let active_count = u32::try_from(
+            registrations_guard
+                .iter()
+                .filter(|item| item.event_id == event_id && item.is_active())
+                .count(),
+        )
+        .unwrap_or(0);
+        event.registration.confirmed_registrations = active_count;
+        event.updated_at = chrono::Utc::now();
+
+        Ok(cancelled)
     }
 }
 
@@ -552,59 +710,18 @@ where
     /// - [`EventApplicationError::NotFound`] se o evento não existir ou pertencer a outro CA.
     /// - [`EventApplicationError::EventNotAvailableForRegistration`] se o evento não estiver publicado.
     /// - [`EventApplicationError::AlreadyRegistered`] se o usuário já possuir inscrição ativa no evento.
+    /// - [`EventApplicationError::EventFull`] se o evento tiver atingido o limite máximo de vagas configurado.
     pub async fn register_in_event(
         &self,
         command: RegisterInEventCommand,
     ) -> Result<EventRegistration, EventApplicationError> {
-        if command.participant_id.is_nil() {
-            return Err(EventApplicationError::Domain(
-                EventDomainError::InvalidParticipantId,
-            ));
-        }
-
-        let mut event = self
-            .repository
-            .find_by_id(command.event_id)
-            .await?
-            .ok_or(EventApplicationError::NotFound(command.event_id))?;
-
-        if let Some(active_ca_id) = command.academic_center_id
-            && event.academic_center_id != active_ca_id
-        {
-            return Err(EventApplicationError::NotFound(command.event_id));
-        }
-
-        if !event.is_published() {
-            return Err(EventApplicationError::EventNotAvailableForRegistration(
+        self.repository
+            .register_participant_atomically(
                 command.event_id,
-            ));
-        }
-
-        let registration = match self
-            .repository
-            .find_registration(command.event_id, command.participant_id)
-            .await?
-        {
-            Some(existing) if existing.is_active() => {
-                return Err(EventApplicationError::AlreadyRegistered {
-                    event_id: command.event_id,
-                    participant_id: command.participant_id,
-                });
-            }
-            Some(mut cancelled_registration) => {
-                cancelled_registration.reactivate();
-                cancelled_registration
-            }
-            None => EventRegistration::new_confirmed(command.event_id, command.participant_id)?,
-        };
-
-        let saved = self.repository.save_registration(&registration).await?;
-        event.registration.confirmed_registrations =
-            event.registration.confirmed_registrations.saturating_add(1);
-        event.updated_at = chrono::Utc::now();
-        self.repository.update(&event).await?;
-
-        Ok(saved)
+                command.participant_id,
+                command.academic_center_id,
+            )
+            .await
     }
 
     /// Cancela a inscrição ativa de um usuário autenticado em um evento.
@@ -618,40 +735,13 @@ where
         &self,
         command: CancelEventRegistrationCommand,
     ) -> Result<EventRegistration, EventApplicationError> {
-        if command.participant_id.is_nil() {
-            return Err(EventApplicationError::Domain(
-                EventDomainError::InvalidParticipantId,
-            ));
-        }
-
-        let mut event = self
-            .repository
-            .find_by_id(command.event_id)
-            .await?
-            .ok_or(EventApplicationError::NotFound(command.event_id))?;
-
-        if let Some(active_ca_id) = command.academic_center_id
-            && event.academic_center_id != active_ca_id
-        {
-            return Err(EventApplicationError::NotFound(command.event_id));
-        }
-
-        let mut registration = self
-            .repository
-            .find_registration(command.event_id, command.participant_id)
-            .await?
-            .filter(EventRegistration::is_active)
-            .ok_or(EventApplicationError::ActiveRegistrationNotFound {
-                event_id: command.event_id,
-                participant_id: command.participant_id,
-            })?;
-
-        registration.cancel();
-        let saved = self.repository.save_registration(&registration).await?;
-        event.cancel_participant_registration();
-        self.repository.update(&event).await?;
-
-        Ok(saved)
+        self.repository
+            .cancel_registration_atomically(
+                command.event_id,
+                command.participant_id,
+                command.academic_center_id,
+            )
+            .await
     }
 }
 
@@ -1213,5 +1303,252 @@ mod tests {
                 EventDomainError::InvalidMaxCapacity(0)
             ))
         );
+    }
+
+    #[tokio::test]
+    async fn enforces_max_capacity_releases_spot_on_cancel_and_allows_unlimited_events() {
+        let ca_computacao = Uuid::new_v4();
+        let author = Uuid::new_v4();
+        let starts_at = Utc::now() + Duration::days(2);
+        let ends_at = starts_at + Duration::hours(2);
+
+        let limited_event = Event::create_published(
+            ca_computacao,
+            author,
+            "Palestra de IA",
+            "Capacidade limitada a 2 vagas",
+            "Auditório 1",
+            starts_at,
+            ends_at,
+            EventRegistrationInfo::with_capacity(2).unwrap(),
+        )
+        .unwrap();
+
+        let unlimited_event = Event::create_published(
+            ca_computacao,
+            author,
+            "Semana Acadêmica",
+            "Evento sem limite de vagas",
+            "Anfiteatro",
+            starts_at,
+            ends_at,
+            EventRegistrationInfo::unrestricted(),
+        )
+        .unwrap();
+
+        let repo = InMemoryEventRepository::with_events(vec![
+            limited_event.clone(),
+            unlimited_event.clone(),
+        ]);
+        let service = EventService::new(repo.clone());
+
+        let student_1 = Uuid::new_v4();
+        let student_2 = Uuid::new_v4();
+        let student_3 = Uuid::new_v4();
+
+        // 1. Primeiros 2 participantes ocupam as 2 vagas disponíveis
+        service
+            .register_in_event(RegisterInEventCommand::for_academic_center(
+                limited_event.id,
+                student_1,
+                ca_computacao,
+            ))
+            .await
+            .expect("deve inscrever primeiro participante");
+
+        // Repetir inscrição para o mesmo participante antes de lotar não consome a segunda vaga
+        let repeat_before_full = service
+            .register_in_event(RegisterInEventCommand::for_academic_center(
+                limited_event.id,
+                student_1,
+                ca_computacao,
+            ))
+            .await;
+        assert_eq!(
+            repeat_before_full,
+            Err(EventApplicationError::AlreadyRegistered {
+                event_id: limited_event.id,
+                participant_id: student_1,
+            })
+        );
+
+        service
+            .register_in_event(RegisterInEventCommand::for_academic_center(
+                limited_event.id,
+                student_2,
+                ca_computacao,
+            ))
+            .await
+            .expect("deve inscrever segundo participante na última vaga");
+
+        let event_full_state = repo.find_by_id(limited_event.id).await.unwrap().unwrap();
+        assert_eq!(event_full_state.registration.confirmed_registrations, 2);
+        assert_eq!(event_full_state.registration.remaining_spots(), Some(0));
+        assert!(!event_full_state.registration.has_available_spots());
+
+        // 2. Quando todas as vagas estão ocupadas, nova inscrição direta é recusada com EventFull
+        let rejected_full = service
+            .register_in_event(RegisterInEventCommand::for_academic_center(
+                limited_event.id,
+                student_3,
+                ca_computacao,
+            ))
+            .await;
+        assert_eq!(
+            rejected_full,
+            Err(EventApplicationError::EventFull {
+                event_id: limited_event.id,
+                max_capacity: 2,
+            })
+        );
+
+        // Repetir inscrição de quem já está inscrito mesmo com evento lotado retorna AlreadyRegistered
+        let repeat_when_full = service
+            .register_in_event(RegisterInEventCommand::for_academic_center(
+                limited_event.id,
+                student_1,
+                ca_computacao,
+            ))
+            .await;
+        assert_eq!(
+            repeat_when_full,
+            Err(EventApplicationError::AlreadyRegistered {
+                event_id: limited_event.id,
+                participant_id: student_1,
+            })
+        );
+
+        // 3. Cancelamento de student_1 libera 1 vaga e permite que student_3 se inscreva
+        service
+            .cancel_registration(CancelEventRegistrationCommand::for_academic_center(
+                limited_event.id,
+                student_1,
+                ca_computacao,
+            ))
+            .await
+            .expect("deve cancelar inscrição de student_1 e liberar uma vaga");
+
+        let after_cancel = repo.find_by_id(limited_event.id).await.unwrap().unwrap();
+        assert_eq!(after_cancel.registration.confirmed_registrations, 1);
+        assert_eq!(after_cancel.registration.remaining_spots(), Some(1));
+
+        service
+            .register_in_event(RegisterInEventCommand::for_academic_center(
+                limited_event.id,
+                student_3,
+                ca_computacao,
+            ))
+            .await
+            .expect("deve permitir inscrição de student_3 na vaga liberada");
+
+        let after_reoccupy = repo.find_by_id(limited_event.id).await.unwrap().unwrap();
+        assert_eq!(after_reoccupy.registration.confirmed_registrations, 2);
+
+        // 4. Evento sem limite de vagas (max_capacity = None) aceita todos sem restrição artificial
+        for _ in 0..10 {
+            service
+                .register_in_event(RegisterInEventCommand::for_academic_center(
+                    unlimited_event.id,
+                    Uuid::new_v4(),
+                    ca_computacao,
+                ))
+                .await
+                .expect("evento sem limite não deve recusar por capacidade");
+        }
+        let unlimited_after = repo.find_by_id(unlimited_event.id).await.unwrap().unwrap();
+        assert_eq!(unlimited_after.registration.confirmed_registrations, 10);
+        assert_eq!(unlimited_after.registration.max_capacity, None);
+    }
+
+    #[tokio::test]
+    async fn concurrent_registrations_never_exceed_configured_max_capacity() {
+        let ca_computacao = Uuid::new_v4();
+        let author = Uuid::new_v4();
+        let starts_at = Utc::now() + Duration::days(2);
+        let ends_at = starts_at + Duration::hours(2);
+
+        // Cenário BDD: Evento publicado "Palestra de IA" possui limite de 3 vagas e já possui 2 inscritos
+        let event = Event::create_published(
+            ca_computacao,
+            author,
+            "Palestra de IA",
+            "Concorrência pela última vaga",
+            "Auditório 1",
+            starts_at,
+            ends_at,
+            EventRegistrationInfo::with_capacity(3).unwrap(),
+        )
+        .unwrap();
+
+        let repo = InMemoryEventRepository::with_events(vec![event.clone()]);
+        let service = EventService::new(repo.clone());
+
+        for _ in 0..2 {
+            service
+                .register_in_event(RegisterInEventCommand::for_academic_center(
+                    event.id,
+                    Uuid::new_v4(),
+                    ca_computacao,
+                ))
+                .await
+                .expect("deve registrar participante inicial");
+        }
+
+        // 10 pessoas sem inscrição solicitam simultaneamente a última vaga disponível
+        let barrier = Arc::new(tokio::sync::Barrier::new(10));
+        let mut handles = Vec::with_capacity(10);
+
+        for _ in 0..10 {
+            let svc = service.clone();
+            let bar = barrier.clone();
+            let event_id = event.id;
+            handles.push(tokio::spawn(async move {
+                let candidate = Uuid::new_v4();
+                bar.wait().await;
+                svc.register_in_event(RegisterInEventCommand::for_academic_center(
+                    event_id,
+                    candidate,
+                    ca_computacao,
+                ))
+                .await
+            }));
+        }
+
+        let mut successes = 0usize;
+        let mut full_errors = 0usize;
+
+        for handle in handles {
+            match handle.await.expect("tarefa concorrente deve concluir") {
+                Ok(reg) => {
+                    assert!(reg.is_active());
+                    successes += 1;
+                }
+                Err(EventApplicationError::EventFull {
+                    event_id,
+                    max_capacity,
+                }) => {
+                    assert_eq!(event_id, event.id);
+                    assert_eq!(max_capacity, 3);
+                    full_errors += 1;
+                }
+                Err(other) => panic!("erro inesperado na disputa concorrente de vaga: {other:?}"),
+            }
+        }
+
+        // Somente 1 nova inscrição ativa é registrada e o evento fica com 3 participantes inscritos
+        assert_eq!(successes, 1);
+        assert_eq!(full_errors, 9);
+
+        let updated_event = repo.find_by_id(event.id).await.unwrap().unwrap();
+        assert_eq!(updated_event.registration.confirmed_registrations, 3);
+
+        let active_registrations = repo
+            .list_registrations_by_event(event.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(EventRegistration::is_active)
+            .count();
+        assert_eq!(active_registrations, 3);
     }
 }

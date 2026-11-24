@@ -11,6 +11,7 @@ use crate::modules::events::domain::EventPublicationStatus;
 use crate::modules::events::application::EventAuthorizationPort;
 use crate::modules::events::domain::DIRECT_EVENT_MANAGEMENT_PERMISSION;
 use crate::modules::events::domain::EventRegistration;
+use crate::modules::events::domain::EventDomainError;
 /// Adaptador PostgreSQL para persistência de eventos na tabela `event`.
 #[derive(Debug, Clone)]
 pub struct PostgresEventRepository {
@@ -285,6 +286,308 @@ impl EventRepository for PostgresEventRepository {
         .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
 
         Ok(rows)
+    }
+
+    async fn register_participant_atomically(
+        &self,
+        event_id: Uuid,
+        participant_id: Uuid,
+        academic_center_id: Option<Uuid>,
+    ) -> Result<EventRegistration, EventApplicationError> {
+        if participant_id.is_nil() {
+            return Err(EventApplicationError::Domain(
+                EventDomainError::InvalidParticipantId,
+            ));
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        let row: Option<EventRow> = sqlx::query_as(
+            "SELECT
+                id,
+                academic_center_id,
+                author_id,
+                title,
+                description,
+                location,
+                starts_at,
+                ends_at,
+                status,
+                requires_registration,
+                max_capacity,
+                confirmed_registrations,
+                registration_deadline,
+                published_at,
+                created_at,
+                updated_at
+             FROM events
+             WHERE id = $1
+             FOR UPDATE",
+        )
+        .bind(event_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        let mut event = row
+            .map(Event::from)
+            .ok_or(EventApplicationError::NotFound(event_id))?;
+
+        if let Some(active_ca_id) = academic_center_id
+            && event.academic_center_id != active_ca_id
+        {
+            return Err(EventApplicationError::NotFound(event_id));
+        }
+
+        if !event.is_published() {
+            return Err(EventApplicationError::EventNotAvailableForRegistration(
+                event_id,
+            ));
+        }
+
+        let existing: Option<EventRegistration> = sqlx::query_as(
+            "SELECT
+                id,
+                event_id,
+                participant_id,
+                status,
+                registered_at,
+                cancelled_at
+             FROM event_registrations
+             WHERE event_id = $1 AND participant_id = $2
+             FOR UPDATE",
+        )
+        .bind(event_id)
+        .bind(participant_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        let registration = match existing {
+            Some(reg) if reg.is_active() => {
+                return Err(EventApplicationError::AlreadyRegistered {
+                    event_id,
+                    participant_id,
+                });
+            }
+            Some(mut cancelled_reg) => {
+                cancelled_reg.reactivate();
+                cancelled_reg
+            }
+            None => EventRegistration::new_confirmed(event_id, participant_id)?,
+        };
+
+        let active_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::BIGINT
+             FROM event_registrations
+             WHERE event_id = $1 AND status IN ('confirmed', 'confirmada')",
+        )
+        .bind(event_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        event.registration.confirmed_registrations =
+            u32::try_from(active_count).unwrap_or(u32::MAX);
+        event.register_participant().map_err(|err| match err {
+            EventDomainError::CapacityExceeded { max_capacity, .. } => {
+                EventApplicationError::EventFull {
+                    event_id,
+                    max_capacity,
+                }
+            }
+            other => EventApplicationError::Domain(other),
+        })?;
+
+        let saved: EventRegistration = sqlx::query_as(
+            "INSERT INTO event_registrations (
+                id,
+                event_id,
+                participant_id,
+                status,
+                registered_at,
+                cancelled_at
+             )
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (event_id, participant_id)
+             DO UPDATE SET
+                status = EXCLUDED.status,
+                registered_at = EXCLUDED.registered_at,
+                cancelled_at = EXCLUDED.cancelled_at
+             RETURNING
+                id,
+                event_id,
+                participant_id,
+                status,
+                registered_at,
+                cancelled_at",
+        )
+        .bind(registration.id)
+        .bind(registration.event_id)
+        .bind(registration.participant_id)
+        .bind(registration.status)
+        .bind(registration.registered_at)
+        .bind(registration.cancelled_at)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        let confirmed_registrations =
+            i32::try_from(event.registration.confirmed_registrations).unwrap_or(i32::MAX);
+        sqlx::query(
+            "UPDATE events
+             SET confirmed_registrations = $2,
+                 updated_at = $3
+             WHERE id = $1",
+        )
+        .bind(event.id)
+        .bind(confirmed_registrations)
+        .bind(event.updated_at)
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        tx.commit()
+            .await
+            .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        Ok(saved)
+    }
+
+    async fn cancel_registration_atomically(
+        &self,
+        event_id: Uuid,
+        participant_id: Uuid,
+        academic_center_id: Option<Uuid>,
+    ) -> Result<EventRegistration, EventApplicationError> {
+        if participant_id.is_nil() {
+            return Err(EventApplicationError::Domain(
+                EventDomainError::InvalidParticipantId,
+            ));
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        let row: Option<EventRow> = sqlx::query_as(
+            "SELECT
+                id,
+                academic_center_id,
+                author_id,
+                title,
+                description,
+                location,
+                starts_at,
+                ends_at,
+                status,
+                requires_registration,
+                max_capacity,
+                confirmed_registrations,
+                registration_deadline,
+                published_at,
+                created_at,
+                updated_at
+             FROM events
+             WHERE id = $1
+             FOR UPDATE",
+        )
+        .bind(event_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        let event = row
+            .map(Event::from)
+            .ok_or(EventApplicationError::NotFound(event_id))?;
+
+        if let Some(active_ca_id) = academic_center_id
+            && event.academic_center_id != active_ca_id
+        {
+            return Err(EventApplicationError::NotFound(event_id));
+        }
+
+        let mut registration = sqlx::query_as::<_, EventRegistration>(
+            "SELECT
+                id,
+                event_id,
+                participant_id,
+                status,
+                registered_at,
+                cancelled_at
+             FROM event_registrations
+             WHERE event_id = $1 AND participant_id = $2
+             FOR UPDATE",
+        )
+        .bind(event_id)
+        .bind(participant_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?
+        .filter(EventRegistration::is_active)
+        .ok_or(EventApplicationError::ActiveRegistrationNotFound {
+            event_id,
+            participant_id,
+        })?;
+
+        registration.cancel();
+
+        let saved: EventRegistration = sqlx::query_as(
+            "UPDATE event_registrations
+             SET status = $3,
+                 cancelled_at = $4
+             WHERE event_id = $1 AND participant_id = $2
+             RETURNING
+                id,
+                event_id,
+                participant_id,
+                status,
+                registered_at,
+                cancelled_at",
+        )
+        .bind(event_id)
+        .bind(participant_id)
+        .bind(registration.status)
+        .bind(registration.cancelled_at)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        let active_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::BIGINT
+             FROM event_registrations
+             WHERE event_id = $1 AND status IN ('confirmed', 'confirmada')",
+        )
+        .bind(event_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        let confirmed_registrations = i32::try_from(active_count).unwrap_or(0);
+        sqlx::query(
+            "UPDATE events
+             SET confirmed_registrations = $2,
+                 updated_at = $3
+             WHERE id = $1",
+        )
+        .bind(event.id)
+        .bind(confirmed_registrations)
+        .bind(Utc::now())
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        tx.commit()
+            .await
+            .map_err(|err| EventApplicationError::Repository(err.to_string()))?;
+
+        Ok(saved)
     }
 }
 /// Adaptador PostgreSQL de controle de acesso e autorização administrativa sobre eventos do CA.
