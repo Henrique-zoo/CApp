@@ -5,6 +5,7 @@ import 'package:capp/src/app/app.dart';
 import 'package:capp/src/app/theme.dart';
 import 'package:capp/src/modules/faq/faq.dart';
 import 'package:capp/src/modules/faq/faq_widgets.dart';
+import 'package:capp/src/modules/identity/identity.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:uuid/uuid.dart';
