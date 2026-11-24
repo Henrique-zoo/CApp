@@ -120,18 +120,75 @@ fn visualizacao_and_inscricao_eventos_scenarios_are_enabled_and_all_steps_regist
         }
         assert_eq!(scenario_count, expected_scenarios);
     }
+}
 
-    // Garante que controle_vagas_eventos.feature (#104) permanece com @pending_backend
+/// Garante que `controle_vagas_eventos.feature` habilita os 6 cenários MVP de controle básico de vagas
+/// no backend (sem `@pending_backend`), mantém os 5 cenários pós-MVP da fila de espera (#279) marcados
+/// com `@pending_backend`, e possui 100% dos steps registrados sem ambiguidade no Cucumber.
+#[test]
+fn controle_vagas_eventos_mvp_scenarios_are_enabled_and_all_steps_registered() {
+    let features_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../features");
+    let collection = AppWorld::collection();
     let controle_path = features_dir.join("controle_vagas_eventos.feature");
-    let controle_feature = Feature::parse_path(&controle_path, Default::default())
+    let feature = Feature::parse_path(&controle_path, Default::default())
         .expect("deve fazer parse de controle_vagas_eventos.feature");
-    let first_rule = controle_feature.rules.first();
-    let first_scenario = first_rule
-        .map(|r| &r.scenarios[0])
-        .unwrap_or_else(|| &controle_feature.scenarios[0]);
-    assert!(scenario_filter::is_pending_backend(
-        &controle_feature,
-        first_rule,
-        first_scenario
-    ));
+
+    assert!(
+        feature.tags.iter().any(|tag| tag == "backend"),
+        "controle_vagas_eventos.feature deve manter a tag @backend"
+    );
+    assert!(
+        feature.tags.iter().any(|tag| tag == "pending_mobile"),
+        "controle_vagas_eventos.feature deve manter a tag @pending_mobile"
+    );
+
+    let mut enabled_mvp_scenarios = 0usize;
+    let mut pending_waitlist_scenarios = 0usize;
+
+    for rule in &feature.rules {
+        for scenario in &rule.scenarios {
+            let is_mvp = scenario.tags.iter().any(|tag| tag == "mvp");
+            let is_pending = scenario_filter::is_pending_backend(&feature, Some(rule), scenario);
+
+            if is_mvp {
+                assert!(
+                    !is_pending,
+                    "cenário MVP '{}' não deve estar marcado como @pending_backend",
+                    scenario.name
+                );
+                enabled_mvp_scenarios += 1;
+            } else {
+                assert!(
+                    is_pending,
+                    "cenário pós-MVP da fila '{}' deve permanecer @pending_backend para a issue #279",
+                    scenario.name
+                );
+                pending_waitlist_scenarios += 1;
+            }
+
+            let steps = feature
+                .background
+                .iter()
+                .flat_map(|bg| &bg.steps)
+                .chain(rule.background.iter().flat_map(|bg| &bg.steps))
+                .chain(scenario.steps.iter());
+
+            for step in steps {
+                match collection.find(step) {
+                    Ok(Some(_)) => {}
+                    Ok(None) => panic!(
+                        "step não registrado em controle_vagas_eventos.feature / '{}': {}",
+                        scenario.name, step.value
+                    ),
+                    Err(err) => panic!(
+                        "step ambíguo em controle_vagas_eventos.feature / '{}': {} ({err})",
+                        scenario.name, step.value
+                    ),
+                }
+            }
+        }
+    }
+
+    assert_eq!(enabled_mvp_scenarios, 6);
+    assert_eq!(pending_waitlist_scenarios, 5);
 }
