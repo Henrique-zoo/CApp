@@ -16,18 +16,19 @@ use axum::{
 use uuid::Uuid;
 
 use super::dto::{
-    CreateEventRequest, EventDetailResponse, EventErrorResponse, EventResponse,
-    ListEventsQueryParams, PublishEventRequest, UpdateEventRequest,
+    CreateEventRequest, EventDetailResponse, EventErrorResponse, EventRegistrationResponse,
+    EventResponse, ListEventsQueryParams, PublishEventRequest, UpdateEventRequest,
 };
 use crate::{
     api::state::AppState,
     modules::{
         events::{
             application::{
-                CreateEventCommand, EventApplicationError, EventRepository, EventService,
-                GetEventByIdQuery, GetPublishedEventDetailQuery, GetPublishedEventDetailUseCase,
-                ListCaEventsQuery, ListPublishedEventsByCaQuery, ListPublishedEventsByCaUseCase,
-                PublishEventCommand, UpdateEventCommand,
+                CancelEventRegistrationCommand, CancelEventRegistrationUseCase, CreateEventCommand,
+                EventApplicationError, EventRepository, EventService, GetEventByIdQuery,
+                GetPublishedEventDetailQuery, GetPublishedEventDetailUseCase, ListCaEventsQuery,
+                ListPublishedEventsByCaQuery, ListPublishedEventsByCaUseCase, PublishEventCommand,
+                RegisterInEventCommand, RegisterParticipantInEventUseCase, UpdateEventCommand,
             },
             domain::EventDomainError,
             infrastructure::{PostgresEventAuthorizationService, PostgresEventRepository},
@@ -64,9 +65,21 @@ fn map_application_error(error: EventApplicationError) -> Response {
             EventDomainError::InvalidEventPeriod { .. } => {
                 (StatusCode::BAD_REQUEST, "invalid_period")
             }
+            EventDomainError::EventNotPublished => {
+                (StatusCode::UNPROCESSABLE_ENTITY, "event_not_available")
+            }
             _ => (StatusCode::BAD_REQUEST, "validation_error"),
         },
         EventApplicationError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
+        EventApplicationError::EventNotAvailableForRegistration(_) => {
+            (StatusCode::UNPROCESSABLE_ENTITY, "event_not_available")
+        }
+        EventApplicationError::AlreadyRegistered { .. } => {
+            (StatusCode::CONFLICT, "already_registered")
+        }
+        EventApplicationError::ActiveRegistrationNotFound { .. } => {
+            (StatusCode::CONFLICT, "no_active_registration")
+        }
         EventApplicationError::PermissionDenied => (StatusCode::FORBIDDEN, "permission_denied"),
         EventApplicationError::Repository(_) => {
             (StatusCode::INTERNAL_SERVER_ERROR, "internal_error")
@@ -385,6 +398,98 @@ async fn execute_get_ca_event_detail<R: EventRepository>(
     }
 }
 
+/// Handler `POST /api/v1/events/{id}/registrations` para inscrever o usuário autenticado em um evento publicado.
+pub async fn register_in_event_handler(
+    State(state): State<AppState>,
+    authenticated_user: AuthenticatedUser,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(params): Query<ListEventsQueryParams>,
+) -> Response {
+    let repo = Arc::new(PostgresEventRepository::new(state.pool));
+    let active_ca_id = extract_active_ca_id(&params, &headers);
+    execute_register_in_event(repo, id, authenticated_user.user_id, active_ca_id).await
+}
+
+/// Handler `POST /api/v1/academic-centers/{ca_id}/events/{id}/registrations` para inscrever o usuário autenticado em um evento publicado de um CA específico.
+pub async fn register_in_ca_event_handler(
+    State(state): State<AppState>,
+    authenticated_user: AuthenticatedUser,
+    Path((ca_id, id)): Path<(Uuid, Uuid)>,
+) -> Response {
+    let repo = Arc::new(PostgresEventRepository::new(state.pool));
+    execute_register_in_event(repo, id, authenticated_user.user_id, Some(ca_id)).await
+}
+
+async fn execute_register_in_event<R: EventRepository>(
+    repo: Arc<R>,
+    event_id: Uuid,
+    participant_id: Uuid,
+    academic_center_id: Option<Uuid>,
+) -> Response {
+    let use_case = RegisterParticipantInEventUseCase::new(repo);
+    let command = RegisterInEventCommand {
+        event_id,
+        participant_id,
+        academic_center_id,
+    };
+
+    match use_case.execute(command).await {
+        Ok(registration) => (
+            StatusCode::CREATED,
+            Json(EventRegistrationResponse::confirmed(registration)),
+        )
+            .into_response(),
+        Err(error) => map_application_error(error),
+    }
+}
+
+/// Handler `DELETE /api/v1/events/{id}/registrations` para cancelar a inscrição ativa do usuário autenticado em um evento.
+pub async fn cancel_event_registration_handler(
+    State(state): State<AppState>,
+    authenticated_user: AuthenticatedUser,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(params): Query<ListEventsQueryParams>,
+) -> Response {
+    let repo = Arc::new(PostgresEventRepository::new(state.pool));
+    let active_ca_id = extract_active_ca_id(&params, &headers);
+    execute_cancel_event_registration(repo, id, authenticated_user.user_id, active_ca_id).await
+}
+
+/// Handler `DELETE /api/v1/academic-centers/{ca_id}/events/{id}/registrations` para cancelar a inscrição ativa do usuário autenticado em um evento de um CA específico.
+pub async fn cancel_ca_event_registration_handler(
+    State(state): State<AppState>,
+    authenticated_user: AuthenticatedUser,
+    Path((ca_id, id)): Path<(Uuid, Uuid)>,
+) -> Response {
+    let repo = Arc::new(PostgresEventRepository::new(state.pool));
+    execute_cancel_event_registration(repo, id, authenticated_user.user_id, Some(ca_id)).await
+}
+
+async fn execute_cancel_event_registration<R: EventRepository>(
+    repo: Arc<R>,
+    event_id: Uuid,
+    participant_id: Uuid,
+    academic_center_id: Option<Uuid>,
+) -> Response {
+    let use_case = CancelEventRegistrationUseCase::new(repo);
+    let command = CancelEventRegistrationCommand {
+        event_id,
+        participant_id,
+        academic_center_id,
+    };
+
+    match use_case.execute(command).await {
+        Ok(registration) => (
+            StatusCode::OK,
+            Json(EventRegistrationResponse::cancelled(registration)),
+        )
+            .into_response(),
+        Err(error) => map_application_error(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -393,7 +498,7 @@ mod tests {
         Router,
         body::{Body, to_bytes},
         http::Request,
-        routing::get,
+        routing::{get, post},
     };
     use chrono::{Duration, Utc};
     use tower::ServiceExt;
@@ -401,7 +506,7 @@ mod tests {
     use super::*;
     use crate::modules::events::{
         application::InMemoryEventRepository,
-        domain::{Event, EventPublicationStatus},
+        domain::{Event, EventPublicationStatus, RegistrationStatus},
     };
 
     fn test_read_router(repo: Arc<InMemoryEventRepository>) -> Router {
@@ -428,6 +533,41 @@ mod tests {
                 ),
             )
             .route(
+                "/api/v1/events/{id}/registrations",
+                post(
+                    |State(repo): State<Arc<InMemoryEventRepository>>,
+                     authenticated_user: AuthenticatedUser,
+                     headers: HeaderMap,
+                     Path(id): Path<Uuid>,
+                     Query(params): Query<ListEventsQueryParams>| async move {
+                        let active_ca_id = extract_active_ca_id(&params, &headers);
+                        execute_register_in_event(
+                            repo,
+                            id,
+                            authenticated_user.user_id,
+                            active_ca_id,
+                        )
+                        .await
+                    },
+                )
+                .delete(
+                    |State(repo): State<Arc<InMemoryEventRepository>>,
+                     authenticated_user: AuthenticatedUser,
+                     headers: HeaderMap,
+                     Path(id): Path<Uuid>,
+                     Query(params): Query<ListEventsQueryParams>| async move {
+                        let active_ca_id = extract_active_ca_id(&params, &headers);
+                        execute_cancel_event_registration(
+                            repo,
+                            id,
+                            authenticated_user.user_id,
+                            active_ca_id,
+                        )
+                        .await
+                    },
+                ),
+            )
+            .route(
                 "/api/v1/academic-centers/{ca_id}/events",
                 get(
                     |State(repo): State<Arc<InMemoryEventRepository>>,
@@ -443,6 +583,30 @@ mod tests {
                     |State(repo): State<Arc<InMemoryEventRepository>>,
                      Path((ca_id, id)): Path<(Uuid, Uuid)>| async move {
                         execute_get_ca_event_detail(repo, ca_id, id).await
+                    },
+                ),
+            )
+            .route(
+                "/api/v1/academic-centers/{ca_id}/events/{id}/registrations",
+                post(
+                    |State(repo): State<Arc<InMemoryEventRepository>>,
+                     authenticated_user: AuthenticatedUser,
+                     Path((ca_id, id)): Path<(Uuid, Uuid)>| async move {
+                        execute_register_in_event(repo, id, authenticated_user.user_id, Some(ca_id))
+                            .await
+                    },
+                )
+                .delete(
+                    |State(repo): State<Arc<InMemoryEventRepository>>,
+                     authenticated_user: AuthenticatedUser,
+                     Path((ca_id, id)): Path<(Uuid, Uuid)>| async move {
+                        execute_cancel_event_registration(
+                            repo,
+                            id,
+                            authenticated_user.user_id,
+                            Some(ca_id),
+                        )
+                        .await
                     },
                 ),
             )
@@ -668,5 +832,217 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(pending_response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn post_and_delete_event_registration_succeeds_for_published_event() {
+        let ca_cc = Uuid::new_v4();
+        let student = Uuid::new_v4();
+        let published = build_event(
+            ca_cc,
+            "Palestra de IA",
+            EventPublicationStatus::Published,
+            24,
+        );
+
+        let repo = Arc::new(InMemoryEventRepository::with_events(vec![
+            published.clone(),
+        ]));
+        let app = test_read_router(repo);
+
+        // 1. POST /api/v1/academic-centers/{ca_id}/events/{id}/registrations -> 201 Created
+        let register_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
+                        published.id
+                    ))
+                    .header("X-User-Id", student.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(register_res.status(), StatusCode::CREATED);
+        let body = to_bytes(register_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let registration: EventRegistrationResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(registration.event_id, published.id);
+        assert_eq!(registration.participant_id, student);
+        assert_eq!(registration.status, RegistrationStatus::Confirmed);
+        assert!(registration.cancelled_at.is_none());
+
+        // 2. DELETE /api/v1/academic-centers/{ca_id}/events/{id}/registrations -> 200 OK
+        let cancel_res = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/api/v1/academic-centers/{ca_cc}/events/{}/registrations",
+                        published.id
+                    ))
+                    .header("X-User-Id", student.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(cancel_res.status(), StatusCode::OK);
+        let body = to_bytes(cancel_res.into_body(), usize::MAX).await.unwrap();
+        let cancelled: EventRegistrationResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(cancelled.event_id, published.id);
+        assert_eq!(cancelled.participant_id, student);
+        assert_eq!(cancelled.status, RegistrationStatus::Cancelled);
+        assert!(cancelled.cancelled_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn post_event_registration_rejects_duplicate_and_unpublished_or_other_ca() {
+        let ca_cc = Uuid::new_v4();
+        let ca_fisica = Uuid::new_v4();
+        let student = Uuid::new_v4();
+
+        let published_cc = build_event(
+            ca_cc,
+            "Palestra de IA",
+            EventPublicationStatus::Published,
+            24,
+        );
+        let pending_cc = build_event(
+            ca_cc,
+            "Hackathon em análise",
+            EventPublicationStatus::PendingApproval,
+            48,
+        );
+        let draft_cc = build_event(ca_cc, "Oficina Rascunho", EventPublicationStatus::Draft, 72);
+
+        let repo = Arc::new(InMemoryEventRepository::with_events(vec![
+            published_cc.clone(),
+            pending_cc.clone(),
+            draft_cc.clone(),
+        ]));
+        let app = test_read_router(repo);
+
+        // 1. Primeira inscrição em evento publicado retorna 201 Created
+        let first_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/events/{}/registrations?ca_id={ca_cc}",
+                        published_cc.id
+                    ))
+                    .header("X-User-Id", student.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first_res.status(), StatusCode::CREATED);
+
+        // 2. Segunda inscrição no mesmo evento retorna 409 Conflict ("already_registered")
+        let duplicate_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/events/{}/registrations?ca_id={ca_cc}",
+                        published_cc.id
+                    ))
+                    .header("X-User-Id", student.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(duplicate_res.status(), StatusCode::CONFLICT);
+        let body = to_bytes(duplicate_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let err: EventErrorResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(err.code, "already_registered");
+
+        // 3. Inscrição em proposta não homologada ou rascunho retorna 422 ("event_not_available")
+        for unpublished in [&pending_cc, &draft_cc] {
+            let unpub_res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!(
+                            "/api/v1/events/{}/registrations?ca_id={ca_cc}",
+                            unpublished.id
+                        ))
+                        .header("X-User-Id", student.to_string())
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(unpub_res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            let body = to_bytes(unpub_res.into_body(), usize::MAX).await.unwrap();
+            let err: EventErrorResponse = serde_json::from_slice(&body).unwrap();
+            assert_eq!(err.code, "event_not_available");
+        }
+
+        // 4. Inscrição em evento de outro CA retorna 404 Not Found
+        let cross_ca_res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/academic-centers/{ca_fisica}/events/{}/registrations",
+                        published_cc.id
+                    ))
+                    .header("X-User-Id", student.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(cross_ca_res.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn delete_event_registration_rejects_when_no_active_registration_exists() {
+        let ca_cc = Uuid::new_v4();
+        let student = Uuid::new_v4();
+        let published = build_event(
+            ca_cc,
+            "Palestra de IA",
+            EventPublicationStatus::Published,
+            24,
+        );
+
+        let repo = Arc::new(InMemoryEventRepository::with_events(vec![
+            published.clone(),
+        ]));
+        let app = test_read_router(repo);
+
+        // Tentativa de cancelar sem inscrição ativa retorna 409 Conflict ("no_active_registration")
+        let cancel_res = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/api/v1/events/{}/registrations?ca_id={ca_cc}",
+                        published.id
+                    ))
+                    .header("X-User-Id", student.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(cancel_res.status(), StatusCode::CONFLICT);
+        let body = to_bytes(cancel_res.into_body(), usize::MAX).await.unwrap();
+        let err: EventErrorResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(err.code, "no_active_registration");
     }
 }

@@ -13,23 +13,21 @@
 //! Todos os campos das entidades e objetos de valor são privados para garantir que
 //! nenhuma construção ou mutação contorne as invariantes de domínio.
 
-use std::{fmt, str::FromStr};
-
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
+use chrono::DateTime;
+use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
 use sqlx::types::Json;
 use thiserror::Error;
 use uuid::Uuid;
-
 /// Comprimento máximo permitido (em caracteres) para o título de um evento.
 pub const MAX_EVENT_TITLE_LENGTH: usize = 200;
-
 /// Comprimento máximo permitido (em caracteres) para a descrição de um evento.
 pub const MAX_EVENT_DESCRIPTION_LENGTH: usize = 5000;
-
 /// Comprimento máximo permitido (em caracteres) para o local de um evento.
 pub const MAX_EVENT_LOCATION_LENGTH: usize = 300;
-
 /// Erros de validação e regras de negócio do domínio de eventos.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum EventDomainError {
@@ -238,7 +236,6 @@ pub enum EventDomainError {
     #[error("só é possível reinscrever uma inscrição que esteja cancelada")]
     RegistrationNotCancelled,
 }
-
 /// Estado de publicação de um evento no ciclo de vida do Centro Acadêmico.
 ///
 /// Mapeado ao enum PostgreSQL `event_status` do Modelo Entidade-Relacionamento:
@@ -259,10 +256,8 @@ pub enum EventPublicationStatus {
     /// Evento cancelado; novas inscrições e convocações ficam impedidas.
     Cancelled,
 }
-
 /// Alias semântico alinhado ao nome do tipo `event_status` no Modelo Entidade-Relacionamento.
 pub type EventStatus = EventPublicationStatus;
-
 impl EventPublicationStatus {
     /// Retorna a representação textual canônica do estado de publicação.
     pub const fn as_str(&self) -> &'static str {
@@ -285,13 +280,11 @@ impl EventPublicationStatus {
         matches!(self, Self::Published)
     }
 }
-
 impl fmt::Display for EventPublicationStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
-
 impl FromStr for EventPublicationStatus {
     type Err = EventDomainError;
 
@@ -308,7 +301,6 @@ impl FromStr for EventPublicationStatus {
         }
     }
 }
-
 /// Decisão registrada na avaliação de homologação de um evento.
 ///
 /// Mapeada ao enum PostgreSQL `publication_review_decision`: `approved` ou `rejected`.
@@ -321,7 +313,6 @@ pub enum PublicationReviewDecision {
     /// Revisor recusou a publicação da revisão analisada.
     Rejected,
 }
-
 impl PublicationReviewDecision {
     /// Retorna a representação textual canônica da decisão.
     pub const fn as_str(&self) -> &'static str {
@@ -331,13 +322,11 @@ impl PublicationReviewDecision {
         }
     }
 }
-
 impl fmt::Display for PublicationReviewDecision {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
-
 impl FromStr for PublicationReviewDecision {
     type Err = EventDomainError;
 
@@ -349,7 +338,6 @@ impl FromStr for PublicationReviewDecision {
         }
     }
 }
-
 /// Entidade que representa um registro de homologação (`event_review`) de uma versão do evento.
 ///
 /// Campos privados impedem adulteração de `reviewed_revision` ou `decision` fora dos
@@ -371,7 +359,6 @@ pub struct EventReview {
     /// Instante em que a decisão foi registrada.
     decided_at: DateTime<Utc>,
 }
-
 impl EventReview {
     /// Constrói um novo registro de homologação validando todas as invariantes.
     ///
@@ -510,7 +497,6 @@ impl EventReview {
         self.decided_at
     }
 }
-
 /// Período de realização de um evento (início e término).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventPeriod {
@@ -519,7 +505,6 @@ pub struct EventPeriod {
     /// Data e horário de término do evento (deve ser posterior a `starts_at`).
     ends_at: DateTime<Utc>,
 }
-
 impl EventPeriod {
     /// Constrói um período validando que o término é estritamente posterior ao início.
     ///
@@ -543,7 +528,6 @@ impl EventPeriod {
         self.ends_at
     }
 }
-
 /// Política mínima de inscrição persistida em `registration_policy` (JSONB).
 ///
 /// Capacidade e ocupação **não** pertencem a esta política: vagas ficam em
@@ -561,23 +545,18 @@ pub struct EventRegistrationPolicy {
     #[serde(default)]
     closes_at: Option<DateTime<Utc>>,
 }
-
 const fn default_registration_enabled() -> bool {
     true
 }
-
 /// Alias alinhado ao contrato MVP do plano de domínio (`enabled` / `opens_at` / `closes_at`).
 pub type RegistrationPolicy = EventRegistrationPolicy;
-
 /// Alias legado mantido para compatibilidade com reexportações existentes.
 pub type EventRegistrationInfo = EventRegistrationPolicy;
-
 impl Default for EventRegistrationPolicy {
     fn default() -> Self {
         Self::unrestricted()
     }
 }
-
 impl EventRegistrationPolicy {
     /// Cria uma política com inscrições habilitadas e sem janela explícita.
     pub const fn unrestricted() -> Self {
@@ -705,7 +684,6 @@ impl EventRegistrationPolicy {
         true
     }
 }
-
 /// Estado da inscrição individual de um participante em um evento.
 ///
 /// Mapeado ao enum PostgreSQL `event_registration_status` do Modelo Entidade-Relacionamento:
@@ -724,10 +702,8 @@ pub enum RegistrationStatus {
     /// Inscrição ou participação na fila cancelada.
     Cancelled,
 }
-
 /// Alias semântico alinhado ao tipo `event_registration_status` do Modelo Entidade-Relacionamento.
 pub type EventRegistrationStatus = RegistrationStatus;
-
 impl RegistrationStatus {
     /// Variante associada para compatibilidade semântica com inscrição confirmada.
     pub const CONFIRMED: Self = Self::Registered;
@@ -741,14 +717,17 @@ impl RegistrationStatus {
             Self::Cancelled => "cancelled",
         }
     }
-}
 
+    /// Indica se a inscrição encontra-se ativa (confirmada).
+    pub const fn is_active(&self) -> bool {
+        matches!(self, Self::Confirmed)
+    }
+}
 impl fmt::Display for RegistrationStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
-
 impl FromStr for RegistrationStatus {
     type Err = EventDomainError;
 
@@ -764,7 +743,6 @@ impl FromStr for RegistrationStatus {
         }
     }
 }
-
 /// Entidade que representa a inscrição de um usuário em um evento (`event_registration`).
 ///
 /// Todos os campos são privados para impedir mutações de estado ou de timestamps
@@ -788,7 +766,6 @@ pub struct EventRegistration {
     /// Data e horário de cancelamento, quando a inscrição estiver cancelada.
     cancelled_at: Option<DateTime<Utc>>,
 }
-
 impl EventRegistration {
     /// Constrói uma instância de [`EventRegistration`] validando todas as invariantes.
     ///
@@ -898,6 +875,18 @@ impl EventRegistration {
             }
             (_, None) => Ok(()),
         }
+    }
+
+    /// Indica se a inscrição está atualmente ativa (`Confirmed`).
+    pub const fn is_active(&self) -> bool {
+        self.status.is_active()
+    }
+
+    /// Reativa uma inscrição previamente cancelada pelo participante.
+    pub fn reactivate(&mut self) {
+        self.status = RegistrationStatus::Confirmed;
+        self.registered_at = Utc::now();
+        self.cancelled_at = None;
     }
 
     /// Cancela a inscrição registrando o instante do cancelamento.
@@ -1010,7 +999,6 @@ impl EventRegistration {
         self.cancelled_at
     }
 }
-
 /// Entidade principal de domínio que representa um Evento promovido por um Centro Acadêmico (`event`).
 ///
 /// A estrutura reflete fielmente a tabela `event` do Modelo Entidade-Relacionamento:
@@ -1045,7 +1033,6 @@ pub struct Event {
     /// Configuração validada das inscrições (`registration_policy` em JSONB).
     registration_policy: Json<EventRegistrationPolicy>,
 }
-
 impl Event {
     /// Constrói uma instância de [`Event`] validando todas as invariantes de negócio.
     ///
@@ -1562,7 +1549,6 @@ impl Event {
         Ok(())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
@@ -2204,5 +2190,31 @@ mod tests {
             .expect("segundo cancel deve ser no-op seguro");
         assert_eq!(event, snapshot);
         assert_eq!(event.status(), EventPublicationStatus::Cancelled);
+    }
+}
+impl sqlx::Type<sqlx::Postgres> for RegistrationStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+    }
+}
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for RegistrationStatus {
+    fn decode(
+        value: sqlx::postgres::PgValueRef<'r>,
+    ) -> Result<Self, Box<dyn std::error::Error + 'static + Send + Sync>> {
+        let text = <&'r str as sqlx::Decode<'r, sqlx::Postgres>>::decode(value)?;
+        text.parse()
+            .map_err(|err: EventDomainError| Box::new(err) as _)
+    }
+}
+impl<'q> sqlx::Encode<'q, sqlx::Postgres> for RegistrationStatus {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + 'static + Send + Sync>> {
+        <&str as sqlx::Encode<'q, sqlx::Postgres>>::encode_by_ref(&self.as_str(), buf)
     }
 }

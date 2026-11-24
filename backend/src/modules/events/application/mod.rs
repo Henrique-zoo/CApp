@@ -7,7 +7,11 @@ pub mod commands;
 pub mod queries;
 pub mod services;
 
-pub use commands::{CreateEventCommand, PublishEventCommand, UpdateEventCommand};
+pub use commands::{
+    CancelEventRegistrationCommand, CancelEventRegistrationUseCase, CreateEventCommand,
+    PublishEventCommand, RegisterInEventCommand, RegisterParticipantInEventUseCase,
+    UpdateEventCommand,
+};
 pub use queries::{
     GetEventByIdQuery, GetPublishedEventDetailQuery, GetPublishedEventDetailUseCase,
     ListCaEventsQuery, ListPublishedEventsByCaQuery, ListPublishedEventsByCaUseCase,

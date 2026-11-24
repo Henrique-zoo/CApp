@@ -1,13 +1,16 @@
 //! Contratos HTTP (DTOs) de entrada e saída para os endpoints de eventos.
 
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::DateTime;
+use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
-
-use crate::modules::events::domain::{
-    Event, EventDomainError, EventPublicationStatus, EventRegistrationPolicy,
-};
-
+use crate::modules::events::domain::Event;
+use crate::modules::events::domain::EventDomainError;
+use crate::modules::events::domain::EventPublicationStatus;
+use crate::modules::events::domain::EventRegistrationPolicy;
+use crate::modules::events::domain::EventRegistration;
+use crate::modules::events::domain::RegistrationStatus;
 /// Dados do formulário para criação de um novo evento (rascunho ou publicação direta).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateEventRequest {
@@ -37,7 +40,6 @@ pub struct CreateEventRequest {
     /// Prazo opcional limite para inscrição (`closes_at` da política).
     pub registration_deadline: Option<DateTime<Utc>>,
 }
-
 impl CreateEventRequest {
     /// Converte o limite HTTP (`u32`) para a capacidade de domínio (`i32`).
     pub fn capacity(&self) -> Result<Option<i32>, EventDomainError> {
@@ -53,7 +55,6 @@ impl CreateEventRequest {
         )
     }
 }
-
 /// Dados do formulário para edição das informações de um evento existente.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateEventRequest {
@@ -80,7 +81,6 @@ pub struct UpdateEventRequest {
     /// Atualização opcional do prazo de inscrição.
     pub registration_deadline: Option<DateTime<Utc>>,
 }
-
 impl UpdateEventRequest {
     /// Indica se o corpo solicita alteração de capacidade ou política de inscrição.
     pub fn touches_registration(&self) -> bool {
@@ -108,7 +108,6 @@ impl UpdateEventRequest {
         )
     }
 }
-
 /// Corpo opcional para a ação de publicação direta de um rascunho de evento.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PublishEventRequest {
@@ -117,7 +116,6 @@ pub struct PublishEventRequest {
     /// Identificador opcional do gestor que realiza a publicação direta.
     pub actor_id: Option<Uuid>,
 }
-
 /// Parâmetros de query string para listagem e consulta de detalhes de eventos de um Centro Acadêmico.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ListEventsQueryParams {
@@ -128,7 +126,6 @@ pub struct ListEventsQueryParams {
     /// Quando omitido nas consultas públicas da agenda, assume `true` por padrão.
     pub only_published: Option<bool>,
 }
-
 impl ListEventsQueryParams {
     /// Retorna se a consulta deve filtrar exclusivamente eventos publicados (`true` por padrão).
     pub const fn should_filter_only_published(&self) -> bool {
@@ -138,7 +135,6 @@ impl ListEventsQueryParams {
         }
     }
 }
-
 /// Representação resumida de um evento publicado na listagem da agenda do CA ativo.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventSummaryResponse {
@@ -161,7 +157,6 @@ pub struct EventSummaryResponse {
     /// Número de vagas restantes quando há limite configurado (`None` para eventos sem limite).
     pub remaining_spots: Option<u32>,
 }
-
 impl From<Event> for EventSummaryResponse {
     fn from(event: Event) -> Self {
         let remaining_spots = event.registration.remaining_spots();
@@ -179,7 +174,6 @@ impl From<Event> for EventSummaryResponse {
         }
     }
 }
-
 /// Representação completa JSON de um evento retornada pela API (listagem e detalhes).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventResponse {
@@ -216,10 +210,8 @@ pub struct EventResponse {
     /// Prazo opcional de inscrição.
     pub registration_deadline: Option<DateTime<Utc>>,
 }
-
 /// Alias semântico para a resposta de detalhes de um evento publicado.
 pub type EventDetailResponse = EventResponse;
-
 impl From<Event> for EventResponse {
     fn from(event: Event) -> Self {
         let registered_count = 0;
@@ -248,7 +240,6 @@ impl From<Event> for EventResponse {
         }
     }
 }
-
 /// Resposta padronizada de erro para operações da API de eventos.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventErrorResponse {
@@ -257,7 +248,6 @@ pub struct EventErrorResponse {
     /// Mensagem descritiva em português.
     pub message: String,
 }
-
 fn map_capacity(max_capacity: Option<u32>) -> Result<Option<i32>, EventDomainError> {
     max_capacity
         .map(|value| {
@@ -272,4 +262,58 @@ fn map_capacity(max_capacity: Option<u32>) -> Result<Option<i32>, EventDomainErr
                 })
         })
         .transpose()
+}
+/// Representação JSON de uma inscrição (ativa ou cancelada) de um participante em um evento.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventRegistrationResponse {
+    /// Identificador único da inscrição.
+    pub id: Uuid,
+    /// Identificador do evento.
+    pub event_id: Uuid,
+    /// Identificador do participante inscrito.
+    pub participant_id: Uuid,
+    /// Situação atual da inscrição (`confirmed`, `cancelled`, `waitlisted`).
+    pub status: RegistrationStatus,
+    /// Data/hora em que a inscrição foi realizada.
+    pub registered_at: DateTime<Utc>,
+    /// Data/hora do cancelamento, quando aplicável.
+    pub cancelled_at: Option<DateTime<Utc>>,
+    /// Mensagem informativa sobre o resultado da operação.
+    pub message: String,
+}
+impl EventRegistrationResponse {
+    /// Constrói a resposta para uma inscrição confirmada com sucesso.
+    pub fn confirmed(registration: EventRegistration) -> Self {
+        Self {
+            id: registration.id,
+            event_id: registration.event_id,
+            participant_id: registration.participant_id,
+            status: registration.status,
+            registered_at: registration.registered_at,
+            cancelled_at: registration.cancelled_at,
+            message: "Inscrição realizada com sucesso.".to_string(),
+        }
+    }
+
+    /// Constrói a resposta para o cancelamento de inscrição realizado com sucesso.
+    pub fn cancelled(registration: EventRegistration) -> Self {
+        Self {
+            id: registration.id,
+            event_id: registration.event_id,
+            participant_id: registration.participant_id,
+            status: registration.status,
+            registered_at: registration.registered_at,
+            cancelled_at: registration.cancelled_at,
+            message: "Cancelamento realizado com sucesso.".to_string(),
+        }
+    }
+}
+impl From<EventRegistration> for EventRegistrationResponse {
+    fn from(registration: EventRegistration) -> Self {
+        if registration.is_active() {
+            Self::confirmed(registration)
+        } else {
+            Self::cancelled(registration)
+        }
+    }
 }
