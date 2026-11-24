@@ -1,9 +1,16 @@
-//! Estrutura do módulo de materiais acadêmicos.
+//! Módulo de materiais acadêmicos.
 //!
-//! O escopo previsto abrange publicação e consulta de arquivos e links organizados por disciplinas.
+//! O domínio representa materiais disponibilizados por Centros Acadêmicos,
+//! associados a disciplinas e autoria, com conteúdo fornecido por arquivos
+//! armazenados ou links externos.
 //!
-//! As camadas [`api`], [`application`], [`domain`] e [`infrastructure`] ainda
-//! são espaços reservados; este módulo não implementa esses comportamentos.
+//! A camada [`domain`] contém as entidades, os estados e as regras fundamentais
+//! de validação dos materiais.
+//!
+//! As camadas [`api`], [`application`] e [`infrastructure`] reservam,
+//! respectivamente, os pontos de integração HTTP, os casos de uso e os
+//! adaptadores de persistência. Essas funcionalidades ainda não estão
+//! implementadas neste módulo.
 
 pub mod api;
 pub mod application;

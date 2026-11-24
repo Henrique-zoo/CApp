@@ -1,9 +1,14 @@
-//! Camada de domínio prevista para o módulo de materiais acadêmicos.
+//! Domínio de materiais acadêmicos.
 //!
-//! [`entities`], [`rules`] e [`events`] reservarão os modelos, suas invariantes
-//! e os fatos relevantes do negócio. Ainda não há regras implementadas;
-//! essa camada deve permanecer independente de HTTP e banco de dados.
+//! [`entities`] contém os modelos e seus estados;
+//! [`rules`] implementa as invariantes de negócio;
+//! [`errors`] reúne os erros compartilhados do domínio.
+//!
+//! Esta camada não executa operações HTTP nem consultas ao banco de dados.
 
 pub mod entities;
+pub mod errors;
 pub mod events;
 pub mod rules;
+
+pub use errors::StudyMaterialError;
