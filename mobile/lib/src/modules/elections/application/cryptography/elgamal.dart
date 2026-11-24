@@ -24,6 +24,8 @@ import 'dart:math';
 
 import 'package:uuid/uuid_value.dart';
 
+part 'elgamal_tally.dart';
+
 /// Identificador do grupo aceito no manifesto eleitoral v1.
 const _groupId = 'rfc3526-modp14';
 
@@ -52,6 +54,48 @@ final _g = BigInt.from(2);
 /// autoridade para produzir a prova de conhecimento e a contribuição de apuração.
 final class ElGamalAuthorityKeyPair {
   ElGamalAuthorityKeyPair._({required this.secret, required this.publicValue});
+
+  /// Restaura o par do segredo conservado no aparelho.
+  factory ElGamalAuthorityKeyPair.fromSecret(BigInt secret) {
+    if (secret <= BigInt.zero || secret >= _q) {
+      throw const FormatException('Escalar da autoridade fora do intervalo');
+    }
+    return ElGamalAuthorityKeyPair._(
+      secret: secret,
+      publicValue: _g.modPow(secret, _p),
+    );
+  }
+
+  /// Prova que a autoridade conhece o segredo usado no valor público.
+  ({BigInt commitment, BigInt response}) proveKey(
+    BigInt Function(BigInt commitment) challenge,
+  ) {
+    final nonce = _sampleNonZeroScalar(Random.secure());
+    final commitment = _g.modPow(nonce, _p);
+    final response = (nonce + challenge(commitment) * secret) % _q;
+    return (commitment: commitment, response: response);
+  }
+
+  /// Decifra parcialmente uma posição de um agregado previamente validado.
+  ({BigInt value, BigInt commitmentG, BigInt commitmentA, BigInt response})
+  contribute(
+    BigInt base,
+    BigInt Function(BigInt value, BigInt commitmentG, BigInt commitmentA)
+    challenge,
+  ) {
+    final nonce = _sampleNonZeroScalar(Random.secure());
+    final value = base.modPow(secret, _p);
+    final commitmentG = _g.modPow(nonce, _p);
+    final commitmentA = base.modPow(nonce, _p);
+    final response =
+        (nonce + challenge(value, commitmentG, commitmentA) * secret) % _q;
+    return (
+      value: value,
+      commitmentG: commitmentG,
+      commitmentA: commitmentA,
+      response: response,
+    );
+  }
 
   /// Escalar privado mantido sob custódia local até a apuração.
   final BigInt secret;

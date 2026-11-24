@@ -96,7 +96,7 @@
           "input": [
             "par (electionId,userId) da eleição solicitada e da conta CApp autenticada",
             "SignedBallot",
-            "manifesto/calendário esperados",
+            "manifesto publicado e período vigente da eleição",
             "acumulador atualizado e revisão da eleição esperada para votação secreta"
           ],
           "output": [
@@ -106,13 +106,13 @@
           ],
           "invariants": [
             "UNIQUE(electionId,userId).",
-            "A conta vem da autenticação. O voterId assinado deve corresponder ao userId dessa conta.",
+            "A conta vem da autenticação. O accountId assinado é o UUID interno dessa conta.",
             "Um novo voto exige que o curso da evidência institucional vigente corresponda ao curso vinculado ao CA da eleição.",
             "A participação guarda a cédula aceita com a chave pública de assinatura gerada para essa eleição.",
-            "Mesmo submissionId com payload diferente é recusado.",
-            "Mesmo voto/operação recupera recibo existente inclusive depois do encerramento, sem alterar o acumulador.",
+            "A abertura usa a exigência de cadastro escolhida na criação. Quando o cadastro é obrigatório, a conta prova a posse antes da abertura e a primeira cédula usa a chave cadastrada.",
+            "Mesmo hash da cédula verificada na mesma eleição e conta recupera o recibo, inclusive depois do encerramento, sem alterar o acumulador.",
             "A consulta de recibo aceito exige a conta autenticada e dispensa nova chave ou permanência no curso.",
-            "Outro submissionId depois de um voto aceito não registra voto novo.",
+            "Hash diferente para a mesma eleição e conta é recusado como participação já confirmada.",
             "Índice, encadeamento, voto, participação, recibo e acumulador são confirmados juntos.",
             "Sem recibo para gravação abortada.",
             "Novo voto revalida estado, prazo vigente e revisão do acumulador na operação atômica."
@@ -127,7 +127,7 @@
             "revisão esperada"
           ],
           "output": [
-            "ScheduleChange assinado e nova revisão",
+            "novo período da eleição",
             "recusa ou conflito"
           ],
           "invariants": [
@@ -231,12 +231,10 @@
     "Ballot": "schemas.json#/$defs/Ballot",
     "BoardEntry": "schemas.json#/$defs/BoardEntry",
     "Receipt": "schemas.json#/$defs/Receipt",
-    "ScheduleChange": "schemas.json#/$defs/ScheduleChange",
     "Cancellation": "schemas.json#/$defs/Cancellation",
     "Closure": "schemas.json#/$defs/Closure",
     "Aggregate": "schemas.json#/$defs/Aggregate",
     "DecryptionShare": "schemas.json#/$defs/DecryptionShare",
-    "Result": "schemas.json#/$defs/Result",
-    "CalendarOrigin": "schemas.json#/$defs/CalendarOrigin"
+    "Result": "schemas.json#/$defs/Result"
   }
 }

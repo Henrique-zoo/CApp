@@ -47,8 +47,14 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import '../infrastructure/firebase/firebase_app_check_setup.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 import '../infrastructure/backend/backend_api.dart';
+import '../modules/elections/elections.dart';
+import '../modules/elections/infrastructure/backend/voter_registration_gateway.dart';
+import '../modules/elections/infrastructure/device_voter_keys.dart';
+import '../modules/elections/infrastructure/election_failure_adapter.dart';
+import '../modules/elections/infrastructure/secret_voting.dart';
 import '../modules/identity/application/institutional_auth_service.dart';
 import '../modules/identity/identity.dart';
 import '../modules/identity/infrastructure/backend/backend_institutional_identity_gateway.dart';
@@ -72,12 +78,43 @@ final class AppDependencies {
   AppDependencies._({
     required this._backendApi,
     required this._accountAuth,
+    required this._preferences,
     required this.sessionController,
     required this.backendReadinessController,
   });
 
   final BackendApi _backendApi;
   final FirebaseAccountAuth _accountAuth;
+  final SharedPreferencesAsync _preferences;
+
+  UuidValue? _currentAccount() {
+    final state = sessionController.state;
+    if (state is! SessionSignedIn ||
+        state.firebaseUid != _accountAuth.currentUserId) {
+      return null;
+    }
+    return state.user?.id;
+  }
+
+  late final _voterRegistrationGateway = BackendVoterRegistrationGateway(
+    _backendApi.voterRegistration,
+  );
+
+  /// Caso de uso eleitoral com a sessão atual e os adaptadores do dispositivo.
+  late final voterRegistration = VoterRegistrationService(
+    _voterRegistrationGateway,
+    DeviceVoterKeys(),
+    _currentAccount,
+  );
+
+  final classifyVotingFailure = classifyElectionFailure;
+
+  late final secretVoting = SecretVotingClient(
+    _backendApi.ballots,
+    _voterRegistrationGateway,
+    _currentAccount,
+    _preferences,
+  );
 
   /// Coordenação exposta à interface pela API pública do módulo.
   ///
@@ -100,7 +137,7 @@ final class AppDependencies {
   /// A inicialização não abre interfaces de autenticação.
   ///
   /// Falhas de configuração ou inicialização são propagadas.
-  /// [backendBaseUrl] aponta para a raiz HTTP, sem prefixo de versão.
+  /// [backendBaseUrl] aponta para a raiz HTTPS, sem prefixo de versão.
   /// [microsoftClientId] e [microsoftAndroidRedirectUri] são configurações públicas
   /// do registro Android; valores vazios são rejeitados antes de montar a interface.
   /// Os recursos retornados são compartilhados até [dispose].
@@ -165,6 +202,7 @@ final class AppDependencies {
     return AppDependencies._(
       backendApi: backendApi,
       accountAuth: firebaseMicrosoftAuth,
+      preferences: preferences,
       backendReadinessController: BackendReadinessController(
         checkReadiness: backendApi.monitoring.getReadiness,
       ),

@@ -51,20 +51,24 @@ void main() {
         CApp(
           sessionController: h.controller,
           backendReadinessController: readiness,
+          electionHome: const Text('Eleição do Centro Acadêmico'),
         ),
       );
 
       await tester.pumpAndSettle();
+      expect(find.text('Eleição do Centro Acadêmico'), findsNothing);
       await tester.tap(find.text('Entrar com Microsoft'));
       await tester.pumpAndSettle();
 
       expect(find.byType(MainPage), findsOneWidget);
+      expect(find.text('Eleição do Centro Acadêmico'), findsOneWidget);
       expect(find.byType(AccountPage), findsNothing);
       expect(find.byType(NavigationBar), findsOneWidget);
       expect(find.byType(LimitedStudentAccessNotice), findsOneWidget);
 
       await openAccount(tester);
 
+      expect(find.text('Eleição do Centro Acadêmico'), findsNothing);
       expect(find.byType(LimitedStudentAccessNotice), findsOneWidget);
 
       expect(find.text('Pessoa Exemplo'), findsOneWidget);

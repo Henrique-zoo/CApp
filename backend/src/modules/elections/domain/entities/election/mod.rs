@@ -132,6 +132,36 @@ impl ElectionPeriod {
         &self.ends_at
     }
 
+    /// Confere que uma revisão só adia o período e preserva uma abertura já ocorrida.
+    /// O instante de abertura efetiva é ausente durante a preparação.
+    pub fn validate_revision(
+        &self,
+        new_period: &Self,
+        opened_at: Option<DateTime<Utc>>,
+        changed_at: DateTime<Utc>,
+    ) -> Result<(), ElectionTransitionError> {
+        use ElectionTransitionError as Error;
+
+        if let Some(opened_at) = opened_at {
+            if new_period.starts_at() != self.starts_at() {
+                return Err(Error::StartCannotChange);
+            }
+            if changed_at < opened_at {
+                return Err(Error::ScheduleChangeBeforeOpening);
+            }
+            if changed_at >= *self.ends_at() {
+                return Err(Error::ExtensionAfterDeadline);
+            }
+        } else if new_period.starts_at() < self.starts_at() {
+            return Err(Error::StartCannotMoveEarlier);
+        }
+        if new_period.ends_at() <= self.ends_at() {
+            return Err(Error::EndMustBeExtended);
+        }
+
+        Ok(())
+    }
+
     /// Informa se o instante está dentro do intervalo `[starts_at, ends_at)`.
     pub fn contains(&self, instant: &DateTime<Utc>) -> bool {
         instant >= &self.starts_at && instant < &self.ends_at
@@ -582,31 +612,13 @@ impl Election {
         new_period: ElectionPeriod,
         changed_at: DateTime<Utc>,
     ) -> Result<(), ElectionTransitionError> {
-        use ElectionTransitionError as Error;
-
-        match &self.state {
-            ElectionState::Preparing | ElectionState::WaitingStart(_) => {
-                if new_period.starts_at() < self.period.starts_at() {
-                    return Err(Error::StartCannotMoveEarlier);
-                }
-            }
-            ElectionState::Open(voting) => {
-                if new_period.starts_at() != self.period.starts_at() {
-                    return Err(Error::StartCannotChange);
-                }
-                if changed_at < voting.opened_at {
-                    return Err(Error::ScheduleChangeBeforeOpening);
-                }
-                if changed_at >= *self.period.ends_at() {
-                    return Err(Error::ExtensionAfterDeadline);
-                }
-            }
-            _ => return Err(Error::InvalidState),
-        }
-
-        if new_period.ends_at() <= self.period.ends_at() {
-            return Err(Error::EndMustBeExtended);
-        }
+        let opened_at = match &self.state {
+            ElectionState::Preparing | ElectionState::WaitingStart(_) => None,
+            ElectionState::Open(voting) => Some(voting.opened_at),
+            _ => return Err(ElectionTransitionError::InvalidState),
+        };
+        self.period
+            .validate_revision(&new_period, opened_at, changed_at)?;
 
         self.period = new_period;
         Ok(())

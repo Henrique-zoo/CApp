@@ -6,6 +6,7 @@ contract validator. A valid live prefix is not proof of current completeness.
 """
 
 import argparse
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -23,6 +24,18 @@ from validate_election_contracts import (
 def require(condition, message):
     if not condition:
         raise ContractError(message)
+
+
+def election_time(value):
+    """Read election metadata as canonical UTC with second precision."""
+    if isinstance(value, str) and value.endswith("Z"):
+        try:
+            parsed = datetime.fromisoformat(value)
+            if parsed.isoformat(timespec="seconds").replace("+00:00", "Z") == value:
+                return parsed
+        except ValueError:
+            pass
+    raise ContractError("Horário eleitoral inválido")
 
 
 class BoardAuditor:
@@ -55,37 +68,24 @@ class BoardAuditor:
     def inspect(self, snapshot):
         """Validate the export itself, without inferring historical continuity."""
         required = {
-            "manifest", "calendarOrigin", "entries", "checkpoint", "closure",
+            "manifest", "startsAt", "endsAt", "entries", "checkpoint", "closure",
             "aggregate",
         }
         require(isinstance(snapshot, dict), "Exportação deve ser objeto JSON")
         require(required <= snapshot.keys(), "Exportação incompleta")
-        require(
-            snapshot.keys() <= required | {"scheduleChanges"},
-            "Campo desconhecido na exportação",
-        )
+        require(snapshot.keys() == required, "Campo desconhecido na exportação")
+        starts_at = election_time(snapshot["startsAt"])
+        ends_at = election_time(snapshot["endsAt"])
+        require(starts_at < ends_at, "Período da votação inválido")
         entries = snapshot["entries"]
-        changes = snapshot.get("scheduleChanges", [])
         require(isinstance(entries, list), "entries deve ser lista")
-        require(isinstance(changes, list), "scheduleChanges deve ser lista")
         require(len(entries) <= self.profile["limits"]["maxVoters"], "Quadro excessivo")
-        calendar = self.signed(snapshot["calendarOrigin"], "calendar-origin")
         manifest = self.signed(snapshot["manifest"], "manifest")
         require(manifest["serverSigningKey"] == self.key, "Chave do manifesto difere da chave confiável")
         manifest_hash = self.hash(manifest)
         election_id = manifest["electionId"]
-        index = {self.hash(calendar): calendar, manifest_hash: manifest}
-        validate_relations(calendar, self.profile, index)
+        index = {manifest_hash: manifest}
         validate_relations(manifest, self.profile, index)
-        schedule_hash = self.hash(calendar)
-        for envelope in changes:
-            change = self.signed(envelope, "schedule-change")
-            require(change["electionId"] == election_id, "Calendário de outra eleição")
-            require(change["previousScheduleHash"] == schedule_hash, "Calendário omitido ou reordenado")
-            require(change["manifestHash"] in (None, manifest_hash), "Calendário de outro manifesto")
-            validate_relations(change, self.profile, index)
-            schedule_hash = self.hash(change)
-            index[schedule_hash] = change
 
         head = manifest_hash
         voters = set()
@@ -97,10 +97,8 @@ class BoardAuditor:
             # Includes ballot schema, voter signature, group and option order.
             validate_relations(entry, self.profile, index)
             ballot = entry["ballot"]["payload"]
-            require(ballot["voterId"] not in voters, "Eleitor repetido no quadro")
-            voters.add(ballot["voterId"])
-            # submissionId is scoped to election + voter, not globally unique.
-            # One participation per voter already rejects duplicate operations.
+            require(ballot["accountId"] not in voters, "Eleitor repetido no quadro")
+            voters.add(ballot["accountId"])
             head = self.hash(entry)
             index[head] = entry
 
@@ -122,7 +120,9 @@ class BoardAuditor:
             require(closed["manifestHash"] == manifest_hash, "Fechamento de outro manifesto")
             require(closed["headHash"] == head and closed["voterCount"] == len(entries),
                     "Fechamento não cobre exatamente o quadro fornecido")
-            require(closed["scheduleHash"] == schedule_hash, "Fechamento usa calendário anterior")
+            # As datas vêm da exportação. A assinatura cobre closedAt.
+            require(election_time(closed["closedAt"]) >= ends_at,
+                    "Fechamento anterior ao fim informado na exportação")
             validate_relations(closed, self.profile, index)
             index[self.hash(closed)] = closed
             total = self.signed(aggregate, "aggregate")
@@ -139,10 +139,8 @@ class BoardAuditor:
     def evidence(self, snapshot):
         """The local wrapper is not a new signed wire kind or a server file."""
         return {
-            "format": "capp-board-anchor-v1", "trustedKeySha256": self.key_hash,
+            "format": "capp-board-anchor-v2", "trustedKeySha256": self.key_hash,
             "manifest": snapshot["manifest"],
-            "calendarOrigin": snapshot["calendarOrigin"],
-            "scheduleChanges": snapshot.get("scheduleChanges", []),
             "checkpoint": snapshot["checkpoint"], "closure": snapshot["closure"],
         }
 
@@ -164,27 +162,15 @@ class BoardAuditor:
         return True
 
     def compare_anchor(self, anchor, snapshot, state):
-        fields = {"format", "trustedKeySha256", "manifest", "calendarOrigin",
-                  "scheduleChanges", "checkpoint", "closure"}
+        fields = {"format", "trustedKeySha256", "manifest", "checkpoint", "closure"}
         require(isinstance(anchor, dict) and anchor.keys() == fields,
                 "Arquivo de âncora inválido")
-        require(anchor["format"] == "capp-board-anchor-v1", "Versão de âncora desconhecida")
+        require(anchor["format"] == "capp-board-anchor-v2", "Versão de âncora desconhecida")
         require(anchor["trustedKeySha256"] == self.key_hash, "Âncora fixou outra chave confiável")
         old_manifest = self.signed(anchor["manifest"], "manifest")
         if old_manifest["electionId"] != state["electionId"]:
             return False
         require(self.hash(old_manifest) == state["manifestHash"], "Manifesto congelado foi substituído")
-        old_calendar = self.signed(anchor["calendarOrigin"], "calendar-origin")
-        require(self.hash(old_calendar) == self.hash(snapshot["calendarOrigin"]["payload"]),
-                "Origem do calendário foi substituída")
-        old_changes = anchor["scheduleChanges"]
-        new_changes = snapshot.get("scheduleChanges", [])
-        require(isinstance(old_changes, list), "Calendário da âncora inválido")
-        require(len(new_changes) >= len(old_changes), "Histórico de calendário truncado")
-        for old, new in zip(old_changes, new_changes):
-            old_payload = self.signed(old, "schedule-change")
-            require(self.hash(old_payload) == self.hash(new["payload"]),
-                    "Histórico de calendário reescrito")
         if anchor["checkpoint"] is not None:
             require(self.compare_receipt(anchor["checkpoint"], state), "Recibo de outra eleição na âncora")
         if anchor["closure"] is not None:

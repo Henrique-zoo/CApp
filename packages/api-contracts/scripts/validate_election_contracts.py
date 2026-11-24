@@ -81,7 +81,23 @@ def signing_bytes(payload, profile):
     A canonicalização é executada pela implementação RFC 8785 fixada no pacote.
     Valores fora de seu domínio são recusados; não há fallback para json.dumps.
     """
-    return bytes.fromhex(profile["signedPrefixHex"]) + rfc8785.dumps(payload)
+    # A cédula atual carrega a operação no domínio criptográfico, não no JSON.
+    ballot_fields = {"electionId", "accountId", "manifestHash", "publicKey", "ciphertexts"}
+    if set(payload) == ballot_fields:
+        kind = "ballot"
+    else:
+        if type(payload.get("version")) is not int or payload["version"] != profile["version"]:
+            raise ContractError("Versão criptográfica eleitoral inválida")
+        try:
+            kind = payload["kind"]
+        except KeyError as error:
+            raise ContractError("Tipo de artefato eleitoral ausente") from error
+    try:
+        domain = profile["domainsHex"][kind]
+    except (KeyError, TypeError) as error:
+        raise ContractError("Domínio criptográfico eleitoral desconhecido") from error
+
+    return bytes.fromhex(domain) + rfc8785.dumps(payload)
 
 
 def digest(payload, profile):
@@ -272,7 +288,7 @@ def _snapshot(head, count, manifest, index, profile):
         entry = _artifact(index, head, "board-entry")
         _require(entry["index"] == expected, "Índice do quadro divergente")
         _require(entry["manifestHash"] == manifest_hash, "Quadro de outro manifesto")
-        account_id = entry["ballot"]["payload"]["voterId"]
+        account_id = entry["ballot"]["payload"]["accountId"]
         _require(account_id not in seen, "Conta repetida no quadro")
         seen.add(account_id)
         entries.append(entry)
@@ -289,7 +305,10 @@ def validate_relations(payload, profile, index):
     servem como referências de interoperabilidade. Não inferem elegibilidade
     acadêmica a partir de arquivos públicos nem autenticam uma conta Firebase.
     """
-    kind = payload["kind"]
+    kind = payload.get("kind", "ballot" if set(payload) == {
+        "electionId", "accountId", "manifestHash", "publicKey", "ciphertexts"
+    } else None)
+    _require(kind is not None, "Tipo de mensagem eleitoral desconhecido")
     prime, order, generator = _group(profile)
 
     if kind == "result" and payload["cancellationHash"] is not None:
@@ -302,47 +321,6 @@ def validate_relations(payload, profile, index):
             "Resultado de outro cancelamento",
         )
 
-    if kind == "calendar-origin":
-        _require(payload["startsAt"] < payload["endsAt"], "Período inicial inválido")
-        return
-
-    if kind == "schedule-change":
-        previous = index.get(payload["previousScheduleHash"])
-        _require(
-            previous is not None
-            and previous["kind"] in {"calendar-origin", "schedule-change"},
-            "Calendário anterior ausente",
-        )
-        _require(
-            previous["electionId"] == payload["electionId"],
-            "Calendário de outra eleição",
-        )
-        if payload["manifestHash"] is not None:
-            configured = _artifact(index, payload["manifestHash"], "manifest")
-            _require(
-                configured["electionId"] == payload["electionId"],
-                "Manifesto de outra eleição",
-            )
-        _require(
-            payload["revision"] == previous.get("revision", 0) + 1,
-            "Revisão não consecutiva",
-        )
-        _require(payload["startsAt"] < payload["endsAt"], "Período inválido")
-        _require(
-            payload["changedAt"] < previous["endsAt"], "Prorrogação depois do prazo"
-        )
-        _require(
-            payload["endsAt"] > previous["endsAt"], "Novo encerramento não foi adiado"
-        )
-        if payload["changedAt"] >= previous["startsAt"]:
-            _require(
-                payload["startsAt"] == previous["startsAt"],
-                "Abertura já ocorrida foi alterada",
-            )
-        else:
-            _require(payload["startsAt"] >= previous["startsAt"], "Abertura antecipada")
-        return
-
     if kind == "manifest":
         options = payload["options"]
         authorities = payload["authorities"]
@@ -351,11 +329,6 @@ def validate_relations(payload, profile, index):
         _require(len(slates) == len(set(slates)), "Chapas duplicadas")
         _require(
             options[-1]["id"] == profile["nullOptionId"], "Nulo fora da última posição"
-        )
-        calendar = _artifact(index, payload["calendarOriginHash"], "calendar-origin")
-        _require(
-            calendar["electionId"] == payload["electionId"],
-            "Calendário de outra eleição",
         )
         ids = [x["id"] for x in authorities]
         _require(len(ids) == len(set(ids)), "Autoridades duplicadas")
@@ -416,17 +389,6 @@ def validate_relations(payload, profile, index):
         _require(payload["voterCount"] == 0, "Participação sem manifesto")
         if kind == "cancellation":
             _require(payload["headHash"] is None, "Quadro sem manifesto")
-            if payload["scheduleHash"] is not None:
-                calendar = index.get(payload["scheduleHash"])
-                _require(
-                    calendar is not None
-                    and calendar["kind"] in {"calendar-origin", "schedule-change"},
-                    "Calendário ausente",
-                )
-                _require(
-                    calendar["electionId"] == payload["electionId"],
-                    "Calendário de outra eleição",
-                )
         return
 
     manifest = _artifact(index, payload["manifestHash"], "manifest")
@@ -474,23 +436,7 @@ def validate_relations(payload, profile, index):
         )
 
     if kind in {"closure", "cancellation"}:
-        schedule = index.get(payload["scheduleHash"])
-        _require(
-            schedule is not None
-            and schedule["kind"] in {"calendar-origin", "schedule-change"},
-            "Calendário ausente",
-        )
-        _require(
-            schedule["electionId"] == payload["electionId"],
-            "Calendário de outra eleição",
-        )
         _snapshot(payload["headHash"], payload["voterCount"], manifest, index, profile)
-
-        if kind == "closure":
-            _require(
-                payload["closedAt"] >= schedule["endsAt"],
-                "Encerramento antes do prazo vigente",
-            )
 
     if kind in {"ballot", "aggregate"}:
         _ordered_options(payload["ciphertexts"], manifest)
@@ -636,9 +582,10 @@ def validate_case(case, corpus, profile, schema):
     keys = {"legacy": corpus["verificationKey"], **corpus.get("keys", {})}
     expected_key = keys[signer]
 
-    if payload["kind"] == "ballot":
+    kind = payload.get("kind", "ballot")
+    if kind == "ballot":
         _require(payload["publicKey"] == expected_key, "Chave do eleitor divergente")
-    elif payload["kind"] == "decryption-share":
+    elif kind == "decryption-share":
         manifest = _artifact(index, payload["manifestHash"], "manifest")
         authority = next(
             (x for x in manifest["authorities"] if x["id"] == payload["authorityId"]),
@@ -651,7 +598,7 @@ def validate_case(case, corpus, profile, schema):
         )
     elif signer != "legacy":
         _require(signer == "server", "Assinante não é o servidor")
-        if payload["kind"] == "manifest":
+        if kind == "manifest":
             _require(
                 payload["serverSigningKey"] == expected_key,
                 "Chave do servidor divergente",

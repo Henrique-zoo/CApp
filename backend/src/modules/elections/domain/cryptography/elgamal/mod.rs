@@ -18,9 +18,10 @@
 //! `crypto-bigint` fornece a aritmética modular de precisão fixa, e `getrandom`
 //! obtém os bytes aleatórios do sistema para a chave da autoridade do servidor.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::LazyLock};
 
 use crate::modules::elections::domain::{
+    entities::authority::KeyProof,
     error::CryptographyError,
     profile::{MAX_AUTHORITIES, MAX_OPTIONS, MAX_VOTER_COUNT, MIN_AUTHORITIES, MIN_OPTIONS},
 };
@@ -59,6 +60,10 @@ const MOD_P: FixedMontyParams<{ U2048::LIMBS }> = FixedMontyParams::new_vartime(
 /// Ordem do subgrupo, igual a `(P - 1) / 2` para o primo ímpar `P`.
 const Q: U2048 = P.as_ref().shr(1);
 
+static MOD_Q: LazyLock<FixedMontyParams<{ U2048::LIMBS }>> = LazyLock::new(|| {
+    FixedMontyParams::new_vartime(Odd::new(Q).expect("a ordem do subgrupo é ímpar"))
+});
+
 /// Gerador do subgrupo de ordem `Q`.
 const G: GroupValue = GroupValue::new(&U2048::from_u8(2), &MOD_P);
 
@@ -75,6 +80,18 @@ pub struct ElGamalAuthorityKeyPair {
 }
 
 impl ElGamalAuthorityKeyPair {
+    /// Reconstitui o par usando o segredo guardado pela própria autoridade.
+    pub fn from_secret(secret: U2048) -> Result<Self, CryptographyError> {
+        if secret == U2048::ZERO || secret >= Q {
+            return Err(CryptographyError::InvalidGroupElement);
+        }
+
+        Ok(Self {
+            secret,
+            public_value: G.pow(&secret).retrieve(),
+        })
+    }
+
     /// Escalar privado `x` em `[1, Q)`, sob custódia da autoridade.
     pub fn secret(&self) -> &U2048 {
         &self.secret
@@ -84,6 +101,67 @@ impl ElGamalAuthorityKeyPair {
     pub fn public_value(&self) -> &U2048 {
         &self.public_value
     }
+
+    /// Produz a prova Schnorr da chave, com o desafio fornecido pelo protocolo.
+    /// O desafio inclui o compromisso recém-gerado e os dados da autoridade.
+    pub fn prove_key<E: From<CryptographyError>>(
+        &self,
+        challenge: impl FnOnce(&U2048) -> Result<[u8; 32], E>,
+    ) -> Result<KeyProof, E> {
+        let nonce = sample_non_zero_scalar(getrandom::fill)?;
+        let commitment = G.pow(&nonce).retrieve();
+        let digest = challenge(&commitment)?;
+
+        Ok(KeyProof::new(commitment, self.respond(nonce, digest)))
+    }
+
+    /// Produz uma contribuição e sua prova para uma posição do agregado.
+    ///
+    /// O chamador verifica o encerramento e a origem do agregado antes de
+    /// fornecer `base`. O desafio inclui o valor e os dois compromissos, além
+    /// da eleição, do encerramento e da posição na transcrição pública.
+    pub fn contribute<E: From<CryptographyError>>(
+        &self,
+        base: &U2048,
+        challenge: impl FnOnce(&U2048, &U2048, &U2048) -> Result<[u8; 32], E>,
+    ) -> Result<DecryptionShare, E> {
+        let base = validate_element(base, true)?;
+        let nonce = sample_non_zero_scalar(getrandom::fill)?;
+        let value = base.pow(&self.secret).retrieve();
+        let commitment_g = G.pow(&nonce).retrieve();
+        let commitment_a = base.pow(&nonce).retrieve();
+        let digest = challenge(&value, &commitment_g, &commitment_a)?;
+
+        Ok(DecryptionShare {
+            value,
+            commitment_g,
+            commitment_a,
+            response: self.respond(nonce, digest),
+        })
+    }
+
+    fn respond(&self, nonce: U2048, digest: [u8; 32]) -> U2048 {
+        // SHA-256 cabe inteiro em Q. A multiplicação e a soma são módulo Q.
+        let mut bytes = [0; U2048::BYTES];
+        bytes[U2048::BYTES - digest.len()..].copy_from_slice(&digest);
+        let challenge = GroupValue::new(&U2048::from_be_slice(&bytes), &MOD_Q);
+        let secret = GroupValue::new(&self.secret, &MOD_Q);
+        let nonce = GroupValue::new(&nonce, &MOD_Q);
+
+        nonce.add(&challenge.mul(&secret)).retrieve()
+    }
+}
+
+/// Valor parcial e prova de igualdade de logaritmos para uma opção.
+pub struct DecryptionShare {
+    /// Valor público `A^x mod P`.
+    pub value: U2048,
+    /// Compromisso `g^w mod P`.
+    pub commitment_g: U2048,
+    /// Compromisso `A^w mod P`.
+    pub commitment_a: U2048,
+    /// Resposta `w + c*x mod Q`.
+    pub response: U2048,
 }
 
 /// Gera o par ElGamal da autoridade do servidor durante a preparação da eleição.
@@ -104,13 +182,7 @@ impl ElGamalAuthorityKeyPair {
 /// falhar ao fornecer os bytes aleatórios para o sorteio.
 pub fn generate_authority_key_pair() -> Result<ElGamalAuthorityKeyPair, CryptographyError> {
     let secret = sample_non_zero_scalar(getrandom::fill)?;
-
-    let public_value = G.pow(&secret).retrieve();
-
-    Ok(ElGamalAuthorityKeyPair {
-        secret,
-        public_value,
-    })
+    ElGamalAuthorityKeyPair::from_secret(secret)
 }
 
 /// Sorteia por rejeição um escalar para gerar a chave da autoridade.

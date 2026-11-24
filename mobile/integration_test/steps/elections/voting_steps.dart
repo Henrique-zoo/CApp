@@ -99,6 +99,8 @@ final votingSteps = <StepDefinition>[
     r'^"([^"]*)" já registrou sua participação nessa eleição por votação secreta$',
   ),
   pendingStep(r'^"([^"]*)" está autenticada pela sua conta Firebase$'),
+  pendingStep(r'^que a eleição (exige|dispensa) o cadastro prévio da chave$'),
+  pendingStep(r'^"([^"]*)" cadastrou sua chave pública antes da abertura$'),
   pendingStep(
     r'^"([^"]*)" não possui inscrição ou chave prévia nessa eleição$',
   ),

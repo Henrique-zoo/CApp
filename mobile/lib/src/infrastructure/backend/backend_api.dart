@@ -30,8 +30,12 @@ import 'package:dio/dio.dart';
 
 import 'auth/firebase_bearer_interceptor.dart';
 import 'auth/firebase_app_check_interceptor.dart';
+import 'elections/ballot_api.dart';
+import 'elections/registration_api.dart';
 import 'identity/identity.dart';
 import 'monitoring/monitoring.dart';
+import 'tls/backend_trust_stub.dart'
+    if (dart.library.io) 'tls/backend_trust_io.dart';
 
 /// Fachada e ponto de configuração das operações HTTP do backend CApp.
 ///
@@ -43,7 +47,10 @@ import 'monitoring/monitoring.dart';
 final class BackendApi {
   /// Configura a URL, os timeouts e a autenticação do cliente HTTP.
   ///
-  /// [baseUrl] deve apontar para a raiz do servidor, sem prefixo `/v1`.
+  /// [baseUrl] deve apontar para a raiz HTTPS do servidor, sem prefixo `/v1`.
+  /// [trustedBackendCertPemBase64] aceita o certificado PEM público do backend
+  /// de demonstração codificado em base64. A confiança adicional se aplica
+  /// apenas a esta API e preserva as raízes da plataforma.
   /// [getFirebaseIdToken] é consultado somente nas operações protegidas.
   /// [getFirebaseAppCheckToken] fornece o atestado do aplicativo nessas operações.
   /// Quando [dio] é fornecido, suas opções são alteradas e o interceptor
@@ -63,14 +70,51 @@ final class BackendApi {
     required String baseUrl,
     required FirebaseIdTokenProvider getFirebaseIdToken,
     required FirebaseAppCheckTokenProvider getFirebaseAppCheckToken,
+    String trustedBackendCertPemBase64 = const String.fromEnvironment(
+      'BACKEND_TLS_TRUST_PEM_BASE64',
+    ),
     Dio? dio,
   }) : _dio = dio ?? Dio() {
+    final server = Uri.tryParse(baseUrl);
+    if (server == null ||
+        !server.isScheme('https') ||
+        server.host.isEmpty ||
+        server.userInfo.isNotEmpty) {
+      throw ArgumentError(
+        'A URL do backend deve usar HTTPS com um host válido e sem credenciais.',
+      );
+    }
+    if (trustedBackendCertPemBase64.isNotEmpty) {
+      configureBackendTrust(_dio, trustedBackendCertPemBase64);
+    }
     _dio.options.baseUrl = baseUrl;
     _dio.options.connectTimeout = const Duration(seconds: 5);
     // O serviço institucional pode consumir 15 segundos no backend.
     _dio.options.receiveTimeout = const Duration(seconds: 20);
 
     _dio.interceptors.insertAll(0, [
+      InterceptorsWrapper(
+        onRequest: (request, handler) {
+          // Um caminho absoluto ou uma opção local do Dio não pode desviar
+          // os tokens Firebase nem o conteúdo de um POST para outro servidor.
+          final destination = request.uri;
+          if (!destination.isScheme('https') ||
+              destination.origin != server.origin ||
+              destination.userInfo.isNotEmpty) {
+            handler.reject(
+              DioException(
+                requestOptions: request,
+                error: const FormatException(
+                  'Destino fora da origem HTTPS do backend.',
+                ),
+              ),
+            );
+            return;
+          }
+          request.followRedirects = false;
+          handler.next(request);
+        },
+      ),
       FirebaseAppCheckInterceptor(getFirebaseAppCheckToken),
       FirebaseBearerInterceptor(getFirebaseIdToken),
     ]);
@@ -81,6 +125,9 @@ final class BackendApi {
   /// Operações de verificação da identidade institucional.
   /// A criação tardia só encapsula o transporte; nenhuma chamada ocorre no acesso.
   late final IdentityApi identity = IdentityApi(_dio);
+
+  late final RegistrationApi voterRegistration = RegistrationApi(_dio);
+  late final BallotApi ballots = BallotApi(_dio);
 
   /// Verificações públicas de saúde e prontidão do backend.
   /// A composição consulta prontidão na abertura, sem bloquear login ou cache.

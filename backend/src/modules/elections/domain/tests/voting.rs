@@ -18,7 +18,7 @@ fn confidential_participation_contains_only_the_ciphertext_vector() {
     let vote = Vote::try_accept(
         &election,
         VoteKey::new(election.id(), account(50)),
-        ballot(ElectionModality::Confidential, 60, 'e'),
+        ballot(ElectionModality::Confidential, 'e'),
         at(20, 11),
     )
     .unwrap();
@@ -52,7 +52,7 @@ fn extension_preserves_historical_votes_and_accepts_new_votes_up_to_the_revised_
         let original = Vote::try_accept(
             &election,
             VoteKey::new(election.id(), account(50)),
-            ballot(mode, 60, 'e'),
+            ballot(mode, 'e'),
             at(20, 11),
         )
         .unwrap();
@@ -66,7 +66,7 @@ fn extension_preserves_historical_votes_and_accepts_new_votes_up_to_the_revised_
             Vote::try_reconstitute(
                 &election,
                 VoteKey::new(election.id(), account(50)),
-                ballot(mode, 60, 'e'),
+                ballot(mode, 'e'),
                 at(20, 11)
             ),
             Ok(original)
@@ -76,7 +76,7 @@ fn extension_preserves_historical_votes_and_accepts_new_votes_up_to_the_revised_
                 Vote::try_accept(
                     &election,
                     VoteKey::new(election.id(), account(50)),
-                    ballot(mode, 60, 'e'),
+                    ballot(mode, 'e'),
                     time
                 )
                 .is_ok()

@@ -3,7 +3,21 @@
   "version": 1,
   "canonicalization": "RFC8785",
   "encoding": "UTF-8",
-  "signedPrefixHex": "434150502d454c454354494f4e532f310a",
+  "domainsHex": {
+    "ballot": "434150502d454c454354494f4e532f42414c4c4f542f3100",
+    "voter-registration": "434150502d454c454354494f4e532f524547495354524154494f4e2f3100",
+    "manifest": "434150502d454c454354494f4e532f4d414e49464553542f3100",
+    "board-entry": "434150502d454c454354494f4e532f424f4152442d454e5452592f3100",
+    "receipt": "434150502d454c454354494f4e532f524543454950542f3100",
+    "cancellation": "434150502d454c454354494f4e532f43414e43454c4c4154494f4e2f3100",
+    "closure": "434150502d454c454354494f4e532f434c4f535552452f3100",
+    "aggregate": "434150502d454c454354494f4e532f4147475245474154452f3100",
+    "authority-registration": "434150502d454c454354494f4e532f415554484f524954592d524547495354524154494f4e2f3100",
+    "decryption-share": "434150502d454c454354494f4e532f44454352595054494f4e2d53484152452f3100",
+    "result": "434150502d454c454354494f4e532f524553554c542f3100",
+    "authority-key-proof": "434150502d454c454354494f4e532f415554484f524954592d4b45592d50524f4f462f3100",
+    "decryption-proof": "434150502d454c454354494f4e532f44454352595054494f4e2d50524f4f462f3100"
+  },
   "digest": "SHA-256",
   "digestEncoding": "lowercase-hex",
   "signature": {
@@ -47,31 +61,32 @@
     "individualBallotValidityProofs": false,
     "allAuthoritiesRequired": true
   },
-  "signatureInput": "prefix || UTF8(JCS(payload))",
+  "signatureInput": "Objetos assinados com kind e version: domain(payload.kind) || UTF8(JCS(payload)); ballot: domain(ballot) || UTF8(JCS(payload tipado com electionId, accountId, manifestHash, publicKey, ciphertexts)); o cadastro assina domain(voter-registration) || UTF8(JCS({electionId, accountId, publicKey})), mas transmite apenas {publicKey} e assinatura.",
   "objectDigest": "SHA256(signatureInput), excluding the outer signature",
   "signers": {
+    "voter-registration": "payload.publicKey, proof of possession for the authenticated account and election",
     "ballot": "payload.publicKey from the signing pair generated for this election, stored with the accepted ballot for (electionId, userId)",
     "decryption-share": "signingKey of authorityId in the manifest",
-    "otherKinds": "server signing key; manifest contains its public copy"
+    "otherKinds": "server signing key; manifest contains its public copy",
+    "authority-registration": "payload.authority.signingKey, proof of possession for the assigned account and election"
   },
   "rules": {
     "options": "IDs distintos; ID da opção de chapa igual ao ID da chapa; exatamente um Nulo, na última posição.",
     "authorities": "Uma autoridade do servidor, uma da comissão e uma por chapa. IDs e chaves distintos. Rejeitar publicValue=1. Se o produto der combinedPublicKey=1, descartar somente o par ElGamal do servidor, sortear outro, gerar nova prova de conhecimento e recalcular a chave conjunta. Repetir se o produto continuar igual a 1. As outras autoridades mantêm seus pares e provas.",
     "groupElements": "1 <= v < p e v^q mod p = 1. O a de cada cifra individual deve ser diferente de 1. Ao cifrar, o app descarta nonces que produzam b=1 ou b=g, pois esses valores revelam o bit cifrado. Um componente agregado pode ser 1, inclusive quando não há cédulas. Respostas de provas em [0,q).",
     "manifestPublication": "Cada electionId tem no máximo um manifesto oficial. As chaves públicas ElGamal individuais e a chave conjunta só são divulgadas no manifesto assinado, após validar a configuração, as chaves e as provas de conhecimento. Os valores provisórios ficam no backend. A publicação torna o manifesto imutável, inclusive antes do primeiro voto. Alterar a configuração publicada exige cancelar a eleição e criar outra com novo electionId.",
-    "calendar": "Em preparação, a comissão pode adiar a abertura e definir o novo fim; todo novo encerramento deve ser estritamente posterior ao anterior. Aberta, prorrogar o fim antes do prazo vigente, preservando o início. Sem encerramento antecipado ou reabertura. Preservar a duração é somente sugestão da interface.",
+    "calendar": "As datas pertencem à eleição e são publicadas como metadados do quadro. Em preparação, a comissão pode adiar a abertura e definir o novo fim; todo novo encerramento deve ser estritamente posterior ao anterior. Aberta, prorrogar o fim antes do prazo vigente, preservando o início. Sem encerramento antecipado ou reabertura. Preservar a duração é somente sugestão da interface.",
     "cancellation": "Comissão pode cancelar eleição não terminal, identificando ator e motivo, preservando registros e sem apuração antecipada.",
-    "scheduleChain": "CalendarOrigin é assinado pelo servidor antes de preparar as chaves. Seu digest é o scheduleHash inicial; Manifest.calendarOriginHash referencia esse objeto. Cada revisão referencia o hash da revisão anterior. ScheduleChange.manifestHash pode ser nulo antes da publicação do manifesto. Revisões do calendário não modificam o manifesto publicado.",
     "boardChain": "Índices começam em 1. Primeiro previousHash = manifestHash. Depois, objectDigest do payload board-entry anterior. Quadro vazio: headHash = manifestHash.",
-    "receipt": "ballotHash = objectDigest do payload ballot; entryHash = objectDigest do payload board-entry. Persistir e devolver o mesmo recibo aceito nas repetições.",
+    "receipt": "ballotHash = SHA256(domain(ballot) || JCS(payload ballot com accountId)); entryHash = objectDigest do payload board-entry. Persistir e devolver o mesmo recibo aceito nas repetições.",
     "counting": "Atualizar o acumulador da eleição na mesma transação que aceita uma nova cédula. Repetições não atualizam o acumulador. Usar o mesmo encerramento para headHash, voterCount e agregado. Recuperar totais em [0,voterCount] e exigir soma(counts)=voterCount, incluindo Nulo.",
     "outcomes": "Autoridade ausente ou contribuição inválida: incomplete. Total fora do intervalo ou soma divergente: annulled. Cancelamento manual: cancelled. Demais casos: apuração valid, sem definir vencedor.",
     "privacy": "Não publicar tokens, Firebase UID, e-mail, escolha em claro, chave privada ou aleatoriedade da cifragem.",
-    "transport": "HTTPS obrigatório entre app e backend, com validação de confiança, validade e nome do servidor no cliente. Terminação TLS no Caddy; HTTP somente na rede privada do Compose, no mesmo host, sem exposição externa da porta do backend. Iniciar chamadas com credenciais diretamente em HTTPS. Um envelope assinado por mensagem JSON; exportação pública pode usar JSON Lines. Rejeitar chaves duplicadas, campos desconhecidos e strings escalares não canônicas.",
+    "transport": "HTTPS obrigatório entre app e backend, com validação de confiança, validade e nome do servidor no cliente. Terminação TLS diretamente no backend Rust (TLS 1.2 ou 1.3), com porta publicada exclusivamente em HTTPS. Iniciar chamadas com credenciais diretamente em HTTPS. Um envelope assinado por mensagem JSON; exportação pública pode usar JSON Lines. Rejeitar chaves duplicadas, campos desconhecidos e strings escalares não canônicas.",
     "binary": "Decodificar Base64url e exigir que a recodificação sem padding seja igual à entrada. Chaves RSA usam DER SPKI canônico com OID rsaEncryption.",
     "serverKey": "A configuração confiável do backend fornece a chave do servidor. A autoassinatura do manifesto, isoladamente, não comprova sua origem.",
-    "eligibility": "Firebase autentica o usuário. O backend resolve o UUID da conta CApp e confere sua correspondência com voterId na cédula. No novo aceite, o curso da evidência institucional vigente deve corresponder ao curso vinculado ao CA da eleição.",
-    "retries": "Autenticar primeiro. Mesma eleição, eleitor e submissionId com o mesmo ballotHash recuperam registro/recibo, inclusive após o encerramento. Outra cédula ou outra operação depois do aceite não cria voto novo.",
+    "eligibility": "Firebase autentica o usuário. O backend obtém o accountId diretamente do extrator autenticado, sem aceitar identidade do corpo da cédula; o accountId é coberto pela assinatura. O curso da evidência institucional vigente deve ser representado pelo CA. A comissão escolhe se a chave deve ser cadastrada antes da abertura. Quando exigido, a cédula deve usar a chave cadastrada. Nos demais casos, o primeiro aceite vincula a chave à participação.",
+    "retries": "Autenticar primeiro. A dupla eleição e conta localiza o voto aceito. O mesmo ballotHash recupera o registro e o recibo, inclusive após o encerramento. Uma cédula com hash diferente para a mesma participação é recusada.",
     "ordering": "A ordem de options e authorities publicada no manifesto é a referência imutável. IDs devem ser distintos; Nulo ocupa a última posição. Canonicalização não reordena arrays. Cifras, totais e contribuições seguem options.",
     "terminalStates": "Cancelamento manual somente antes de resultado final. Repetir o mesmo cancelamento é idempotente. Tallied, cancelled e annulled não reabrem. Incomplete ainda permite receber contribuições válidas.",
     "authorityCustody": "Segredos de autoridade e nonces de prova permanecem no respectivo responsável. Gerar segredos e nonces em [1,q) por CSPRNG; não reutilizar nonce de prova.",
@@ -79,7 +94,7 @@
     "numericLiterals": "Campos numéricos JSON usam literais inteiros; recusar ponto decimal, expoente, NaN, infinitos e zero negativo. Valores criptográficos continuam sendo strings decimais canônicas."
   },
   "proofChallenges": {
-    "hash": "c = integer_big_endian(SHA256(prefix || UTF8(JCS(challengePayload)))) mod q",
+    "hash": "c = integer_big_endian(SHA256(domain(challengePayload.kind) || UTF8(JCS(challengePayload)))) mod q",
     "authorityKey": {
       "kind": "authority-key-proof",
       "fields": [

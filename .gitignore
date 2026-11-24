@@ -11,6 +11,11 @@ CMakeCache.txt
 !.env.example
 !.env.*.example
 
+# Material TLS gerado localmente
+.tls/
+*.key
+*.key.pem
+
 # Logs and temporary files
 *.log
 *.tmp

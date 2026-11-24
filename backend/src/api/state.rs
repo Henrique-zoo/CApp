@@ -5,11 +5,22 @@
 //! Firebase; não contêm identidade ou tokens de uma requisição específica.
 //! Nos testes, o adaptador PostgreSQL usa o banco associado ao cenário.
 
+use std::sync::Arc;
+
 use crate::{
     infrastructure::database::PgDatabase,
-    modules::identity::infrastructure::{
-        firebase::{AppCheckVerifier, FirebaseTokenVerifier},
-        microsoft::MicrosoftGraphClient,
+    modules::{
+        elections::{
+            crypto_wire::ServerSigner,
+            infrastructure::{
+                PgElectionBoardRepository, PgVoterRegistrationRepository, RsaPssBallotVerifier,
+                RsaPssVoterKeyProofVerifier,
+            },
+        },
+        identity::infrastructure::{
+            firebase::{AppCheckVerifier, FirebaseTokenVerifier},
+            microsoft::MicrosoftGraphClient,
+        },
     },
 };
 
@@ -72,6 +83,21 @@ pub struct AppState {
 
     /// Clientes externos compartilhados, sem credenciais de usuários armazenadas.
     pub clients: Clients,
+
+    /// Adaptador do cadastro da chave eleitoral que reutiliza o pool de `pg_database`.
+    pub voter_registration_repository: PgVoterRegistrationRepository,
+
+    /// Verificador usado pelo serviço de aceite das cédulas.
+    pub(crate) ballot_verifier: RsaPssBallotVerifier,
+
+    /// Verificador tipado de prova de posse de chave para o cadastro eleitoral.
+    pub(crate) voter_key_proof_verifier: RsaPssVoterKeyProofVerifier,
+
+    /// Persistência dos votos, usando o pool compartilhado.
+    pub(crate) vote_repository: PgElectionBoardRepository,
+
+    /// A instalação fornece a chave para habilitar a assinatura de recibos.
+    pub(crate) election_signer: Option<Arc<ServerSigner>>,
 }
 
 impl AppState {
@@ -127,9 +153,52 @@ impl AppState {
     /// # }
     /// ```
     pub fn new(pg_database: PgDatabase, clients: Clients) -> Self {
+        let voter_registration_repository =
+            PgVoterRegistrationRepository::new(pg_database.pool.clone());
+
+        let vote_repository = PgElectionBoardRepository::new(pg_database.pool.clone());
+
         Self {
             pg_database,
             clients,
+            voter_registration_repository,
+            ballot_verifier: RsaPssBallotVerifier,
+            voter_key_proof_verifier: RsaPssVoterKeyProofVerifier,
+            vote_repository,
+            election_signer: None,
         }
+    }
+
+    /// Habilita o aceite transacional de cédulas usando a chave prevista no manifesto.
+    pub fn with_election_signer(mut self, signer: Arc<ServerSigner>) -> Self {
+        self.election_signer = Some(signer);
+        self
+    }
+
+    /// Inicia o relógio que encerra eleições publicadas quando o prazo vence.
+    /// O processo encerra a tarefa junto com o servidor.
+    pub fn start_election_clock(&self) -> Option<tokio::task::JoinHandle<()>> {
+        let signer = self.election_signer.clone()?;
+        let boards = self.vote_repository.clone();
+        Some(tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                interval.tick().await;
+                if let Err(error) =
+                    crate::modules::elections::application::services::board::close_due(
+                        &boards, &*signer,
+                    )
+                    .await
+                {
+                    tracing::error!(%error, "Falha ao consultar eleições a encerrar");
+                }
+                if let Err(error) = crate::modules::elections::application::services::tally::submit_pending_server_shares(
+                    &boards, &boards, &*signer,
+                ).await {
+                    tracing::error!(%error, "Falha ao consultar contribuições do servidor");
+                }
+            }
+        }))
     }
 }

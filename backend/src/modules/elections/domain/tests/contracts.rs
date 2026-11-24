@@ -21,9 +21,7 @@ use crate::modules::elections::{
             result::{FinalTallyResult, TallyComputation},
         },
         error::ElectionTransitionError,
-        identifiers::{
-            AcademicCenterId, AccountId, AuthorityId, ElectionId, SlateId, SubmissionId,
-        },
+        identifiers::{AcademicCenterId, AccountId, AuthorityId, ElectionId, SlateId},
         rules::board_snapshot::validate_confidential_board_snapshot,
     },
     infrastructure::codec::{BASE64_URL_MAX_LENGTH, decode_fingerprint},
@@ -166,29 +164,17 @@ fn public_protocol_scenarios_preserve_domain_outcomes() {
     let corpus = corpus();
     for scenario in corpus["scenarios"].as_array().unwrap() {
         let name = text(scenario, "name");
-        let initial_case = case(&corpus, &format!("{name}/calendar-origin"));
-        let initial = &initial_case["payload"];
+        let voting_period = period(&corpus["periods"][name]);
+        let opened_at = *voting_period.starts_at();
         let manifest_case = case(&corpus, &format!("{name}/manifest"));
         let manifest = read_manifest(&manifest_case["payload"]);
-        assert_eq!(manifest.election_id(), election_id(initial));
-        assert_eq!(
-            hash(&manifest_case["payload"], "calendarOriginHash"),
-            hash(initial_case, "sha256")
-        );
         let mut election = Election::new(
             manifest.election_id(),
             manifest.academic_center_id(),
-            period(initial),
+            voting_period.clone(),
             ElectionModality::Confidential,
             at(14, 10),
         );
-        let delay = &case(&corpus, &format!("{name}/delay"))["payload"];
-        let delayed_period = period(delay);
-        let opened_at = *delayed_period.starts_at();
-        election
-            .change_schedule(delayed_period, time(delay, "changedAt"))
-            .unwrap();
-
         let configuration = ElectionConfiguration::Confidential(Box::new(
             VerifiedManifest::from_verified_parts(manifest, hash(manifest_case, "sha256")),
         ));
@@ -199,13 +185,6 @@ fn public_protocol_scenarios_preserve_domain_outcomes() {
         election
             .advance(ElectionTransition::Open { opened_at })
             .unwrap();
-        let extension_case = case(&corpus, &format!("{name}/extension"));
-        let extension = &extension_case["payload"];
-        let extended_period = period(extension);
-        election
-            .change_schedule(extended_period.clone(), time(extension, "changedAt"))
-            .unwrap();
-
         // As mesmas cédulas do corpus preservam dimensão, ordem e contexto.
         for ballot in corpus["cases"]
             .as_array()
@@ -216,8 +195,7 @@ fn public_protocol_scenarios_preserve_domain_outcomes() {
             let payload = &ballot["payload"];
             let signed = SignedBallot::new(
                 election_id(payload),
-                AccountId::try_from_uuid(uuid(payload, "voterId")).unwrap(),
-                SubmissionId::try_from_uuid(uuid(payload, "submissionId")).unwrap(),
+                AccountId::try_from_uuid(uuid(payload, "accountId")).unwrap(),
                 decoded(text(payload, "publicKey")),
                 decoded(text(ballot, "signature")),
                 BallotContent::Confidential {
@@ -235,10 +213,6 @@ fn public_protocol_scenarios_preserve_domain_outcomes() {
         let head_hash = hash(closure, "headHash");
         validate_confidential_board_snapshot(Some(&manifest_hash), Some(&head_hash), n).unwrap();
         assert_eq!(election_id(closure), election.id());
-        assert_eq!(
-            hash(closure, "scheduleHash"),
-            hash(extension_case, "sha256")
-        );
         assert_eq!(manifest_hash, hash(manifest_case, "sha256"));
         let closed_at = time(closure, "closedAt");
         election
@@ -344,7 +318,7 @@ fn public_protocol_scenarios_preserve_domain_outcomes() {
         assert_eq!(voting.opened_at, opened_at, "{name}");
         assert_eq!(*actual_closed_at, closed_at, "{name}");
         assert_eq!(*voter_count, n, "{name}");
-        assert_eq!(election.current_period(), &extended_period, "{name}");
+        assert_eq!(election.current_period(), &voting_period, "{name}");
 
         if let Some(counts) = counts {
             let totals: Vec<_> = counts.iter().map(|c| c.count().value()).collect();
@@ -370,17 +344,15 @@ fn public_protocol_scenarios_preserve_domain_outcomes() {
 #[test]
 fn public_cancellation_before_manifest_has_no_tally() {
     let corpus = corpus();
-    let initial = case(&corpus, "cancelled/calendar-origin");
-    let payload = &initial["payload"];
+    let cancellation = &case(&corpus, "cancelled/cancellation")["payload"];
     let mut election = Election::new(
-        election_id(payload),
+        election_id(cancellation),
         aid(),
-        period(payload),
+        period(&corpus["periods"]["cancelled"]),
         ElectionModality::Confidential,
         at(14, 10),
     );
 
-    let cancellation = &case(&corpus, "cancelled/cancellation")["payload"];
     let requested_by = uuid(cancellation, "requestedBy");
     let cancelled_at = time(cancellation, "cancelledAt");
     let reason = text(cancellation, "reason");
@@ -416,7 +388,9 @@ fn domain_limits_match_the_versioned_profile() {
         "/../packages/api-contracts/elections/profile.json"
     )))
     .unwrap();
-    use super::super::profile::{MAX_AUTHORITIES, MAX_OPTIONS, MAX_VOTER_COUNT, MIN_OPTIONS};
+    use super::super::profile::{
+        MAX_AUTHORITIES, MAX_OPTIONS, MAX_SIGNED_MESSAGE_BYTES, MAX_VOTER_COUNT, MIN_OPTIONS,
+    };
     let schema: Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../packages/api-contracts/elections/schemas.json"
@@ -437,6 +411,10 @@ fn domain_limits_match_the_versioned_profile() {
     assert_eq!(
         serde_json::json!(MAX_VOTER_COUNT),
         profile["limits"]["maxVoters"]
+    );
+    assert_eq!(
+        serde_json::json!(MAX_SIGNED_MESSAGE_BYTES),
+        profile["limits"]["maxSignedMessageBytes"]
     );
     assert_eq!(
         serde_json::json!(BASE64_URL_MAX_LENGTH),

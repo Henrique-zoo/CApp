@@ -18,9 +18,13 @@ não uma versão de URL nem a versão do pacote Rust do backend.
 
 `elections/` contém o protocolo v1 da issue #377: perfil de parâmetros,
 schemas dos objetos compartilhados, interfaces entre implementações,
-matriz de segurança e vetores públicos. Chapa única é permitida; o fluxo
-usa as contas Firebase do CApp. O diretório não declara endpoints já
-implementados e não altera a versão atual do OpenAPI.
+matriz de segurança e vetores públicos. O fluxo admite chapa única e usa as
+contas Firebase do CApp. O OpenAPI referencia os schemas deste diretório.
+
+O OpenAPI 5.0.0 usa `SignedBallotSubmission` para enviar o voto. A API inclui
+a eleição da rota e a conta autenticada ao reconstruir o objeto `Ballot`
+coberto pela assinatura. O quadro continua publicando o envelope completo.
+App e backend devem ser atualizados juntos nesta mudança de desenvolvimento.
 
 A especificação do fluxo, responsabilidades, codificação e limites está no
 [Rustdoc do módulo eleitoral](../../backend/src/modules/elections/mod.rs).
@@ -28,10 +32,9 @@ Os vetores usam parâmetros de grupo reais e material sintético de teste;
 nenhuma chave privada é versionada. O validador de fixtures não substitui
 o servidor de votação ou o auditor independente do produto.
 
-O transporte entre app e backend deve usar HTTPS, com terminação TLS no
-Caddy e validação do certificado pelo aplicativo. Essa configuração pertence
-à integração; os contratos e vetores não configuram o proxy nem testam TLS.
-O Rustdoc detalha a confiança nos certificados em produção e desenvolvimento.
+O app se conecta diretamente ao backend Rust por HTTPS e valida o certificado
+do servidor. O [roteiro HTTPS](../../deploy/https/README.md) descreve a
+configuração e os testes do transporte.
 
 Instale `requirements-ci.txt` em um ambiente virtual e mantenha OpenSSL no
 PATH. Da raiz do repositório, execute:
@@ -48,6 +51,21 @@ A CI executa os mesmos testes. Consumidores Rust/Dart devem usar os vetores
 versionados para conferir seus próprios bytes e verificações. Alterar o
 protocolo exige revisar perfil, schemas, vetores e consumidores afetados;
 não regenerar expectativas automaticamente durante a validação.
+
+## Contrato eleitoral
+
+O [perfil criptográfico](elections/profile.json) fixa os prefixos por `kind`.
+Cada prefixo termina com um byte NUL. A assinatura, o hash de uma evidência e
+o desafio de uma prova usam o prefixo correspondente seguido do payload em
+UTF-8 JCS (RFC 8785). Os [schemas eleitorais](elections/schemas.json) são
+referenciados pelo OpenAPI, e o Rust, o Flutter e o auditor Python conferem os
+mesmos [vetores](elections/vectors.json).
+
+A [submissão HTTP](examples/election-ballot-submission.json) contém o hash do manifesto,
+a chave pública, as cifras e a assinatura. O backend recupera `electionId`
+da rota e `accountId` da conta autenticada e reconstitui a cédula pública sem
+`version` nem `kind`, usando o domínio criptográfico específico da cédula. O registro público contém
+essa cédula completa, e a resposta distingue primeiro aceite e reenvio.
 
 ## Versionamento
 
@@ -90,7 +108,9 @@ contrato contra a qual foi desenvolvida e testada.
 
 | Versão do contrato | Versão Flutter (`pubspec.yaml`) | Situação |
 | --- | --- | --- |
-| 4.0.0 | 1.0.0+1 | Contrato atual com curso institucional validado e sugestão transitória de e-mail; publicação em produção não registrada. |
+| 4.0.0 | 1.0.0+1 | Curso institucional validado e sugestão transitória de e-mail. |
+| 4.2.0 | 1.0.0+1 | Cadastro facultativo da chave eleitoral e consulta da própria participação. |
+| 4.3.0 | 1.0.0+1 | Envio da cédula assinada e recuperação do recibo no Android. |
 
 A tabela deve ser atualizada ao preparar uma nova versão do aplicativo ou
 do contrato. Versões não registradas não recebem garantia de compatibilidade
@@ -110,6 +130,8 @@ compatibilidade durante a evolução da API.
 | --- | --- | --- | --- |
 | `GET /health` | `backend/src/api/router.rs` | `mobile/lib/src/infrastructure/backend/monitoring/monitoring_api.dart` | `mobile/test/src/infrastructure/backend/monitoring/monitoring_api_test.dart` |
 | `GET /ready` | `backend/src/api/router.rs` | `mobile/lib/src/infrastructure/backend/monitoring/monitoring_api.dart` | `mobile/test/src/infrastructure/backend/monitoring/monitoring_api_test.dart` |
+| `GET /elections/{id}/registration/me`, `PUT /elections/{id}/registration/me` | `backend/src/modules/elections/api/handlers.rs` | `mobile/lib/src/infrastructure/backend/elections/registration_api.dart` | `backend/tests/integration/repositories/election_board/registration.rs` e `mobile/test/src/modules/elections/voter_registration_client_test.dart` |
+| `POST /elections/{id}/ballots` | `backend/src/modules/elections/api/handlers.rs` | `mobile/lib/src/infrastructure/backend/elections/ballot_api.dart` | `backend/tests/integration/repositories/election_board/ballots.rs` |
 | `POST /auth/institutional/verify` | `backend/src/modules/identity/api/` | `mobile/lib/src/infrastructure/backend/identity/identity_api.dart` | `backend/src/modules/identity/api/tests.rs`, `backend/tests/integration/http/identity.rs`, `mobile/test/src/infrastructure/backend/identity/identity_api_test.dart` e `mobile/test/src/modules/identity/infrastructure/backend/backend_institutional_identity_gateway_test.dart` |
 | `GET /auth/session` | `backend/src/modules/identity/api/` | `mobile/lib/src/infrastructure/backend/identity/identity_api.dart` | `backend/tests/integration/http/identity.rs`, `mobile/test/src/infrastructure/backend/identity/identity_api_test.dart` e `mobile/test/src/modules/identity/application/account_session_test.dart` |
 | `PUT /users/me/profile` | `backend/src/modules/identity/api/` | `mobile/lib/src/infrastructure/backend/identity/identity_api.dart` | `backend/tests/integration/http/identity.rs`, `mobile/test/src/infrastructure/backend/identity/identity_api_test.dart` e `mobile/test/src/modules/identity/application/account_session_test.dart` |

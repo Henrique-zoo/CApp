@@ -1,8 +1,55 @@
 """Testes unitários do validador de exemplos OpenAPI."""
 
+import json
 import unittest
 
-from validate_examples import validate_instance
+from validate_examples import SPEC_PATH, contract_registry, load_spec, pointer, validate_instance
+
+
+class ElectionBallotEndpointTests(unittest.TestCase):
+    def test_submission_and_receipt_match_the_signed_protocol(self):
+        spec = load_spec()
+        registry = contract_registry(spec)
+        path = ["paths", "/elections/{id}/ballots", "post"]
+        with (SPEC_PATH.parent / "elections" / "vectors.json").open(encoding="utf-8") as f:
+            envelopes = {
+                c["name"]: {"payload": c["payload"], "signature": c["signature"]}
+                for c in json.load(f)["cases"]
+            }
+
+        def errors(value, *parts):
+            location = pointer([*path, *parts, "content", "application/json", "schema"])
+            return validate_instance(value, {"$ref": f"{SPEC_PATH.as_uri()}#{location}"}, registry)
+
+        evidence = envelopes["valid/ballot-0"]
+        ballot = {
+            "payload": {
+                field: evidence["payload"][field]
+                for field in ("manifestHash", "publicKey", "ciphertexts")
+            },
+            "signature": evidence["signature"],
+        }
+        self.assertFalse(errors(ballot, "requestBody"))
+        self.assertTrue(errors(evidence, "requestBody"))
+        for field in ("accountId", "electionId"):
+            with self.subTest(field=field):
+                self.assertTrue(errors(
+                    {**ballot, "payload": {**ballot["payload"], field: evidence["payload"][field]}},
+                    "requestBody",
+                ))
+        self.assertTrue(
+            errors(
+                {**ballot, "payload": {**ballot["payload"], "submissionId": "removed"}},
+                "requestBody",
+            )
+        )
+        entry = envelopes["valid/entry-0"]
+        receipt = envelopes["valid/receipt-0"]
+        for status, recovered in (("201", False), ("200", True)):
+            result = {"entry": entry, "receipt": receipt, "recovered": recovered}
+            self.assertFalse(errors(result, "responses", status))
+            self.assertTrue(errors({**result, "receipt": entry}, "responses", status))
+            self.assertTrue(errors({**result, "recovered": not recovered}, "responses", status))
 
 
 class ValidateInstanceTests(unittest.TestCase):

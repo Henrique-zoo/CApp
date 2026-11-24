@@ -7,7 +7,7 @@
 //! antes de as quatro frentes implementarem seus próprios adaptadores.
 //!
 //! O [`domain`] modela as entidades e invariantes da #130.
-//! [`application::board`] define a porta transacional da #381. [`infrastructure`]
+//! [`application::ports::ElectionBoardRepository`] define a porta transacional da #381. [`infrastructure`]
 //! persiste as evidências em PostgreSQL e [`api`] publica o quadro e os recibos.
 //! [`crypto_wire`] verifica os envelopes do contrato da #377.
 //!
@@ -33,16 +33,16 @@
 //!
 //! [`domain::entities::vote::Vote`] vincula a conta interna à eleição e contém a
 //! cédula aceita, sua chave pública de assinatura e o instante do aceite. A
-//! repetição usa o ID da operação e o digest do payload para recuperar o mesmo
-//! voto, inclusive após o encerramento.
+//! repetição no domínio usa o par de eleição e conta e o digest da cédula.
+//! O serviço HTTP preserva a verificação dos envelopes v1 e permite recuperar
+//! o aceite original inclusive após o encerramento.
 //! O repositório de #381 confirma o voto e suas evidências na mesma transação,
-//! conforme [`application::ports::BallotStore`].
+//! conforme [`application::ports::VoteRepository`].
 //! [`domain::entities::vote::board_entry::BoardEntry`] projeta a cédula original do
 //! voto e sua posição encadeada para a auditoria. O repositório confirma atomicamente a
 //! cédula, seu registro no quadro e o recibo correspondente na modalidade
-//! confidencial. A resposta contém somente o recibo persistido, inclusive
-//! na retransmissão. Na modalidade identificada, o aceite confirma o voto
-//! sem corpo de resposta.
+//! confidencial. A rota de voto secreto v1 devolve a entrada confirmada e o
+//! recibo persistido, inclusive na retransmissão.
 //!
 //! `VerifiedManifest` representa a configuração validada antes da publicação.
 //! A porta `BallotVerifier` verifica cédulas e devolve `VerifiedBallot` para o
@@ -73,7 +73,7 @@
 //! voto com a conta CApp autenticada e o ID da eleição solicitada. No aceite,
 //! a transação compara o curso da evidência institucional vigente com o curso
 //! vinculado ao CA da eleição. Somente a correspondência autoriza um novo voto.
-//! A cédula assina o UUID da conta CApp no campo `voterId`. No quadro público,
+//! A cédula assina o UUID da conta CApp no campo `accountId`. No quadro público,
 //! esse UUID permite conferir que cada conta aparece uma vez na eleição.
 //! A conta é resolvida pelo backend a partir da autenticação Firebase.
 //!
@@ -92,7 +92,7 @@
 //!
 //! # Objetos e bytes do protocolo
 //!
-//! `schemas.json` especifica calendário inicial, manifesto, cédula, registro, recibo,
+//! `schemas.json` especifica manifesto, cédula, registro, recibo,
 //! cancelamento, encerramento, agregado, contribuição de autoridade e resultado.
 //! Tipos auxiliares compõem esses objetos; não exigem um endpoint ou entidade por
 //! tipo. DTOs de telas e operações HTTP serão definidos nas integrações respectivas.
@@ -100,8 +100,10 @@
 //! por caminhos validados, sem depender de mapas JSON ou credenciais Firebase.
 //!
 //! Todo envelope público possui `payload` e `signature`. A entrada da assinatura
-//! é UTF-8 de `CAPP-ELECTIONS/1` seguido de LF, concatenado com UTF-8 JCS do payload
-//! conforme RFC 8785. O digest é SHA-256 dessa mesma entrada, em hexadecimal
+//! é o prefixo definido para o `kind` no `profile.json`, seguido do payload em
+//! UTF-8 JCS conforme RFC 8785. Por exemplo, a cédula usa `CAPP-ELECTIONS/BALLOT/1`
+//! seguido do byte NUL. Os desafios das provas têm prefixos próprios. O digest
+//! é SHA-256 da mesma entrada, em hexadecimal
 //! minúsculo, excluindo a assinatura externa. Uma assinatura aninhada da cédula
 //! participa do payload do registro e, portanto, do encadeamento desse registro.
 //!
@@ -153,14 +155,12 @@
 //! As comparações do domínio preservam as frações de segundo do relógio. Ao
 //! montar um registro assinado, o codec trunca o timestamp para segundos UTC.
 //!
-//! O calendário inicial é um objeto assinado independente, disponível antes de
-//! as chaves estarem prontas. O manifesto referencia sua origem. Revisões
-//! numeradas e assinadas encadeiam os adiamentos sem modificar o manifesto
-//! publicado. Uma revisão anterior à publicação pode ter `manifestHash` nulo.
-//! O encerramento referencia o calendário efetivo e congela a cabeça do quadro,
-//! a contagem e o acumulador de cifras. Voto, prorrogação, encerramento e
-//! cancelamento concorrentes devem observar uma ordem transacional consistente
-//! no adaptador de persistência.
+//! O período fica na entidade eleitoral e é publicado no quadro como datas
+//! da eleição. O manifesto permanece imutável quando o período muda. O termo
+//! assinado congela a cabeça, a contagem e o instante do encerramento. O
+//! agregado assinado vincula o acumulador a esse termo. Voto, prorrogação,
+//! encerramento e cancelamento concorrentes precisam observar a mesma ordem
+//! transacional.
 //!
 //! A comissão pode cancelar uma eleição não terminal, inclusive por criação
 //! equivocada em preparação. O backend registra ator, motivo e instante, conserva
@@ -199,20 +199,15 @@
 //!
 //! # Transporte HTTPS
 //!
-//! HTTPS é obrigatório entre aplicativo e backend, tanto na votação secreta quanto
-//! na identificada. A integração do protocolo na issue #385 deve terminar TLS no
-//! Caddy e encaminhar HTTP ao backend:3000 pela rede privada do Compose, no mesmo host.
-//! A porta HTTP do backend não fica exposta externamente. O aplicativo inicia as
-//! requisições diretamente em HTTPS; redirecionar uma chamada HTTP depois de enviar
-//! credenciais não protege os dados da primeira requisição.
+//! HTTPS é obrigatório entre aplicativo e backend na votação secreta e na
+//! identificada. O backend termina TLS diretamente com Rustls. O aplicativo
+//! inicia as requisições em HTTPS e valida a confiança, a validade e o nome do
+//! certificado antes de transmitir os tokens.
 //!
-//! Em produção, usar certificado de uma CA pública, com emissão e renovação
-//! automáticas pelo Caddy. Em desenvolvimento, uma CA local ou certificado
-//! autoassinado exige confiança explícita no cliente. Instalar a CA no computador
-//! do servidor não a torna automaticamente confiável no aplicativo do celular.
-//! O app valida cadeia/confiança, validade e nome do servidor; não aceita qualquer
-//! certificado nem desabilita essa validação. Chaves privadas TLS ficam no proxy,
-//! fora do repositório, e são distintas dos segredos eleitorais.
+//! O certificado autoassinado da demonstração é configurado explicitamente no
+//! cliente Android. Uma implantação pública pode usar um certificado de CA
+//! pública. A chave privada TLS fica no servidor e é distinta das chaves
+//! eleitorais.
 //!
 //! TLS protege o canal; Firebase Auth identifica a conta e App Check verifica a
 //! atestação do aplicativo. Nenhum deles substitui os demais ou comprova o conteúdo
@@ -246,8 +241,7 @@
 //! [RFC 3526](https://www.rfc-editor.org/rfc/rfc3526.html),
 //! [RFC 8017](https://www.rfc-editor.org/rfc/rfc8017.html),
 //! [RFC 8235](https://www.rfc-editor.org/rfc/rfc8235.html),
-//! [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446.html) e
-//! [HTTPS automático no Caddy](https://caddyserver.com/docs/automatic-https).
+//! [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446.html).
 
 pub mod api;
 pub mod application;

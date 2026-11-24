@@ -5,6 +5,10 @@ target/
 .env.*
 !.env.example
 
+**/.tls/
+**/*.key
+**/*.key.pem
+
 *.log
 tmp/
 temp/

@@ -1,4 +1,4 @@
-//! Codec e assinaturas do protocolo público CAPP-ELECTIONS/1.
+//! Codec e domínios criptográficos do protocolo eleitoral público v1.
 //!
 //! JSON recebido deve passar por `parse_strict_json` antes de virar `Value`:
 //! desserializar diretamente em mapas perderia propriedades duplicadas. A chave
@@ -23,13 +23,37 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use super::domain::cryptography::elgamal::{
-    ElGamalCiphertext, EncryptedBallot, group_modulus, validate_public_key as validate_elgamal_key,
+use super::domain::{
+    cryptography::elgamal::{
+        ElGamalCiphertext, EncryptedBallot, group_modulus,
+        validate_public_key as validate_elgamal_key,
+    },
+    entities::ballot::{BallotCiphertexts, BallotContent, Ciphertext, SignedBallot},
+    identifiers::{AccountId, ElectionId},
+};
+use super::{
+    application::ports::BallotVerifier,
+    infrastructure::{
+        RsaPssBallotVerifier,
+        codec::{decode_fingerprint, encode_fingerprint},
+    },
 };
 
-const PREFIX: &[u8] = b"CAPP-ELECTIONS/1\n";
-/// Limite do envelope original antes de qualquer interpretação.
-pub const MAX_SIGNED_MESSAGE_BYTES: usize = 262_144;
+const BALLOT_DOMAIN: &[u8] = b"CAPP-ELECTIONS/BALLOT/1\0";
+const REGISTRATION_DOMAIN: &[u8] = b"CAPP-ELECTIONS/REGISTRATION/1\0";
+const MANIFEST_DOMAIN: &[u8] = b"CAPP-ELECTIONS/MANIFEST/1\0";
+const BOARD_ENTRY_DOMAIN: &[u8] = b"CAPP-ELECTIONS/BOARD-ENTRY/1\0";
+const RECEIPT_DOMAIN: &[u8] = b"CAPP-ELECTIONS/RECEIPT/1\0";
+const CANCELLATION_DOMAIN: &[u8] = b"CAPP-ELECTIONS/CANCELLATION/1\0";
+const CLOSURE_DOMAIN: &[u8] = b"CAPP-ELECTIONS/CLOSURE/1\0";
+const AGGREGATE_DOMAIN: &[u8] = b"CAPP-ELECTIONS/AGGREGATE/1\0";
+const AUTHORITY_REGISTRATION_DOMAIN: &[u8] = b"CAPP-ELECTIONS/AUTHORITY-REGISTRATION/1\0";
+const DECRYPTION_SHARE_DOMAIN: &[u8] = b"CAPP-ELECTIONS/DECRYPTION-SHARE/1\0";
+const RESULT_DOMAIN: &[u8] = b"CAPP-ELECTIONS/RESULT/1\0";
+const AUTHORITY_KEY_PROOF_DOMAIN: &[u8] = b"CAPP-ELECTIONS/AUTHORITY-KEY-PROOF/1\0";
+const DECRYPTION_PROOF_DOMAIN: &[u8] = b"CAPP-ELECTIONS/DECRYPTION-PROOF/1\0";
+
+pub use super::domain::profile::MAX_SIGNED_MESSAGE_BYTES;
 
 /// Falhas públicas sem incluir chaves privadas ou o conteúdo recebido.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -61,8 +85,8 @@ pub struct BallotContext {
     pub election_id: Uuid,
     /// Digest do manifesto oficial.
     pub manifest_hash: String,
-    /// Identidade eleitoral vinculada à conta autenticada.
-    pub voter_id: Uuid,
+    /// Conta CApp esperada no campo público `accountId`.
+    pub account_id: AccountId,
     /// Chave pública SPKI em Base64url do voto já aceito, quando houver.
     pub expected_public_key: Option<String>,
     /// Ordem imutável de opções, incluindo Nulo na última posição.
@@ -79,7 +103,7 @@ pub struct VerifiedWireBallot {
     /// SHA-256 do DER da chave pública da cédula.
     pub key_fingerprint: String,
     /// Cifras validadas, na ordem do manifesto, para acumulação transacional.
-    pub ciphertexts: Vec<ElGamalCiphertext>,
+    pub(crate) ciphertexts: EncryptedBallot,
 }
 
 impl fmt::Debug for VerifiedWireBallot {
@@ -87,7 +111,7 @@ impl fmt::Debug for VerifiedWireBallot {
         f.debug_struct("VerifiedWireBallot")
             .field("ballot_hash", &self.ballot_hash)
             .field("key_fingerprint", &self.key_fingerprint)
-            .field("ciphertext_count", &self.ciphertexts.len())
+            .field("ciphertext_count", &self.ciphertexts.ciphertexts().len())
             .finish()
     }
 }
@@ -112,6 +136,8 @@ pub struct VerifiedManifest {
     pub manifest_hash: String,
     /// Eleição da configuração.
     pub election_id: Uuid,
+    /// CA responsável pela eleição, declarado no manifesto assinado.
+    pub academic_center_id: Uuid,
     /// IDs na ordem imutável do vetor cifrado.
     pub option_ids: Vec<Uuid>,
 }
@@ -196,9 +222,36 @@ pub fn canonical_payload(payload: &Value) -> Result<Vec<u8>, CryptoWireError> {
     Ok(bytes)
 }
 
-fn signature_input(payload: &Value) -> Result<Vec<u8>, CryptoWireError> {
-    let mut input = PREFIX.to_vec();
-    input.extend(canonical_payload(payload)?);
+/// Prefixa o payload canônico com o domínio fixo do artefato ou da prova.
+pub(crate) fn signature_input(payload: &Value) -> Result<Vec<u8>, CryptoWireError> {
+    if payload["version"].as_u64() != Some(1) {
+        return Err(CryptoWireError::Encoding);
+    }
+    let domain = match string(payload, "kind")? {
+        "ballot" => BALLOT_DOMAIN,
+        "voter-registration" => REGISTRATION_DOMAIN,
+        "manifest" => MANIFEST_DOMAIN,
+        "board-entry" => BOARD_ENTRY_DOMAIN,
+        "receipt" => RECEIPT_DOMAIN,
+        "cancellation" => CANCELLATION_DOMAIN,
+        "closure" => CLOSURE_DOMAIN,
+        "aggregate" => AGGREGATE_DOMAIN,
+        "authority-registration" => AUTHORITY_REGISTRATION_DOMAIN,
+        "decryption-share" => DECRYPTION_SHARE_DOMAIN,
+        "result" => RESULT_DOMAIN,
+        "authority-key-proof" => AUTHORITY_KEY_PROOF_DOMAIN,
+        "decryption-proof" => DECRYPTION_PROOF_DOMAIN,
+        _ => return Err(CryptoWireError::Encoding),
+    };
+
+    with_domain(domain, payload)
+}
+
+fn with_domain(domain: &[u8], payload: &Value) -> Result<Vec<u8>, CryptoWireError> {
+    let canonical = canonical_payload(payload)?;
+    let mut input = Vec::with_capacity(domain.len() + canonical.len());
+    input.extend_from_slice(domain);
+    input.extend_from_slice(&canonical);
     Ok(input)
 }
 
@@ -257,7 +310,7 @@ pub fn validate_public_key(encoded: &str) -> Result<String, CryptoWireError> {
     Ok(hex_digest(&bytes))
 }
 
-fn exact_fields<'a>(
+pub(super) fn exact_fields<'a>(
     value: &'a Value,
     fields: &[&str],
 ) -> Result<&'a Map<String, Value>, CryptoWireError> {
@@ -268,14 +321,14 @@ fn exact_fields<'a>(
     Ok(object)
 }
 
-fn string<'a>(object: &'a Value, name: &str) -> Result<&'a str, CryptoWireError> {
+pub(super) fn string<'a>(object: &'a Value, name: &str) -> Result<&'a str, CryptoWireError> {
     object
         .get(name)
         .and_then(Value::as_str)
         .ok_or(CryptoWireError::Encoding)
 }
 
-fn version_kind(payload: &Value, kind: &str) -> Result<(), CryptoWireError> {
+pub(super) fn version_kind(payload: &Value, kind: &str) -> Result<(), CryptoWireError> {
     if payload.get("version").and_then(Value::as_u64) != Some(1) || string(payload, "kind")? != kind
     {
         return Err(CryptoWireError::Encoding);
@@ -331,7 +384,30 @@ pub fn verify_signed_object(
         .map_err(|_| CryptoWireError::Signature)
 }
 
-fn group_parameters() -> &'static (BigUint, BigUint) {
+/// Prova privada de posse destinada à conta autenticada e à eleição da rota.
+pub fn verify_registration(
+    raw: &[u8],
+    election_id: Uuid,
+    account_id: Uuid,
+) -> Result<String, CryptoWireError> {
+    let envelope = parse_strict_json(raw)?;
+    let payload = &envelope["payload"];
+    exact_fields(
+        payload,
+        &["version", "kind", "electionId", "accountId", "publicKey"],
+    )?;
+    version_kind(payload, "voter-registration")?;
+    if uuid_value(string(payload, "electionId")?, false)? != election_id
+        || uuid_value(string(payload, "accountId")?, false)? != account_id
+    {
+        return Err(CryptoWireError::Context);
+    }
+    let public_key = string(payload, "publicKey")?;
+    verify_signed_object(&envelope, public_key)?;
+    Ok(public_key.to_owned())
+}
+
+pub(super) fn group_parameters() -> &'static (BigUint, BigUint) {
     static PARAMETERS: std::sync::OnceLock<(BigUint, BigUint)> = std::sync::OnceLock::new();
     PARAMETERS.get_or_init(|| {
         let p = BigUint::from_bytes_be(group_modulus().to_be_bytes().as_slice());
@@ -340,10 +416,44 @@ fn group_parameters() -> &'static (BigUint, BigUint) {
     })
 }
 
-fn group_element(encoded: &str) -> Result<BigUint, CryptoWireError> {
+pub(super) fn group_element(encoded: &str) -> Result<BigUint, CryptoWireError> {
     let value = decimal(encoded)?;
     validate_elgamal_key("rfc3526-modp14", &value).map_err(|_| CryptoWireError::Ciphertext)?;
     Ok(BigUint::from_bytes_be(value.to_be_bytes().as_slice()))
+}
+
+/// Confere a prova Schnorr de uma chave pública vinculada à autoridade.
+pub(super) fn verify_authority_knowledge(
+    election: Uuid,
+    authority: &Value,
+) -> Result<BigUint, CryptoWireError> {
+    let (prime, order) = group_parameters();
+    let proof = &authority["keyProof"];
+    exact_fields(proof, &["commitment", "response"])?;
+    let public = group_element(string(authority, "publicValue")?)?;
+    let commitment = group_element(string(proof, "commitment")?)?;
+    let response = BigUint::from_bytes_be(
+        decimal(string(proof, "response")?)?
+            .to_be_bytes()
+            .as_slice(),
+    );
+    if &response >= order {
+        return Err(CryptoWireError::Ciphertext);
+    }
+    let challenge_payload = json!({
+        "version":1,"kind":"authority-key-proof","electionId":election,
+        "groupId":"rfc3526-modp14","authorityId":authority["id"],"role":authority["role"],
+        "slateId":authority["slateId"],"signingKey":authority["signingKey"],
+        "publicValue":authority["publicValue"],"commitment":proof["commitment"],
+    });
+    let challenge =
+        BigUint::from_bytes_be(&Sha256::digest(signature_input(&challenge_payload)?)) % order;
+    if BigUint::from(2_u8).modpow(&response, prime)
+        != commitment * public.modpow(&challenge, prime) % prime
+    {
+        return Err(CryptoWireError::Signature);
+    }
+    Ok(public)
 }
 
 /// Confere assinatura com âncora externa, configuração, grupo e provas públicas.
@@ -367,13 +477,11 @@ pub fn verify_manifest(
             "authorities",
             "combinedPublicKey",
             "serverSigningKey",
-            "calendarOriginHash",
         ],
     )?;
     version_kind(payload, "manifest")?;
     let election_id = uuid_value(string(payload, "electionId")?, false)?;
-    uuid_value(string(payload, "academicCenterId")?, false)?;
-    hash(string(payload, "calendarOriginHash")?)?;
+    let academic_center_id = uuid_value(string(payload, "academicCenterId")?, false)?;
     if string(payload, "serverSigningKey")? != trusted_server_key
         || string(payload, "groupId")? != "rfc3526-modp14"
     {
@@ -416,7 +524,7 @@ pub fn verify_manifest(
     let mut public_values = HashSet::new();
     let mut slates = HashSet::new();
     let (mut server_count, mut commission_count) = (0, 0);
-    let (prime, order) = group_parameters();
+    let (prime, _) = group_parameters();
     let mut combined = BigUint::from(1_u8);
     for authority in authorities {
         exact_fields(
@@ -457,31 +565,7 @@ pub fn verify_manifest(
             }
             _ => return Err(CryptoWireError::Context),
         }
-        let proof = &authority["keyProof"];
-        exact_fields(proof, &["commitment", "response"])?;
-        let public = group_element(public_encoded)?;
-        let commitment = group_element(string(proof, "commitment")?)?;
-        let response = BigUint::from_bytes_be(
-            decimal(string(proof, "response")?)?
-                .to_be_bytes()
-                .as_slice(),
-        );
-        if &response >= order {
-            return Err(CryptoWireError::Ciphertext);
-        }
-        let challenge_payload = json!({
-            "version":1,"kind":"authority-key-proof","electionId":payload["electionId"],
-            "groupId":payload["groupId"],"authorityId":authority["id"],"role":authority["role"],
-            "slateId":authority["slateId"],"signingKey":authority["signingKey"],
-            "publicValue":authority["publicValue"],"commitment":proof["commitment"],
-        });
-        let challenge =
-            BigUint::from_bytes_be(&Sha256::digest(signature_input(&challenge_payload)?)) % order;
-        if BigUint::from(2_u8).modpow(&response, prime)
-            != commitment * public.modpow(&challenge, prime) % prime
-        {
-            return Err(CryptoWireError::Signature);
-        }
+        let public = verify_authority_knowledge(election_id, authority)?;
         combined = combined * public % prime;
     }
     let expected_slates: HashSet<_> = option_ids[..option_ids.len() - 1].iter().copied().collect();
@@ -497,6 +581,7 @@ pub fn verify_manifest(
         envelope,
         manifest_hash,
         election_id,
+        academic_center_id,
         option_ids,
     })
 }
@@ -511,42 +596,17 @@ fn timestamp(value: &str) -> Result<chrono::DateTime<chrono::Utc>, CryptoWireErr
     Ok(parsed)
 }
 
-/// Confere calendário original assinado e sua referência no manifesto congelado.
-pub fn verify_calendar_origin(
-    raw: &[u8],
-    manifest: &VerifiedManifest,
-    trusted_server_key: &str,
-) -> Result<Value, CryptoWireError> {
-    let envelope = parse_strict_json(raw)?;
-    verify_signed_object(&envelope, trusted_server_key)?;
-    let payload = &envelope["payload"];
-    exact_fields(
-        payload,
-        &["version", "kind", "electionId", "startsAt", "endsAt"],
-    )?;
-    version_kind(payload, "calendar-origin")?;
-    if uuid_value(string(payload, "electionId")?, false)? != manifest.election_id
-        || object_digest(payload)? != string(&manifest.envelope["payload"], "calendarOriginHash")?
-        || timestamp(string(payload, "startsAt")?)? >= timestamp(string(payload, "endsAt")?)?
-    {
-        return Err(CryptoWireError::Context);
-    }
-    Ok(envelope)
-}
-
-/// Confere fechamento contra a cabeça/contagem e calendário já validados.
-/// Não implementa política de prorrogação; o chamador fornece o calendário efetivo.
+/// Verifica o termo assinado contra o manifesto e o estado final do quadro.
+/// O prazo de votação é mantido pela eleição e conferido no serviço de encerramento.
 pub fn verify_closure(
     raw: &[u8],
     manifest: &VerifiedManifest,
-    schedule: &Value,
     expected_head: &str,
     expected_count: u32,
     trusted_server_key: &str,
 ) -> Result<Value, CryptoWireError> {
     let envelope = parse_strict_json(raw)?;
     verify_signed_object(&envelope, trusted_server_key)?;
-    verify_signed_object(schedule, trusted_server_key)?;
     let payload = &envelope["payload"];
     exact_fields(
         payload,
@@ -555,7 +615,6 @@ pub fn verify_closure(
             "kind",
             "electionId",
             "manifestHash",
-            "scheduleHash",
             "headHash",
             "voterCount",
             "closedAt",
@@ -563,19 +622,14 @@ pub fn verify_closure(
     )?;
     version_kind(payload, "closure")?;
     hash(expected_head)?;
-    if !matches!(
-        string(&schedule["payload"], "kind")?,
-        "calendar-origin" | "schedule-change"
-    ) || uuid_value(string(&schedule["payload"], "electionId")?, false)? != manifest.election_id
-        || expected_count > 100_000
+    timestamp(string(payload, "closedAt")?)?;
+
+    if expected_count > 100_000
         || (expected_count == 0 && expected_head != manifest.manifest_hash)
         || uuid_value(string(payload, "electionId")?, false)? != manifest.election_id
         || string(payload, "manifestHash")? != manifest.manifest_hash
-        || string(payload, "scheduleHash")? != object_digest(&schedule["payload"])?
         || string(payload, "headHash")? != expected_head
         || payload["voterCount"].as_u64() != Some(u64::from(expected_count))
-        || timestamp(string(payload, "closedAt")?)?
-            < timestamp(string(&schedule["payload"], "endsAt")?)?
     {
         return Err(CryptoWireError::Context);
     }
@@ -590,33 +644,30 @@ pub fn verify_ballot(
     verify_ballot_value(parse_strict_json(raw)?, context)
 }
 
-fn verify_ballot_value(
+pub(crate) fn verify_ballot_value(
     envelope: Value,
     context: &BallotContext,
 ) -> Result<VerifiedWireBallot, CryptoWireError> {
+    // O quadro armazena a representação assinada, diferente da DTO HTTP
+    // mínima. Sua verificação reutiliza a mesma porta criptográfica do aceite.
     exact_fields(&envelope, &["payload", "signature"])?;
     let payload = &envelope["payload"];
     exact_fields(
         payload,
         &[
-            "version",
-            "kind",
             "electionId",
+            "accountId",
             "manifestHash",
-            "voterId",
-            "submissionId",
             "publicKey",
             "ciphertexts",
         ],
     )?;
-    version_kind(payload, "ballot")?;
     let election_id = uuid_value(string(payload, "electionId")?, false)?;
-    let voter_id = uuid_value(string(payload, "voterId")?, false)?;
-    let submission_id = uuid_value(string(payload, "submissionId")?, false)?;
+    let account_id = uuid_value(string(payload, "accountId")?, false)?;
     let manifest_hash = hash(string(payload, "manifestHash")?)?;
     let public_key = string(payload, "publicKey")?;
     if election_id != context.election_id
-        || voter_id != context.voter_id
+        || account_id != context.account_id.into_uuid()
         || manifest_hash != context.manifest_hash
         || context
             .expected_public_key
@@ -625,8 +676,8 @@ fn verify_ballot_value(
     {
         return Err(CryptoWireError::Context);
     }
-    let key_fingerprint = validate_public_key(public_key)?;
-    verify_signed_object(&envelope, public_key)?;
+    let key_bytes = decode_base64(public_key)?;
+    let signature = decode_base64(string(&envelope, "signature")?)?;
     let values = payload["ciphertexts"]
         .as_array()
         .ok_or(CryptoWireError::Encoding)?;
@@ -637,26 +688,46 @@ fn verify_ballot_value(
     {
         return Err(CryptoWireError::Context);
     }
-    let mut crypto_values = Vec::with_capacity(values.len());
+    let mut typed = Vec::with_capacity(values.len());
     for (value, expected_option) in values.iter().zip(&context.option_ids) {
         exact_fields(value, &["optionId", "a", "b"])?;
         let option_id = uuid_value(string(value, "optionId")?, true)?;
         if option_id != *expected_option {
             return Err(CryptoWireError::Context);
         }
-        crypto_values.push(ElGamalCiphertext {
-            a: decimal(string(value, "a")?)?,
-            b: decimal(string(value, "b")?)?,
-        });
+        typed.push(Ciphertext::new(
+            option_id,
+            ElGamalCiphertext {
+                a: decimal(string(value, "a")?)?,
+                b: decimal(string(value, "b")?)?,
+            },
+        ));
     }
-    EncryptedBallot::new(crypto_values.clone()).map_err(|_| CryptoWireError::Ciphertext)?;
-    let ballot_hash = object_digest(payload)?;
-    let _ = submission_id;
+    let ciphertexts = BallotCiphertexts::try_new(typed).map_err(|_| CryptoWireError::Ciphertext)?;
+    let signed = SignedBallot::new(
+        ElectionId::try_from_uuid(election_id).map_err(|_| CryptoWireError::Context)?,
+        AccountId::try_from_uuid(account_id).map_err(|_| CryptoWireError::Context)?,
+        key_bytes.clone(),
+        signature,
+        BallotContent::Confidential {
+            manifest_hash: decode_fingerprint(&manifest_hash)
+                .map_err(|_| CryptoWireError::Encoding)?,
+            ciphertexts,
+        },
+    );
+    let verified = RsaPssBallotVerifier
+        .verify_ballot(signed)
+        .map_err(|_| CryptoWireError::Signature)?;
+    let ballot_hash = encode_fingerprint(verified.ballot_hash());
+    let key_fingerprint = hex_digest(&key_bytes);
+    let BallotContent::Confidential { ciphertexts, .. } = verified.ballot().content() else {
+        return Err(CryptoWireError::Context);
+    };
     Ok(VerifiedWireBallot {
         envelope,
         ballot_hash,
         key_fingerprint,
-        ciphertexts: crypto_values,
+        ciphertexts: ciphertexts.encrypted_ballot().clone(),
     })
 }
 
@@ -712,12 +783,13 @@ impl ServerSigner {
     /// Prepara registro e recibo. O chamador persiste ambos antes de devolvê-los.
     pub fn issue_record(
         &self,
-        ballot: &VerifiedWireBallot,
+        ballot: &Value,
+        ballot_hash: &str,
         index: u32,
         previous_hash: &str,
     ) -> Result<SignedRecord, CryptoWireError> {
         hash(previous_hash)?;
-        let payload = &ballot.envelope["payload"];
+        let payload = &ballot["payload"];
         if !(1..=100_000).contains(&index)
             || (index == 1 && previous_hash != string(payload, "manifestHash")?)
         {
@@ -726,13 +798,13 @@ impl ServerSigner {
         let entry_payload = json!({
             "version":1,"kind":"board-entry","electionId":payload["electionId"],
             "manifestHash":payload["manifestHash"],"index":index,"previousHash":previous_hash,
-            "ballot":ballot.envelope,
+            "ballot":ballot,
         });
         let entry_hash = object_digest(&entry_payload)?;
         let board_entry = self.sign_payload(&entry_payload)?;
         let receipt = self.sign_payload(&json!({
             "version":1,"kind":"receipt","electionId":payload["electionId"],
-            "manifestHash":payload["manifestHash"],"ballotHash":ballot.ballot_hash,
+            "manifestHash":payload["manifestHash"],"ballotHash":ballot_hash,
             "index":index,"entryHash":entry_hash,
         }))?;
         Ok(SignedRecord {
@@ -755,10 +827,37 @@ pub fn verify_record(
 ) -> Result<SignedRecord, CryptoWireError> {
     let board_entry = parse_strict_json(board_raw)?;
     let receipt = parse_strict_json(receipt_raw)?;
-    verify_signed_object(&board_entry, server_public_key)?;
-    verify_signed_object(&receipt, server_public_key)?;
-    let entry = &board_entry["payload"];
-    let issued = &receipt["payload"];
+    let (ballot, entry_hash) = verify_entry(
+        &board_entry,
+        context,
+        expected_index,
+        expected_previous_hash,
+        server_public_key,
+    )?;
+    verify_receipt(
+        &receipt,
+        context,
+        expected_index,
+        &ballot.ballot_hash,
+        &entry_hash,
+        server_public_key,
+    )?;
+    Ok(SignedRecord {
+        board_entry,
+        receipt,
+        entry_hash,
+    })
+}
+
+fn verify_entry(
+    envelope: &Value,
+    context: &BallotContext,
+    index: u32,
+    previous_hash: &str,
+    server_public_key: &str,
+) -> Result<(VerifiedWireBallot, String), CryptoWireError> {
+    verify_signed_object(envelope, server_public_key)?;
+    let entry = &envelope["payload"];
     exact_fields(
         entry,
         &[
@@ -771,8 +870,34 @@ pub fn verify_record(
             "ballot",
         ],
     )?;
+    version_kind(entry, "board-entry")?;
+    hash(previous_hash)?;
+    if !(1..=100_000).contains(&index)
+        || (index == 1 && previous_hash != context.manifest_hash)
+        || entry["index"].as_u64() != Some(u64::from(index))
+        || string(entry, "previousHash")? != previous_hash
+        || uuid_value(string(entry, "electionId")?, false)? != context.election_id
+        || string(entry, "manifestHash")? != context.manifest_hash
+    {
+        return Err(CryptoWireError::Context);
+    }
+
+    let ballot = verify_ballot_value(entry["ballot"].clone(), context)?;
+    Ok((ballot, object_digest(entry)?))
+}
+
+fn verify_receipt(
+    envelope: &Value,
+    context: &BallotContext,
+    index: u32,
+    ballot_hash: &str,
+    entry_hash: &str,
+    server_public_key: &str,
+) -> Result<(), CryptoWireError> {
+    verify_signed_object(envelope, server_public_key)?;
+    let receipt = &envelope["payload"];
     exact_fields(
-        issued,
+        receipt,
         &[
             "version",
             "kind",
@@ -783,34 +908,19 @@ pub fn verify_record(
             "entryHash",
         ],
     )?;
-    version_kind(entry, "board-entry")?;
-    version_kind(issued, "receipt")?;
-    let ballot = verify_ballot_value(entry["ballot"].clone(), context)?;
-    let entry_hash = object_digest(entry)?;
-    hash(expected_previous_hash)?;
-    if !(1..=100_000).contains(&expected_index)
-        || (expected_index == 1 && expected_previous_hash != context.manifest_hash)
-        || entry["index"].as_u64() != Some(u64::from(expected_index))
-        || issued["index"] != entry["index"]
-        || string(entry, "previousHash")? != expected_previous_hash
-        || string(issued, "ballotHash")? != ballot.ballot_hash
-        || string(issued, "entryHash")? != entry_hash
+    version_kind(receipt, "receipt")?;
+    if receipt["index"].as_u64() != Some(u64::from(index))
+        || string(receipt, "ballotHash")? != ballot_hash
+        || string(receipt, "entryHash")? != entry_hash
+        || uuid_value(string(receipt, "electionId")?, false)? != context.election_id
+        || string(receipt, "manifestHash")? != context.manifest_hash
     {
         return Err(CryptoWireError::Context);
     }
-    for value in [entry, issued] {
-        if uuid_value(string(value, "electionId")?, false)? != context.election_id
-            || string(value, "manifestHash")? != context.manifest_hash
-        {
-            return Err(CryptoWireError::Context);
-        }
-    }
-    Ok(SignedRecord {
-        board_entry,
-        receipt,
-        entry_hash,
-    })
+    Ok(())
 }
+
+pub mod tally;
 
 #[cfg(test)]
 #[path = "crypto_wire/tests.rs"]

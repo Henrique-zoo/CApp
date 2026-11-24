@@ -1,8 +1,17 @@
 //! Aceite através da porta da aplicação, com commits reais em PostgreSQL.
 
+#[cfg(feature = "test-support")]
+mod ballots;
 mod fixtures;
 #[cfg(feature = "test-support")]
-mod receipts;
+mod private_routes;
+mod registration;
+#[cfg(feature = "test-support")]
+mod session;
+#[cfg(feature = "test-support")]
+mod tally;
+#[cfg(feature = "test-support")]
+mod three_voters;
 
 use crate::support::TestDatabase;
 use axum::{
@@ -10,9 +19,11 @@ use axum::{
     http::{Request, StatusCode},
 };
 use backend::modules::elections::{
-    application::board::{BoardError, ElectionBoard, EligibleVoter},
+    application::{
+        board::BoardError, ports::ElectionBoardRepository, services::board as board_service,
+    },
     crypto_wire::object_digest,
-    infrastructure::PgElectionBoard,
+    infrastructure::PgElectionBoardRepository,
 };
 use backend::modules::identity::infrastructure::{
     firebase::{AppCheckVerifier, FirebaseTokenVerifier},
@@ -26,9 +37,12 @@ use backend::{
     infrastructure::database::PgDatabase,
 };
 use chrono::{Duration, Utc};
-use fixtures::{Origin, Voter, server, vector};
+use crypto_bigint::U2048;
+use fixtures::{
+    Origin, Voter, election_id, seed_academic_center, server, submit_vote, vector, vote_key,
+};
 use serde_json::{Value, json};
-use std::sync::Arc;
+use tokio_stream::StreamExt;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -36,42 +50,45 @@ use uuid::Uuid;
 async fn paged_export_keeps_its_original_snapshot_while_another_vote_commits() {
     let db = TestDatabase::new().await;
     let signer = server();
-    let store = PgElectionBoard::new(db.pool.clone(), Arc::clone(&signer));
+    let store = PgElectionBoardRepository::new(db.pool.clone());
     let origin = Origin::during(&signer, Utc::now() + Duration::hours(1));
     let id = origin.election;
-    store.open(origin.frozen()).await.unwrap();
+
+    assert!(matches!(
+        board_service::publish(&store, &*signer, origin.frozen(false)).await,
+        Err(BoardError::Storage(error))
+            if error.downcast_ref::<sqlx::Error>()
+                .and_then(sqlx::Error::as_database_error)
+                .is_some_and(|error| error.is_foreign_key_violation())
+    ));
+    seed_academic_center(&db.pool).await;
+    board_service::publish(&store, &*signer, origin.frozen(false))
+        .await
+        .unwrap();
+
     // Material sintético compartilhado para testar páginas e isolamento da leitura.
-    let public_key = signer.public_key_base64().unwrap();
-    let manifest_hash = object_digest(&origin.manifest["payload"]).unwrap();
     let cast = async || {
-        let account_id = Uuid::new_v4();
-        sqlx::query("INSERT INTO app_user (id,firebase_uid) VALUES ($1,$2)")
-            .bind(account_id)
-            .bind(account_id.to_string())
-            .execute(&db.pool)
+        let voter = Voter::with_pem(
+            &db.pool,
+            "valid/ballot-0",
+            include_str!("../../fixtures/jwt/test-only-rsa-private.pem"),
+        )
+        .await;
+        let raw = voter.sign(&origin, voter.payload.clone());
+        submit_vote(&store, id, voter.admitted(), &raw)
             .await
             .unwrap();
-        let mut ballot = vector("valid/ballot-0").clone();
-        ballot["manifestHash"] = json!(&manifest_hash);
-        ballot["voterId"] = json!(account_id);
-        ballot["submissionId"] = json!(Uuid::new_v4());
-        ballot["publicKey"] = json!(&public_key);
-        let voter = EligibleVoter {
-            account_id,
-            eligible_until: Utc::now() + Duration::hours(1),
-        };
-        let raw = serde_json::to_vec(&signer.sign_payload(&ballot).unwrap()).unwrap();
-        store.record(id, voter, &raw).await.unwrap();
     };
     for _ in 0..33 {
         cast().await;
     }
-    let mut receiver = PgElectionBoard::stream_snapshot(&db.pool, id)
+    let database = PgDatabase::new(db.pool.clone());
+    let mut stream = board_service::stream_snapshot(&database, election_id(id))
         .await
         .unwrap();
     cast().await;
     let mut bytes = Vec::new();
-    while let Some(part) = receiver.recv().await {
+    while let Some(part) = stream.next().await {
         bytes.extend(part.unwrap());
     }
     let snapshot: Value = serde_json::from_slice(&bytes).unwrap();
@@ -81,7 +98,7 @@ async fn paged_export_keeps_its_original_snapshot_while_another_vote_commits() {
         snapshot["checkpoint"]["payload"]["entryHash"],
         object_digest(&entries[32]["payload"]).unwrap()
     );
-    let latest = PgElectionBoard::read_checkpoint(&db.pool, id)
+    let latest = board_service::read_checkpoint(&database, election_id(id))
         .await
         .unwrap();
     assert_eq!(latest["payload"]["index"], 34);
@@ -113,13 +130,16 @@ async fn public_evidence(pool: &sqlx::PgPool, uri: &str, expected: StatusCode) -
 async fn rollback_concurrency_and_recovery_preserve_one_chain() {
     let db = TestDatabase::new().await;
     let signer = server();
-    let store = PgElectionBoard::new(db.pool.clone(), Arc::clone(&signer));
+    let store = PgElectionBoardRepository::new(db.pool.clone());
     let origin = Origin::during(&signer, Utc::now() + Duration::hours(1));
     let id = origin.election;
-    let empty = store.open(origin.frozen()).await.unwrap();
+    seed_academic_center(&db.pool).await;
+    let empty = board_service::publish(&store, &*signer, origin.frozen(false))
+        .await
+        .unwrap();
     assert!(empty.entries.is_empty() && empty.checkpoint.is_none());
     assert_eq!(
-        PgElectionBoard::read_checkpoint(&db.pool, id)
+        board_service::read_checkpoint(&PgDatabase::new(db.pool.clone()), election_id(id))
             .await
             .unwrap(),
         origin.manifest
@@ -134,36 +154,41 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
     sqlx::raw_sql(
         "CREATE FUNCTION fail_board_commit() RETURNS trigger LANGUAGE plpgsql AS
         $$ BEGIN RAISE EXCEPTION 'injected commit failure'; END $$;
-        CREATE CONSTRAINT TRIGGER fail_test_commit AFTER INSERT ON election_board_entry
+        CREATE CONSTRAINT TRIGGER fail_test_commit AFTER INSERT ON election_vote
         DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_board_commit()",
     )
     .execute(&db.pool)
     .await
     .unwrap();
     assert!(matches!(
-        store.record(id, a.admitted(), &first).await,
+        submit_vote(&store, id, a.admitted(), &first).await,
         Err(BoardError::Storage(_))
     ));
-    assert!(store.recover(id, a.account).await.unwrap().is_none());
+    assert!(
+        board_service::read_own_receipt(&PgDatabase::new(db.pool.clone()), vote_key(id, a.account))
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(
-        serde_json::to_value(store.snapshot(id).await.unwrap()).unwrap(),
+        serde_json::to_value(store.snapshot(election_id(id)).await.unwrap()).unwrap(),
         serde_json::to_value(&empty).unwrap()
     );
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM election_participation")
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM election_vote")
         .fetch_one(&db.pool)
         .await
         .unwrap();
     assert_eq!(count, 0);
-    sqlx::query("DROP TRIGGER fail_test_commit ON election_board_entry")
+    sqlx::query("DROP TRIGGER fail_test_commit ON election_vote")
         .execute(&db.pool)
         .await
         .unwrap();
 
     let (one, retry, other, observed) = tokio::join!(
-        store.record(id, a.admitted(), &first),
-        store.record(id, a.admitted(), &first),
-        store.record(id, b.admitted(), &second),
-        store.snapshot(id)
+        submit_vote(&store, id, a.admitted(), &first),
+        submit_vote(&store, id, a.admitted(), &first),
+        submit_vote(&store, id, b.admitted(), &second),
+        store.snapshot(election_id(id))
     );
     let (one, retry, other, observed) = (
         one.unwrap(),
@@ -186,17 +211,17 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
             .map(|e| e["payload"]["index"].as_u64().unwrap())
     );
 
-    let board = store.snapshot(id).await.unwrap();
+    let board = store.snapshot(election_id(id)).await.unwrap();
     assert_eq!(board.entries.len(), 2);
     let exported =
         public_evidence(&db.pool, &format!("/elections/{id}/board"), StatusCode::OK).await;
     assert_eq!(exported, serde_json::to_value(&board).unwrap());
     assert_eq!(
-        one.entry["payload"]["ballot"]["payload"]["voterId"],
+        one.entry["payload"]["ballot"]["payload"]["accountId"],
         json!(a.account)
     );
     assert_eq!(
-        other.entry["payload"]["ballot"]["payload"]["voterId"],
+        other.entry["payload"]["ballot"]["payload"]["accountId"],
         json!(b.account)
     );
     let remote_anchor = public_evidence(
@@ -213,6 +238,14 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
     )
     .await;
     assert_eq!(missing["error"]["code"], "board_not_found");
+    let invalid = public_evidence(
+        &db.pool,
+        &format!("/elections/{}/board", Uuid::nil()),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(invalid["error"]["code"], "bad_request");
+
     for (index, entry) in board.entries.iter().enumerate() {
         let previous = if index == 0 {
             &origin.manifest
@@ -226,32 +259,45 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
         );
     }
     // O corpus contém o produto esperado, calculado independentemente do store Rust.
-    let accumulated: Value =
+    let accumulated: Vec<u8> =
         sqlx::query_scalar("SELECT accumulator FROM election_board WHERE election_id=$1")
             .bind(id)
             .fetch_one(&db.pool)
             .await
             .unwrap();
-    assert_eq!(accumulated, vector("valid/aggregate")["ciphertexts"]);
+    let expected_components = vector("valid/aggregate")["ciphertexts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|cipher| [&cipher["a"], &cipher["b"]]);
+    let mut expected = Vec::new();
+    for component in expected_components {
+        let number = U2048::from_str_radix_vartime(component.as_str().unwrap(), 10).unwrap();
+        expected.extend_from_slice(&number.to_be_bytes());
+    }
+    assert_eq!(accumulated, expected);
 
     // Novo adaptador e novas conexões reconstroem a resposta perdida após o commit.
     let fresh_pool = sqlx::postgres::PgPoolOptions::new()
         .connect_with((*db.pool.connect_options()).clone())
         .await
         .unwrap();
-    let restarted = PgElectionBoard::new(fresh_pool.clone(), signer);
-    let saved = restarted.recover(id, a.account).await.unwrap().unwrap();
-    assert_eq!(saved.receipt, one.receipt);
+    let restarted = PgElectionBoardRepository::new(fresh_pool.clone());
+    let reader = PgDatabase::new(fresh_pool.clone());
+    let saved = board_service::read_own_receipt(&reader, vote_key(id, a.account))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved, one.receipt);
     #[cfg(feature = "test-support")]
-    receipts::assert_own_receipts(
+    private_routes::assert_own_receipts(
         &fresh_pool,
         id,
         [(a.account, &one.receipt), (b.account, &other.receipt)],
     )
     .await;
     assert!(
-        restarted
-            .recover(id, Uuid::new_v4())
+        board_service::read_own_receipt(&reader, vote_key(id, Uuid::new_v4()))
             .await
             .unwrap()
             .is_none()
@@ -259,8 +305,7 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
     let resigned = a.sign(&origin, a.payload.clone());
     assert_ne!(resigned, first);
     assert_eq!(
-        restarted
-            .record(id, a.admitted(), &resigned)
+        submit_vote(&restarted, id, a.admitted(), &resigned)
             .await
             .unwrap()
             .receipt,
@@ -269,20 +314,9 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
     let mut different = a.payload.clone();
     different["ciphertexts"] = b.payload["ciphertexts"].clone();
     assert!(matches!(
-        restarted
-            .record(id, a.admitted(), &a.sign(&origin, different))
-            .await,
-        Err(BoardError::SubmissionConflict)
-    ));
-    let mut another = a.payload.clone();
-    another["submissionId"] = json!(Uuid::new_v4());
-    assert!(matches!(
-        restarted
-            .record(id, a.admitted(), &a.sign(&origin, another))
-            .await,
+        submit_vote(&restarted, id, a.admitted(), &a.sign(&origin, different)).await,
         Err(BoardError::AlreadyParticipated)
     ));
-
     fresh_pool.close().await;
     db.close().await;
 }
@@ -291,28 +325,30 @@ async fn rollback_concurrency_and_recovery_preserve_one_chain() {
 async fn close_freezes_the_accepted_vote_and_preserves_its_receipt() {
     let db = TestDatabase::new().await;
     let signer = server();
-    let store = PgElectionBoard::new(db.pool.clone(), Arc::clone(&signer));
+    let store = PgElectionBoardRepository::new(db.pool.clone());
     let voter = Voter::new(&db.pool, "valid/ballot-0").await;
     let late_voter = Voter::new(&db.pool, "valid/ballot-1").await;
     let end = Utc::now() + Duration::seconds(15);
     let origin = Origin::during(&signer, end);
     let id = origin.election;
-    store.open(origin.frozen()).await.unwrap();
+    board_service::publish(&store, &*signer, origin.frozen(false))
+        .await
+        .unwrap();
     assert!(matches!(
-        store.close(id).await,
+        board_service::close(&store, &*signer, election_id(id)).await,
         Err(BoardError::NotYetEnded)
     ));
     let ballot = voter.sign(&origin, voter.payload.clone());
     assert!(matches!(
-        store.record(id, late_voter.admitted(), &ballot).await,
-        Err(BoardError::InvalidEvidence(_))
+        submit_vote(&store, id, late_voter.admitted(), &ballot).await,
+        Err(BoardError::VoterMismatch)
     ));
     let mut competing = voter.payload.clone();
-    competing["submissionId"] = json!(Uuid::new_v4());
+    competing["ciphertexts"] = late_voter.payload["ciphertexts"].clone();
     let competing = voter.sign(&origin, competing);
     let (left, right) = tokio::join!(
-        store.record(id, voter.admitted(), &ballot),
-        store.record(id, voter.admitted(), &competing)
+        submit_vote(&store, id, voter.admitted(), &ballot),
+        submit_vote(&store, id, voter.admitted(), &competing)
     );
     let (accepted, committed_ballot) = match (left, right) {
         (Ok(record), Err(BoardError::AlreadyParticipated)) => (record, ballot),
@@ -321,17 +357,21 @@ async fn close_freezes_the_accepted_vote_and_preserves_its_receipt() {
             panic!("Duas operações da mesma conta precisam disputar um único aceite: {result:?}")
         }
     };
-    let mut changed_key = voter.payload.clone();
-    changed_key["publicKey"] = late_voter.payload["publicKey"].clone();
     assert!(matches!(
-        store
-            .record(id, voter.admitted(), &late_voter.sign(&origin, changed_key))
-            .await,
-        Err(BoardError::InvalidEvidence(_))
+        submit_vote(
+            &store,
+            id,
+            voter.admitted(),
+            &late_voter.sign(&origin, voter.payload.clone())
+        )
+        .await,
+        Err(BoardError::AlreadyParticipated)
     ));
     sqlx::query("SELECT pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM ($1::timestamptz - clock_timestamp())))::float8)")
         .bind(end).execute(&db.pool).await.unwrap();
-    let closed = store.close(id).await.unwrap();
+    let closed = board_service::close(&store, &*signer, election_id(id))
+        .await
+        .unwrap();
     let closure = &closed.closure.as_ref().unwrap()["payload"];
     assert_eq!(closure["voterCount"], 1);
     assert_eq!(
@@ -340,13 +380,25 @@ async fn close_freezes_the_accepted_vote_and_preserves_its_receipt() {
     );
     let aggregate = &closed.aggregate.as_ref().unwrap()["payload"];
     assert_eq!(aggregate["closureHash"], object_digest(closure).unwrap());
-    assert_eq!(aggregate["ciphertexts"], voter.payload["ciphertexts"]);
-    assert_eq!(store.close(id).await.unwrap().closure, closed.closure);
-    let mut expired = voter.admitted();
-    expired.eligible_until = Utc::now() - Duration::days(1);
+    let committed: Value = serde_json::from_slice(&committed_ballot).unwrap();
     assert_eq!(
-        store
-            .record(id, expired, &committed_ballot)
+        aggregate["ciphertexts"],
+        committed["payload"]["ciphertexts"]
+    );
+    assert_eq!(
+        board_service::close(&store, &*signer, election_id(id))
+            .await
+            .unwrap()
+            .closure,
+        closed.closure
+    );
+    sqlx::query("UPDATE institutional_verification SET expires_at = now() - interval '1 hour' WHERE user_id = $1")
+        .bind(voter.account)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        submit_vote(&store, id, voter.admitted(), &committed_ballot)
             .await
             .unwrap()
             .receipt,
@@ -354,7 +406,7 @@ async fn close_freezes_the_accepted_vote_and_preserves_its_receipt() {
     );
     let late = late_voter.sign(&origin, late_voter.payload.clone());
     assert!(matches!(
-        store.record(id, late_voter.admitted(), &late).await,
+        submit_vote(&store, id, late_voter.admitted(), &late).await,
         Err(BoardError::Closed)
     ));
     db.close().await;

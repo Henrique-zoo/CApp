@@ -202,6 +202,11 @@ um módulo: implementa portas, converte DTOs e traduz códigos de erro para as f
 da aplicação. Essa separação permite compartilhar o transporte sem centralizar
 as regras de todos os domínios em um cliente HTTP global.
 
+Em eleições, `VoterRegistrationService` coordena a consulta e o cadastro da
+chave da conta autenticada. A composição fornece o gateway HTTP e o adaptador
+de chaves nativas. O gateway converte o DTO e as recusas para o vocabulário da
+aplicação. A chave privada fica no Android Keystore ou no Keychain do iOS.
+
 ## Fluxo geral de uma operação
 
 Uma operação iniciada na interface normalmente percorre estes passos:
@@ -488,21 +493,51 @@ O filtro de `BrowserTabActivity` em `android/app/src/main/AndroidManifest.xml`
 deve corresponder à redirect URI do registro. A configuração de múltiplas contas
 fica em `assets/auth/msal_config.json`, declarado no `pubspec.yaml`.
 
-A partir de `mobile`, forneça os valores públicos do seu registro Microsoft:
+A partir de `mobile`, execute o CApp com o domínio HTTPS do backend e os
+valores públicos do registro Microsoft.
 
 ~~~bash
 flutter run \
   --dart-define=MSAL_CLIENT_ID='<application-client-id>' \
   --dart-define=MSAL_ANDROID_REDIRECT_URI='<redirect-uri-do-registro-android>' \
-  --dart-define=BACKEND_BASE_URL=http://10.0.2.2:3000
+  --dart-define=BACKEND_BASE_URL='https://api.seu-dominio.example'
 ~~~
 
 Use a redirect URI no formato fornecido pelo registro; o `android:path` do
 manifesto contém o hash da assinatura sem a codificação percentual da URI.
 Não há client secret no aplicativo. Os dois parâmetros MSAL são obrigatórios;
-valores vazios interrompem a inicialização. O endereço de backend mostrado
-atende ao emulador Android; dispositivos físicos precisam de um endereço
-alcançável. A composição MSAL atual ainda não configura as outras plataformas.
+valores vazios interrompem a inicialização. A composição MSAL atual ainda não
+configura as outras plataformas.
+
+Para a demonstração local, o endereço padrão do emulador Android é
+`https://10.0.2.2:8443`. Passe o PEM público do backend, codificado em
+base64, em `BACKEND_TLS_TRUST_PEM_BASE64`. Essa confiança adicional vale
+para o transporte do backend, que continua validando o endereço, o prazo
+e a cadeia do certificado. Para um servidor com certificado público
+confiável pela plataforma, omita esse parâmetro.
+
+O [roteiro HTTPS](../deploy/https/README.md#executar-no-android) contém o
+comando completo e os endereços para emulador, Android físico via USB e Wi-Fi.
+
+### Eleição no Início
+
+Para apresentar a eleição no Android, execute o app com o backend eleitoral
+em HTTPS, os parâmetros MSAL do login existente e estes dois parâmetros:
+
+~~~text
+--dart-define=ELECTION_ID=<uuid-da-eleicao>
+--dart-define=ELECTION_MANIFEST_SHA256=<hash-do-manifesto-em-64-digitos-hexadecimais-minusculos>
+~~~
+
+Use o hash do manifesto divulgado pela comissão por um canal independente do
+backend. Ele permite ao app conferir as chapas e o calendário antes de mostrá-los.
+Sem uma eleição configurada, o Início exibe **Nenhuma eleição disponível**.
+
+Entre com a conta institucional. Se a eleição exigir cadastro prévio, use
+**Habilitar para votar** antes da abertura e vote no mesmo aparelho. Nas demais
+eleições, o Android cria a chave quando você confirma o primeiro voto. Durante a
+votação, escolha uma chapa ou **Voto nulo**, toque em **Votar** e confirme. O
+recibo permite conferir a inclusão da cédula no quadro público.
 
 ## Documentação e validação
 

@@ -43,7 +43,6 @@ macro_rules! non_null_identifier {
 non_null_identifier!(ElectionId);
 non_null_identifier!(AcademicCenterId);
 non_null_identifier!(AuthorityId);
-non_null_identifier!(SubmissionId);
 non_null_identifier!(SlateId);
 non_null_identifier!(AccountId);
 
@@ -86,11 +85,6 @@ mod tests {
     #[test]
     fn slate_id_rejects_the_uuid_reserved_for_the_null_vote() {
         assert!(SlateId::try_from_uuid(Uuid::nil()).is_err());
-    }
-
-    #[test]
-    fn submission_id_rejects_nil_uuid() {
-        assert!(SubmissionId::try_from_uuid(Uuid::nil()).is_err());
     }
 
     #[test]

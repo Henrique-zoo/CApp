@@ -3,6 +3,9 @@
 Plataforma digital para Centros Acadêmicos, composta por um aplicativo
 móvel e um backend compartilhado.
 
+Para executar a demonstração eleitoral no Android, siga o
+[roteiro de HTTPS direto no backend](deploy/https/README.md).
+
 O objetivo do CApp é fornecer uma infraestrutura comum para que
 diferentes Centros Acadêmicos possam disponibilizar informações,
 organizar atividades, gerenciar processos internos e melhorar a
@@ -260,7 +263,8 @@ Estrutura recomendada:
 No Windows, execute o backend dentro do WSL 2. No Linux, utilize o terminal
 do próprio sistema.
 
-Para iniciar PostgreSQL e backend juntos, execute na raiz do monorepo:
+Após gerar e configurar os PEMs pelo [roteiro HTTPS](deploy/https/README.md),
+inicie PostgreSQL e backend juntos na raiz do monorepo.
 
 ```bash
 docker compose --profile backend up -d --build
@@ -389,7 +393,7 @@ O fluxo normal será:
 
           |
 
-          | HTTP/HTTPS + JSON
+          | HTTPS + JSON
 
           ↓
 

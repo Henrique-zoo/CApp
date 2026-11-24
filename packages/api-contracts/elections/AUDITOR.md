@@ -2,7 +2,8 @@
 
 `scripts/audit_election_board.py` lê uma exportação real sem acessar o servidor
 nem importar sua implementação Rust. Usa o schema, a canonicalização JCS e os
-primitivos públicos do validador Python dos contratos. O corpus `vectors.json`
+primitivos públicos do validador Python dos contratos, incluindo o prefixo
+de cada tipo de evidência definido em [profile.json](profile.json). O corpus `vectors.json`
 é usado somente nos testes, nunca para decidir a validade de uma exportação.
 
 ## Executar
@@ -29,7 +30,7 @@ anteriores para inspeção humana. A ferramenta não protege um disco local que
 o adversário possa reescrever nem torna confiável uma primeira observação
 adversarial.
 
-Na primeira execução válida, o arquivo é criado com o manifesto, calendário,
+Na primeira execução válida, o arquivo é criado com o manifesto,
 último recibo e fechamento observado. Nas seguintes, o mesmo caminho fornece
 a referência anterior e só é atualizado após validar a exportação inteira e
 comparar a continuidade. Um lock exclusivo `<arquivo>.lock` serializa a
@@ -97,7 +98,7 @@ São verificados JSON estrito sem nomes duplicados, schemas de envelopes,
 JCS/prefixo/hash, RSA-PSS do servidor e das cédulas, manifesto e provas de
 chaves das autoridades, opções e elementos do grupo, referências cruzadas,
 índices consecutivos, cadeia completa, uma participação por eleitor,
-recibo final, calendário, fechamento e produto dos ciphertexts do agregado.
+recibo final, fechamento e produto dos ciphertexts do agregado.
 Não há uma chamada remota ou confiança implícita no banco para esses passos.
 
 O escopo não inclui apuração final, shares de decriptação, identidade
@@ -107,19 +108,20 @@ servidor confiável para o vínculo com o cadastro e ausência de prova pública
 individual 0/1. A assinatura da cédula demonstra posse da chave nela declarada;
 um export sem cadastro público não demonstra sozinho o vínculo institucional.
 
-`submissionId` identifica a operação no escopo de eleição e eleitor; dois
-eleitores distintos podem usar o mesmo valor. A unicidade de participação do
-eleitor impede que a repetição de sua operação crie uma segunda entrada.
+A participação é identificada pela eleição e pelo UUID da conta. No envio,
+o servidor compara o hash do payload assinado com o do voto aceito para devolver
+o mesmo recibo quando a cédula é reenviada.
 
 ## Formato de exportação
 
-Todos os objetos abaixo, exceto o wrapper, são envelopes completos
-`{"payload": {...}, "signature": "..."}` do schema existente:
+Os artefatos assinados usam envelopes `{"payload": {...}, "signature": "..."}`.
+As datas vêm do período informado na exportação.
 
 ```json
 {
   "manifest": "envelope manifest",
-  "calendarOrigin": "envelope calendar-origin",
+  "startsAt": "2026-11-21T12:00:00Z",
+  "endsAt": "2026-11-25T12:00:00Z",
   "entries": ["envelopes board-entry em ordem crescente"],
   "checkpoint": "último envelope receipt; null se vazio",
   "closure": "envelope closure; null se aberto",
@@ -127,16 +129,11 @@ Todos os objetos abaixo, exceto o wrapper, são envelopes completos
 }
 ```
 
-As strings acima são descrições, não valores wire. `closure` e `aggregate`
-devem estar ambos presentes ou ambos nulos. O transporte pode incluir
-`scheduleChanges`, uma lista ordenada de envelopes `schedule-change`; sem
-esse campo, o calendário vigente é o originário. Prorrogações genuínas
-acrescentam ao histórico. O fechamento deve referenciar o último calendário.
-O store da #381 atualmente exporta apenas o calendário originário.
-
-A âncora local é um wrapper de evidências existentes, identificado por
-`format: capp-board-anchor-v1`; não introduz um novo `kind` de protocolo nem
-uma assinatura fictícia de snapshot.
+`closure` e `aggregate` devem estar ambos presentes ou ambos nulos. O auditor
+confere que a exportação informa um período coerente e compara `closedAt`
+com o fim declarado. A evidência assinada cobre o instante do encerramento
+e o estado final do quadro. A âncora local `capp-board-anchor-v2` conserva o
+manifesto, o último recibo e o fechamento observado.
 
 ## Testes
 

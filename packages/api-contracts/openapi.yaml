@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: CApp API
-  version: 4.1.0
+  version: 5.0.0
   description: |
     Contrato das rotas atualmente implementadas no backend CApp.
     Os caminhos são servidos sem prefixo /v1.
@@ -17,6 +17,8 @@ info:
     é retornado apenas como suggestedEmail durante o cadastro, fora da evidência
     institucional, e não é persistido. Contas ativas preservam o e-mail escolhido.
     A partir de 4.1.0, as leituras do quadro eleitoral e de seu checkpoint são públicas.
+    A versão 4.2.0 acrescenta o cadastro privado da chave quando a eleição o exige.
+    A versão 4.3.0 recebe cédulas cifradas e assinadas no dispositivo.
 
     A verificação institucional valida um Firebase ID token e um Microsoft access
     token da mesma pessoa, consulta a instituição pelo tenant Microsoft, verifica
@@ -35,6 +37,257 @@ tags:
     description: Distribuição de evidências para verificação pelos eleitores e autoridades.
 
 paths:
+  /elections/{id}/ballots:
+    parameters:
+      - $ref: "#/components/parameters/ElectionId"
+    post:
+      operationId: submitSecretBallot
+      tags: [Eleições]
+      summary: Registrar voto secreto e obter o recibo assinado
+      description: |
+        Enviar as cifras na ordem do manifesto, a chave pública e a assinatura.
+        A assinatura usa o payload público Ballot v1, sem kind nem version,
+        com electionId da rota e accountId da conta autenticada.
+        O corpo transporta somente manifestHash, publicKey e ciphertexts no payload.
+        O backend reconstitui os campos restantes para verificar a assinatura.
+        A entrada é CAPP-ELECTIONS/BALLOT/1, um byte NUL e o payload público em JCS.
+        O eleitor precisa ter vínculo vigente com um curso representado pelo CA. A chave é cadastrada
+        antes da abertura quando exigido ou vinculada no primeiro voto aceito.
+        Se a resposta se perder, o mesmo hash do conteúdo assinado recupera as
+        evidências originais, inclusive após o encerramento.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./elections/schemas.json#/$defs/SignedBallotSubmission"
+            examples:
+              signedBallot:
+                externalValue: ./examples/election-ballot-submission.json
+      responses:
+        "201":
+          description: Primeiro aceite. Registro e recibo confirmados no mesmo commit (recovered é false).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/RecordedBallot"
+                  - type: object
+                    properties:
+                      recovered:
+                        const: false
+        "200":
+          description: Reenvio de cédula já confirmada. O registro e o recibo são os originais (recovered é true).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/RecordedBallot"
+                  - type: object
+                    properties:
+                      recovered:
+                        const: true
+        "400":
+          description: UUID inválido ou cédula recusada por formato, assinatura ou contexto.
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: A conta, o App Check ou a elegibilidade eleitoral impedem a submissão.
+        "404":
+          description: Eleição desconhecida ou conta ainda não provisionada.
+        "409":
+          description: Prazo, cadastro prévio ausente, chave divergente, participação anterior ou limite de participantes.
+        "413":
+          description: O envelope excede 262144 bytes.
+        "415":
+          description: O servidor exige application/json.
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          description: Autenticação, emissão de recibo ou armazenamento indisponível.
+
+  /elections/{id}/authority/me:
+    parameters:
+      - $ref: "#/components/parameters/ElectionId"
+    get:
+      operationId: readOwnElectionAuthority
+      tags: [Eleições]
+      summary: Consultar a designação de autoridade da própria conta
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      responses:
+        "200":
+          $ref: "#/components/responses/ElectionAuthorityAssignment"
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: A conta não foi designada para a eleição.
+    put:
+      operationId: registerOwnElectionAuthority
+      tags: [Eleições]
+      summary: Entregar a chave pública e a prova da autoridade
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignedAuthorityRegistration"
+      responses:
+        "200":
+          $ref: "#/components/responses/ElectionAuthorityAssignment"
+        "400":
+          description: Assinatura, prova ou envelope inválido.
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: A conta não corresponde à designação.
+        "409":
+          description: Preparação encerrada ou chave diferente já registrada.
+  /elections/{id}/manifest:
+    parameters:
+      - $ref: "#/components/parameters/ElectionId"
+    put:
+      operationId: publishElectionManifest
+      tags: [Eleições]
+      summary: Publicar o manifesto confidencial da comissão designada
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      responses:
+        "200":
+          $ref: "#/components/responses/ElectionAuthorityAssignment"
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: A conta não representa a comissão da eleição.
+        "409":
+          description: Preparação encerrada ou credenciais de autoridades pendentes.
+  /elections/{id}/period:
+    parameters:
+      - $ref: "#/components/parameters/ElectionId"
+    put:
+      operationId: updateElectionPeriod
+      tags: [Eleições]
+      summary: Adiar a abertura ou prorrogar o fim da votação
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ElectionPeriodChange"
+      responses:
+        "200":
+          description: Período vigente confirmado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ElectionPeriod"
+        "400":
+          description: Período ou motivo inválido.
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: A conta não representa a comissão da eleição.
+        "409":
+          description: Eleição cancelada ou já encerrada.
+  /elections/{id}/cancellation:
+    parameters:
+      - $ref: "#/components/parameters/ElectionId"
+    put:
+      operationId: cancelElection
+      tags: [Eleições]
+      summary: Cancelar a eleição pela comissão designada
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ElectionCancellationRequest"
+      responses:
+        "200":
+          description: Cancelamento confirmado. Repetições devolvem o cancelamento registrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ElectionCancellation"
+        "400":
+          description: Motivo inválido.
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: A conta não representa a comissão da eleição.
+        "409":
+          description: Eleição já encerrada.
+  /elections/{id}/tally:
+    parameters:
+      - $ref: "#/components/parameters/ElectionId"
+    get:
+      operationId: readElectionTally
+      tags: [Eleições]
+      summary: Consultar contribuições e resultado da apuração
+      security: []
+      responses:
+        "200":
+          description: Evidências públicas da eleição encerrada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ElectionTally"
+        "404":
+          description: Quadro eleitoral inexistente.
+        "409":
+          description: A votação ainda não foi encerrada.
+  /elections/{id}/tally/shares/{authority}:
+    parameters:
+      - $ref: "#/components/parameters/ElectionId"
+      - name: authority
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      operationId: submitElectionDecryptionShare
+      tags: [Eleições]
+      summary: Entregar a contribuição assinada de uma autoridade designada
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignedShare"
+      responses:
+        "200":
+          description: Estado confirmado da apuração após a entrega.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ElectionTally"
+        "400":
+          description: Prova, assinatura ou vínculo com o encerramento inválido.
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: Conta sem atribuição ou origem do aplicativo recusada.
+        "409":
+          description: Quadro aberto ou contribuição definitiva já aceita.
+
   /elections/{id}/board:
     parameters:
       - $ref: "#/components/parameters/ElectionId"
@@ -75,7 +328,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ElectionEvidence"
+                anyOf:
+                  - $ref: "./elections/schemas.json#/$defs/SignedManifest"
+                  - $ref: "./elections/schemas.json#/$defs/SignedReceipt"
         "400":
           description: O identificador da eleição precisa ser um UUID.
         "404":
@@ -84,6 +339,78 @@ paths:
           description: Falha de consistência nas evidências armazenadas.
         "503":
           description: Falha ao ler o armazenamento eleitoral.
+
+  /elections/{id}/registration/me:
+    parameters:
+      - $ref: "#/components/parameters/ElectionId"
+    get:
+      operationId: getOwnElectionRegistration
+      tags: [Eleições]
+      summary: Consultar o cadastro e a participação da própria conta
+      description: Informa se a eleição exige cadastro prévio e permite consultar a situação após o encerramento.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      responses:
+        "200":
+          $ref: "#/components/responses/ElectionRegistration"
+        "400":
+          description: Identificador da eleição inválido.
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          $ref: "#/components/responses/AccountAccessDenied"
+        "404":
+          $ref: "#/components/responses/RegistrationNotFound"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          description: Autenticação ou armazenamento indisponível.
+    put:
+      operationId: registerOwnElectionKey
+      tags: [Eleições]
+      summary: Cadastrar a chave pública do eleitor antes da abertura
+      description: |
+        Assinar o payload com RSA-PSS/SHA-256 (MGF1-SHA-256, salt de 32 bytes)
+        sobre o prefixo CAPP-ELECTIONS/REGISTRATION/1, um byte NUL e o JSON canônico RFC 8785.
+        O corpo transporta a chave pública e a assinatura. O backend reconstrói
+        o payload assinado com a versão e o tipo fixos, a eleição da rota e o UUID
+        interno da conta autenticada. Repetir o cadastro confirmado
+        com a mesma chave recupera a inscrição. O servidor mantém o vínculo original.
+        A operação se aplica às eleições que exigem cadastro prévio.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ElectionRegistrationProof"
+            examples:
+              signedRegistration:
+                externalValue: ./examples/election-voter-registration.json
+      responses:
+        "200":
+          $ref: "#/components/responses/ElectionRegistration"
+        "400":
+          description: Identificador inválido ou prova de posse inválida (invalid_registration_proof).
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          description: App Check, conta ou elegibilidade institucional recusados.
+        "404":
+          $ref: "#/components/responses/RegistrationNotFound"
+        "409":
+          description: Cadastro dispensado (registration_not_required), encerrado (registration_closed) ou chave diferente da original (registration_key_conflict).
+        "413":
+          description: O corpo excede 262144 bytes.
+        "415":
+          description: O servidor exige application/json.
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          description: Autenticação ou armazenamento indisponível.
 
   /elections/{id}/receipts/me:
     parameters:
@@ -102,7 +429,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ElectionEvidence"
+                $ref: "./elections/schemas.json#/$defs/SignedReceipt"
         "400":
           description: O identificador da eleição precisa ser um UUID.
         "401":
@@ -466,11 +793,29 @@ components:
       in: path
       name: id
       required: true
-      description: UUID da eleição publicado no manifesto.
+      description: UUID não nulo da eleição, conforme publicado no manifesto.
       schema:
         type: string
         format: uuid
   responses:
+    ElectionAuthorityAssignment:
+      description: Designação confirmada da própria conta.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ElectionAuthorityAssignment"
+    ElectionRegistration:
+      description: Cadastro e participação da conta autenticada nesta eleição.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ElectionRegistrationStatus"
+    RegistrationNotFound:
+      description: Eleição desconhecida ou conta interna ainda não provisionada.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
     BoardNotFound:
       description: A eleição ainda não possui quadro publicado.
       content:
@@ -520,50 +865,139 @@ components:
         microsoft.com vinculada. Enviar um único Authorization: Bearer <ID_TOKEN>.
         O access token Microsoft é enviado separadamente no corpo da verificação.
   schemas:
-    ElectionEvidence:
+    RecordedBallot:
+      $ref: "./elections/schemas.json#/$defs/RecordedBallot"
+    ElectionRegistrationProof:
+      $ref: "./elections/registration-request.schema.json"
+    ElectionRegistrationStatus:
+      $ref: "./elections/schemas.json#/$defs/VoterRegistrationStatus"
+    ElectionPeriod:
       type: object
-      description: Envelope assinado do quadro eleitoral, com payload do protocolo v1.
       additionalProperties: false
-      required: [payload, signature]
+      required: [startsAt, endsAt]
       properties:
-        signature:
-          $ref: "./elections/schemas.json#/$defs/Base64Url"
-        payload:
-          oneOf:
-            - $ref: "./elections/schemas.json#/$defs/CalendarOrigin"
-            - $ref: "./elections/schemas.json#/$defs/Manifest"
-            - $ref: "./elections/schemas.json#/$defs/BoardEntry"
-            - $ref: "./elections/schemas.json#/$defs/Receipt"
-            - $ref: "./elections/schemas.json#/$defs/Closure"
-            - $ref: "./elections/schemas.json#/$defs/Aggregate"
+        startsAt:
+          $ref: "./elections/schemas.json#/$defs/Time"
+        endsAt:
+          $ref: "./elections/schemas.json#/$defs/Time"
+    ElectionPeriodChange:
+      type: object
+      additionalProperties: false
+      required: [startsAt, endsAt, reason]
+      properties:
+        startsAt:
+          $ref: "./elections/schemas.json#/$defs/Time"
+          description: Pode ser adiado antes da abertura. Após abrir, preserve o início vigente.
+        endsAt:
+          $ref: "./elections/schemas.json#/$defs/Time"
+          description: Deve ser posterior ao encerramento vigente.
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    ElectionCancellationRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    ElectionCancellation:
+      type: object
+      additionalProperties: false
+      required: [cancelledAt, cancelledBy, reason]
+      properties:
+        cancelledAt:
+          type: string
+          format: date-time
+        cancelledBy:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    ElectionAuthorityAssignment:
+      type: object
+      additionalProperties: false
+      required: [authorityId, role, slateId, registered, startsAt, endsAt, cancelled, manifestHash]
+      properties:
+        authorityId:
+          $ref: "./elections/schemas.json#/$defs/Uuid"
+        role:
+          enum: [commission, slate]
+        slateId:
+          anyOf:
+            - $ref: "./elections/schemas.json#/$defs/Uuid"
+            - type: "null"
+        registered:
+          type: boolean
+        startsAt:
+          $ref: "./elections/schemas.json#/$defs/Time"
+        endsAt:
+          $ref: "./elections/schemas.json#/$defs/Time"
+        cancelled:
+          type: boolean
+        manifestHash:
+          anyOf:
+            - $ref: "./elections/schemas.json#/$defs/Hash"
+            - type: "null"
+    SignedAuthorityRegistration:
+      $ref: "./elections/schemas.json#/$defs/SignedAuthorityRegistration"
+    SignedShare:
+      $ref: "./elections/schemas.json#/$defs/SignedDecryptionShare"
+    SignedTallyResult:
+      $ref: "./elections/schemas.json#/$defs/SignedResult"
+    ElectionTally:
+      type: object
+      additionalProperties: false
+      required: [shares, result]
+      properties:
+        shares:
+          type: array
+          items:
+            $ref: "#/components/schemas/SignedShare"
+        result:
+          description: Resultado assinado. Nulo enquanto nenhuma autoridade contribuiu.
+          anyOf:
+            - $ref: "#/components/schemas/SignedTallyResult"
+            - type: "null"
     ElectionBoardSnapshot:
       type: object
       additionalProperties: false
-      required: [manifest, calendarOrigin, entries, checkpoint, closure, aggregate]
+      required: [manifest, startsAt, endsAt, entries, checkpoint, closure, aggregate]
       properties:
         manifest:
-          $ref: "#/components/schemas/ElectionEvidence"
-        calendarOrigin:
-          $ref: "#/components/schemas/ElectionEvidence"
+          $ref: "./elections/schemas.json#/$defs/SignedManifest"
+        startsAt:
+          $ref: "./elections/schemas.json#/$defs/Time"
+          description: Início do período de votação vigente informado pela eleição.
+        endsAt:
+          $ref: "./elections/schemas.json#/$defs/Time"
+          description: Fim do período de votação vigente informado pela eleição.
         entries:
           type: array
           items:
-            $ref: "#/components/schemas/ElectionEvidence"
+            $ref: "./elections/schemas.json#/$defs/SignedBoardEntry"
         checkpoint:
           description: Último recibo confirmado. Nulo antes do primeiro voto.
           anyOf:
-            - $ref: "#/components/schemas/ElectionEvidence"
+            - $ref: "./elections/schemas.json#/$defs/SignedReceipt"
             - type: "null"
         closure:
           description: Termo assinado ao encerrar a votação.
           anyOf:
-            - $ref: "#/components/schemas/ElectionEvidence"
+            - $ref: "./elections/schemas.json#/$defs/SignedClosure"
             - type: "null"
         aggregate:
           description: Produto das cifras vinculado ao termo de encerramento.
           anyOf:
-            - $ref: "#/components/schemas/ElectionEvidence"
+            - $ref: "./elections/schemas.json#/$defs/SignedAggregate"
             - type: "null"
+        cancellation:
+          $ref: "#/components/schemas/ElectionCancellation"
     InternalUserResponse:
       type: object
       required: [id, status, nickname, email, currentSemester, institutionEntrySemester]
