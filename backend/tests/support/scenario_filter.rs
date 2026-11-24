@@ -6,7 +6,7 @@ use cucumber::gherkin::{Feature, Rule, Scenario};
 ///
 /// Tags da feature, da regra e do cenário são consideradas. A pendência do
 /// mobile não impede a execução no backend, nem substitui os filtros da CLI.
-pub(super) fn is_pending_backend(
+pub(crate) fn is_pending_backend(
     feature: &Feature,
     rule: Option<&Rule>,
     scenario: &Scenario,

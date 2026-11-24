@@ -21,7 +21,7 @@
 
 mod database;
 pub(crate) mod results;
-mod scenario_filter;
+pub(crate) mod scenario_filter;
 pub(crate) mod world;
 
 use std::{path::PathBuf, sync::Arc};
@@ -96,7 +96,8 @@ pub(crate) async fn run(features_path: PathBuf, required_tag: Option<&'static st
         .max_concurrent_scenarios(4)
         .before(move |feature, rule, scenario, world| {
             let suite = Arc::clone(&before_suite);
-            let isolated = has_isolated_database_tag(feature, rule, scenario);
+            let isolated =
+                required_tag.is_some() || has_isolated_database_tag(feature, rule, scenario);
             async move { world.attach_database(&suite, isolated).await }.boxed_local()
         })
         .after(move |_, _, _, _, world| {

@@ -2,7 +2,7 @@
 
 # Referência: Relatório de Features do Projeto, seção 4.4.
 # A referência não define uma ordenação específica para os eventos.
-@backend @mobile @pending_backend @pending_mobile
+@backend @mobile @pending_mobile
 Funcionalidade: Visualização de eventos publicados
 
   Como estudante
