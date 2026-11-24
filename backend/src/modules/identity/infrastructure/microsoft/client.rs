@@ -1,19 +1,23 @@
 //! Consultas ao perfil e aos vínculos do usuário no Microsoft Graph.
 
-use std::time::Duration;
-
 use reqwest::{Client, RequestBuilder, StatusCode};
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
-use crate::modules::identity::{
-    application::{
-        error::AuthenticationError,
-        ports::{InstitutionalAffiliation, InstitutionalDirectory, InstitutionalProfile},
+use crate::{
+    config::{
+        HttpConfig, is_permanent_client_error, is_retryable_error, is_retryable_status,
+        parse_retry_after,
     },
-    infrastructure::microsoft::dto::{
-        GraphCheckMemberGroupsRequest, GraphCheckMemberGroupsResponse, GraphOrganizationsResponse,
-        GraphUserResponse,
+    modules::identity::{
+        application::{
+            error::AuthenticationError,
+            ports::{InstitutionalAffiliation, InstitutionalDirectory, InstitutionalProfile},
+        },
+        infrastructure::microsoft::dto::{
+            GraphCheckMemberGroupsRequest, GraphCheckMemberGroupsResponse,
+            GraphOrganizationsResponse, GraphUserResponse,
+        },
     },
 };
 
@@ -26,15 +30,17 @@ pub struct MicrosoftGraphClient {
     http: Client,
     /// Origem fixa em produção; substituída por Wiremock apenas nos testes.
     base_url: String,
+    /// Configurações de timeout e retentativa segura.
+    http_config: HttpConfig,
 }
 
 impl MicrosoftGraphClient {
-    /// Constrói o adaptador a partir de um cliente HTTP já configurado.
+    /// Constrói o adaptador a partir de um cliente HTTP já configurado e timeouts padrão.
     ///
     /// # Parâmetros
     ///
     /// - `http`: cliente reutilizável com redirecionamentos desabilitados, para manter
-    ///   as credenciais nas origens esperadas. Os métodos impõem timeout de cinco segundos.
+    ///   as credenciais nas origens esperadas.
     ///
     /// # Retorno
     ///
@@ -52,22 +58,54 @@ impl MicrosoftGraphClient {
     /// # Ok::<(), reqwest::Error>(())
     /// ```
     pub fn new(http: Client) -> Self {
+        Self::with_config(http, HttpConfig::default())
+    }
+
+    /// Constrói o adaptador com parâmetros explícitos de timeout e retentativa.
+    ///
+    /// # Parâmetros
+    ///
+    /// - `http`: cliente reutilizável com redirecionamento desabilitado.
+    /// - `http_config`: configuração de timeouts e política de retentativa com backoff.
+    pub fn with_config(http: Client, http_config: HttpConfig) -> Self {
         Self {
             http,
             base_url: "https://graph.microsoft.com/v1.0".to_owned(),
+            http_config,
         }
     }
 
     /// Usa uma origem local de teste sem alterar o construtor público.
+    #[allow(dead_code)]
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn new_with_base_url(http: Client, base_url: String) -> Self {
-        Self { http, base_url }
+        Self::new_with_base_url_and_config(http, base_url, HttpConfig::default())
     }
 
-    /// Executa uma requisição interna com Bearer e timeout de cinco segundos.
+    /// Usa uma origem local de teste com configuração customizada de timeouts e retentativas.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn new_with_base_url_and_config(
+        http: Client,
+        base_url: String,
+        http_config: HttpConfig,
+    ) -> Self {
+        Self {
+            http,
+            base_url,
+            http_config,
+        }
+    }
+
+    /// Executa uma requisição interna com Bearer, timeout e retentativa segura.
     ///
-    /// Os métodos deste adaptador constroem URLs fixas do Graph. Não registra o token
-    /// nem o corpo recebido. A requisição não é repetida automaticamente em caso de erro.
+    /// Aplica política de retentativa com backoff exponencial e jitter apenas para
+    /// falhas transitórias (erros de rede/timeout ou HTTP 429, 502, 503, 504).
+    /// Erros definitivos do cliente (400, 401, 403, 404) nunca são repetidos.
+    ///
+    /// # Invariantes de Segurança
+    ///
+    /// - Nunca registra o token nem o corpo recebido em logs ou mensagens de erro.
+    /// - Redirecionamentos permanecem desabilitados no cliente HTTP.
     ///
     /// # Retorno
     ///
@@ -76,44 +114,86 @@ impl MicrosoftGraphClient {
     /// # Erros
     ///
     /// 401 vira `InvalidToken`; qualquer outro status diferente de 200, falha de rede,
-    /// timeout ou JSON incompatível vira `ProviderUnavailable`. Em particular, 403 ou
-    /// 429 do Graph não são interpretados como ausência de vínculo estudantil.
+    /// timeout ou JSON incompatível vira `ProviderUnavailable`.
     async fn send_json<T: DeserializeOwned>(
         &self,
-        request: RequestBuilder,
+        make_request: impl Fn() -> RequestBuilder,
         access_token: &str,
     ) -> Result<T, AuthenticationError> {
-        let response = request
-            .bearer_auth(access_token)
-            .timeout(Duration::from_secs(5))
-            .send()
-            .await
-            .map_err(|error| {
-                tracing::warn!(
-                    timeout = error.is_timeout(),
-                    "Falha de comunicação com Microsoft Graph"
-                );
-                AuthenticationError::ProviderUnavailable
-            })?;
+        let mut retries = 0;
 
-        let status = response.status();
+        loop {
+            let request = make_request()
+                .bearer_auth(access_token)
+                .timeout(self.http_config.request_timeout);
 
-        if status == StatusCode::UNAUTHORIZED {
-            return Err(AuthenticationError::InvalidToken);
+            let result = request.send().await;
+
+            match result {
+                Ok(response) => {
+                    let status = response.status();
+
+                    if status == StatusCode::UNAUTHORIZED {
+                        return Err(AuthenticationError::InvalidToken);
+                    }
+
+                    if is_permanent_client_error(status) {
+                        tracing::warn!(
+                            %status,
+                            "Microsoft Graph retornou erro definitivo do cliente; sem retentativa"
+                        );
+                        return Err(AuthenticationError::ProviderUnavailable);
+                    }
+
+                    if is_retryable_status(status) && retries < self.http_config.max_retries {
+                        retries += 1;
+                        let retry_after = parse_retry_after(response.headers());
+                        let delay = self.http_config.compute_backoff(retries, retry_after);
+                        tracing::warn!(
+                            %status,
+                            retries,
+                            delay_ms = delay.as_millis(),
+                            "Microsoft Graph retornou falha transitória; aguardando retentativa"
+                        );
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+
+                    if status != StatusCode::OK {
+                        tracing::warn!(
+                            %status,
+                            "Microsoft Graph não permitiu concluir a consulta"
+                        );
+                        return Err(AuthenticationError::ProviderUnavailable);
+                    }
+
+                    return response.json().await.map_err(|_| {
+                        tracing::warn!("Microsoft Graph retornou uma resposta inesperada");
+                        AuthenticationError::ProviderUnavailable
+                    });
+                }
+                Err(error) => {
+                    if is_retryable_error(&error) && retries < self.http_config.max_retries {
+                        retries += 1;
+                        let delay = self.http_config.compute_backoff(retries, None);
+                        tracing::warn!(
+                            timeout = error.is_timeout(),
+                            retries,
+                            delay_ms = delay.as_millis(),
+                            "Falha de transporte/timeout com Microsoft Graph; aguardando retentativa"
+                        );
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+
+                    tracing::warn!(
+                        timeout = error.is_timeout(),
+                        "Falha de comunicação com Microsoft Graph"
+                    );
+                    return Err(AuthenticationError::ProviderUnavailable);
+                }
+            }
         }
-
-        if status != StatusCode::OK {
-            tracing::warn!(
-                %status,
-                "Microsoft Graph não permitiu concluir a consulta"
-            );
-            return Err(AuthenticationError::ProviderUnavailable);
-        }
-
-        response.json().await.map_err(|_| {
-            tracing::warn!("Microsoft Graph retornou uma resposta inesperada");
-            AuthenticationError::ProviderUnavailable
-        })
     }
 }
 
@@ -125,12 +205,14 @@ impl InstitutionalDirectory for MicrosoftGraphClient {
     /// mais de uma organização. Retorna seu UUID sem interpretar localmente o access
     /// token Microsoft. Falhas seguem a classificação de `send_json`.
     async fn get_tenant_id(&self, access_token: &str) -> Result<Uuid, AuthenticationError> {
-        let request = self
-            .http
-            .get(format!("{}/organization", self.base_url))
-            .query(&[("$select", "id")]);
+        let base_url = self.base_url.clone();
+        let make_request = || {
+            self.http
+                .get(format!("{base_url}/organization"))
+                .query(&[("$select", "id")])
+        };
         let [organization] = self
-            .send_json::<GraphOrganizationsResponse>(request, access_token)
+            .send_json::<GraphOrganizationsResponse>(make_request, access_token)
             .await?
             .value;
 
@@ -153,12 +235,14 @@ impl InstitutionalDirectory for MicrosoftGraphClient {
         access_token: &str,
         is_student: bool,
     ) -> Result<InstitutionalProfile, AuthenticationError> {
-        let request = self
-            .http
-            .get(format!("{}/me", self.base_url))
-            .query(&[("$select", "id,displayName,mail,jobTitle")]);
+        let base_url = self.base_url.clone();
+        let make_request = || {
+            self.http
+                .get(format!("{base_url}/me"))
+                .query(&[("$select", "id,displayName,mail,jobTitle")])
+        };
         let user = self
-            .send_json::<GraphUserResponse>(request, access_token)
+            .send_json::<GraphUserResponse>(make_request, access_token)
             .await?;
 
         Ok(InstitutionalProfile {
@@ -187,13 +271,15 @@ impl InstitutionalDirectory for MicrosoftGraphClient {
             group_ids: [student_group_id],
         };
 
-        let request = self
-            .http
-            .post(format!("{}/me/checkMemberGroups", self.base_url))
-            .json(&body);
+        let base_url = self.base_url.clone();
+        let make_request = || {
+            self.http
+                .post(format!("{base_url}/me/checkMemberGroups"))
+                .json(&body)
+        };
 
         let response = self
-            .send_json::<GraphCheckMemberGroupsResponse>(request, access_token)
+            .send_json::<GraphCheckMemberGroupsResponse>(make_request, access_token)
             .await?;
 
         Ok(response.value.contains(&student_group_id))

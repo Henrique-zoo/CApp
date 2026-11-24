@@ -175,6 +175,51 @@ impl FirebaseTokenVerifier {
     /// # Ok::<(), anyhow::Error>(())
     /// ```
     pub fn new(project_id: String, http: Client) -> anyhow::Result<Self> {
+        Self::with_config(project_id, http, crate::config::HttpConfig::default())
+    }
+
+    /// Constrói o verificador com configuração customizada de timeouts e retentativas.
+    pub fn with_config(
+        project_id: String,
+        http: Client,
+        http_config: crate::config::HttpConfig,
+    ) -> anyhow::Result<Self> {
+        Self::build(project_id, http, JWKS_URL.to_owned(), http_config)
+    }
+
+    /// Constrói um verificador com JWKS local exclusivamente para testes.
+    #[allow(dead_code)]
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn new_with_endpoint(
+        project_id: String,
+        http: Client,
+        jwks_url: String,
+    ) -> anyhow::Result<Self> {
+        Self::new_with_endpoint_and_config(
+            project_id,
+            http,
+            jwks_url,
+            crate::config::HttpConfig::default(),
+        )
+    }
+
+    /// Constrói um verificador com JWKS local e configuração customizada exclusivamente para testes.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn new_with_endpoint_and_config(
+        project_id: String,
+        http: Client,
+        jwks_url: String,
+        http_config: crate::config::HttpConfig,
+    ) -> anyhow::Result<Self> {
+        Self::build(project_id, http, jwks_url, http_config)
+    }
+
+    fn build(
+        project_id: String,
+        http: Client,
+        jwks_url: String,
+        http_config: crate::config::HttpConfig,
+    ) -> anyhow::Result<Self> {
         anyhow::ensure!(
             !project_id.is_empty() && !project_id.chars().any(char::is_whitespace),
             "FIREBASE_PROJECT_ID deve conter um ID de projeto válido"
@@ -192,23 +237,9 @@ impl FirebaseTokenVerifier {
         validation.validate_nbf = true;
 
         Ok(Self {
-            keys: JwksCache::new(http, JWKS_URL.to_owned(), CACHE_POLICY),
+            keys: JwksCache::with_config(http, jwks_url, CACHE_POLICY, http_config),
             validation,
         })
-    }
-
-    /// Constrói um verificador com JWKS local exclusivamente para testes.
-    #[cfg(any(test, feature = "test-support"))]
-    pub(crate) fn new_with_endpoint(
-        project_id: String,
-        http: Client,
-        jwks_url: String,
-    ) -> anyhow::Result<Self> {
-        let mut verifier = Self::new(project_id, http.clone())?;
-
-        verifier.keys = JwksCache::new(http, jwks_url, CACHE_POLICY);
-
-        Ok(verifier)
     }
 }
 

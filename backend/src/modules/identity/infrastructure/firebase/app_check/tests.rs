@@ -240,15 +240,16 @@ async fn jwks_failure_is_unavailability_with_backoff() {
 
     Mock::given(path("/jwks"))
         .respond_with(ResponseTemplate::new(503))
-        .expect(1)
+        .expect(3)
         .mount(&server)
         .await;
 
-    let v = AppCheckVerifier::new_with_endpoint(
+    let v = AppCheckVerifier::new_with_endpoint_and_config(
         NUMBER.into(),
         vec![APP.into()],
         Client::new(),
         format!("{}/jwks", server.uri()),
+        crate::config::HttpConfig::default_for_test(),
     )
     .unwrap();
 

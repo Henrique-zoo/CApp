@@ -20,7 +20,12 @@ const TEST_JWKS: &str = include_str!(concat!(
 ));
 
 fn new_test_keys(server: &MockServer) -> JwksCache {
-    JwksCache::new(Client::new(), format!("{}/keys", server.uri()), HTTP_POLICY)
+    JwksCache::with_config(
+        Client::new(),
+        format!("{}/keys", server.uri()),
+        HTTP_POLICY,
+        HttpConfig::default_for_test(),
+    )
 }
 
 async fn mock_jwks(server: &MockServer, max_age: u64, expected_calls: u64) {
@@ -92,7 +97,7 @@ async fn expired_known_keys_are_not_used_during_backoff() {
     server.verify().await;
 }
 
-/// Falha HTTP do JWKS é indisponibilidade e ativa backoff.
+/// Falha HTTP do JWKS é indisponibilidade e ativa backoff após esgotar retentativas.
 #[tokio::test]
 async fn server_failure_is_provider_unavailable() {
     let server = MockServer::start().await;
@@ -100,7 +105,7 @@ async fn server_failure_is_provider_unavailable() {
     Mock::given(method("GET"))
         .and(path("/keys"))
         .respond_with(ResponseTemplate::new(503))
-        .expect(1)
+        .expect(3)
         .mount(&server)
         .await;
 
@@ -318,7 +323,7 @@ async fn failed_refresh_preserves_valid_known_keys() {
 
     Mock::given(path("/keys"))
         .respond_with(ResponseTemplate::new(503))
-        .expect(1)
+        .expect(3)
         .mount(&server)
         .await;
 
@@ -445,4 +450,137 @@ fn multiple_cache_control_headers_use_the_shortest_valid_ttl() {
     headers.append(CACHE_CONTROL, "max-age=invalid".parse().unwrap());
 
     assert_eq!(cache_ttl(&headers, HTTP_POLICY), Duration::ZERO);
+}
+
+/// Falha transitória 503 na busca de JWKS seguida de 200 OK conclui com sucesso após retentativa.
+#[tokio::test]
+async fn jwks_transient_503_then_200_succeeds() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/keys"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/keys"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("Cache-Control", "public, max-age=300")
+                .set_body_raw(TEST_JWKS, "application/json"),
+        )
+        .mount(&server)
+        .await;
+
+    let verifier = new_test_keys(&server);
+    let key = verifier.key_for("test-kid").await;
+    assert!(key.is_ok(), "deve obter a chave após a retentativa");
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "deve ter realizado exatamente 2 requisições"
+    );
+}
+
+/// Falha transitória 429 na busca de JWKS com Retry-After seguida de 200 OK conclui com sucesso.
+#[tokio::test]
+async fn jwks_transient_429_then_200_succeeds() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/keys"))
+        .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "0"))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/keys"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("Cache-Control", "public, max-age=300")
+                .set_body_raw(TEST_JWKS, "application/json"),
+        )
+        .mount(&server)
+        .await;
+
+    let verifier = new_test_keys(&server);
+    let key = verifier.key_for("test-kid").await;
+    assert!(key.is_ok(), "deve obter a chave após a retentativa");
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "deve ter realizado exatamente 2 requisições"
+    );
+}
+
+/// Erros definitivos do cliente (400, 401, 403, 404) na busca de JWKS não realizam retentativa.
+#[tokio::test]
+async fn jwks_permanent_client_errors_do_not_retry() {
+    for status in [400, 401, 403, 404] {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/keys"))
+            .respond_with(ResponseTemplate::new(status))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let verifier = new_test_keys(&server);
+        let result = verifier.key_for("test-kid").await;
+        assert!(matches!(result, Err(JwksError::Unavailable)));
+
+        server.verify().await;
+    }
+}
+
+/// Resposta lenta na busca de JWKS estoura o timeout e retenta até o esgotamento.
+#[tokio::test]
+async fn jwks_slow_response_times_out_and_retries() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/keys"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_millis(150))
+                .set_body_raw(TEST_JWKS, "application/json"),
+        )
+        .expect(3)
+        .mount(&server)
+        .await;
+
+    let config = HttpConfig {
+        connect_timeout: Duration::from_millis(30),
+        request_timeout: Duration::from_millis(30),
+        max_retries: 2,
+        min_retry_delay: Duration::from_millis(1),
+        max_retry_delay: Duration::from_millis(5),
+    };
+
+    let client_http = Client::builder()
+        .connect_timeout(config.connect_timeout)
+        .timeout(config.request_timeout)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+
+    let verifier = JwksCache::with_config(
+        client_http,
+        format!("{}/keys", server.uri()),
+        HTTP_POLICY,
+        config,
+    );
+
+    let result = verifier.key_for("test-kid").await;
+    assert!(matches!(result, Err(JwksError::Unavailable)));
+
+    server.verify().await;
 }

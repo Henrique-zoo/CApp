@@ -10,8 +10,9 @@ use axum::{
 };
 use backend::{
     api::state::AppState,
+    config::HttpConfig,
     infrastructure::database::PgDatabase,
-    test_support::{identity_router, local_identity_clients},
+    test_support::{identity_router, local_identity_clients_with_config},
 };
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -172,17 +173,16 @@ async fn institutional_http_flows_with_real_database() {
         .mount(&jwks)
         .await;
 
-    let http = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .unwrap();
+    let http_config = HttpConfig::default_for_test();
+    let http = http_config.build_client().unwrap();
     let state = AppState::new(
         PgDatabase::new(pool.clone()),
-        local_identity_clients(
+        local_identity_clients_with_config(
             PROJECT.into(),
             http,
             format!("{}/keys", jwks.uri()),
             format!("{}/v1.0", graph.uri()),
+            http_config.clone(),
         )
         .unwrap(),
     );
@@ -604,7 +604,7 @@ async fn institutional_http_flows_with_real_database() {
     graph.reset().await;
     Mock::given(path("/v1.0/organization"))
         .respond_with(ResponseTemplate::new(503))
-        .expect(1)
+        .expect(1 + u64::from(http_config.max_retries))
         .mount(&graph)
         .await;
 
@@ -618,6 +618,9 @@ async fn institutional_http_flows_with_real_database() {
 
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(body["error"]["code"], "authentication_provider_unavailable");
+
+    graph.verify().await;
+    graph.reset().await;
 
     pool.close().await;
 
