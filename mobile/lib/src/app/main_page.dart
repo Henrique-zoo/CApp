@@ -27,6 +27,7 @@ class MainPage extends StatefulWidget {
     required this.state,
     required this.onSignOut,
     this.electionHome,
+    this.eventsHome,
   });
 
   /// Fotografia do ramo pronto; a identidade da subárvore pertence ao gate.
@@ -34,6 +35,9 @@ class MainPage extends StatefulWidget {
 
   /// Eleição apresentada na aba Início da sessão atual.
   final Widget? electionHome;
+
+  /// Agenda de eventos publicados do Centro Acadêmico ativo.
+  final Widget? eventsHome;
 
   /// Executa o modo confirmado na Conta, com tratamento de falhas na composição.
   final Future<void> Function(AccountSignOutMode mode) onSignOut;
@@ -45,9 +49,31 @@ class MainPage extends StatefulWidget {
 class _MainPageState extends State<MainPage> {
   int _selectedIndex = 0;
 
+  String get _title {
+    switch (_selectedIndex) {
+      case 0:
+        return 'CApp';
+      case 1:
+        return 'Eventos';
+      default:
+        return 'Conta';
+    }
+  }
+
+  Widget _buildTabContent() {
+    switch (_selectedIndex) {
+      case 0:
+        return widget.electionHome ?? const SizedBox.expand();
+      case 1:
+        return widget.eventsHome ?? const SizedBox.expand();
+      default:
+        return AccountPage(state: widget.state, onSignOut: widget.onSignOut);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(_selectedIndex == 0 ? 'CApp' : 'Conta')),
+    appBar: AppBar(title: Text(_title)),
     body: Column(
       children: [
         if (widget.state.verification!.profile.affiliation
@@ -59,11 +85,7 @@ class _MainPageState extends State<MainPage> {
               child: LimitedStudentAccessNotice(),
             ),
           ),
-        Expanded(
-          child: _selectedIndex == 0
-              ? (widget.electionHome ?? const SizedBox.expand())
-              : AccountPage(state: widget.state, onSignOut: widget.onSignOut),
-        ),
+        Expanded(child: _buildTabContent()),
       ],
     ),
     bottomNavigationBar: NavigationBar(
@@ -77,6 +99,11 @@ class _MainPageState extends State<MainPage> {
           icon: Icon(Icons.home_outlined),
           selectedIcon: Icon(Icons.home),
           label: 'Início',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.event_outlined),
+          selectedIcon: Icon(Icons.event),
+          label: 'Eventos',
         ),
         NavigationDestination(
           icon: Icon(Icons.person_outline),
