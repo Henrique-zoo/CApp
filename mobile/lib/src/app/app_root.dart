@@ -32,7 +32,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../modules/demands/demands.dart';
+import '../modules/demands/demands_widgets.dart';
 import '../modules/elections/elections_widgets.dart';
+import '../modules/identity/identity.dart';
 import 'app_dependencies.dart';
 import 'capp.dart';
 import 'session_lifecycle_observer.dart';
@@ -63,6 +66,9 @@ class AppRoot extends StatefulWidget {
     required this.dependencies,
     this.electionId = '',
     this.manifestHash = '',
+    this.academicCenterId = '',
+    this.academicCenterName = '',
+    this.isCaManager = false,
   });
 
   /// Composição utilizada pela interface e pertencente a este proprietário.
@@ -76,6 +82,15 @@ class AppRoot extends StatefulWidget {
 
   /// Âncora independente usada para conferir o manifesto servido pela API.
   final String manifestHash;
+
+  /// Identificador (UUID) do Centro Acadêmico ativo para consulta de demandas.
+  final String academicCenterId;
+
+  /// Nome de exibição opcional do Centro Acadêmico ativo.
+  final String academicCenterName;
+
+  /// Indica se a sessão atual atua com papel de gestão do Centro Acadêmico.
+  final bool isCaManager;
 
   /// Cria o estado responsável pela montagem e pelo descarte da composição.
   @override
@@ -107,12 +122,66 @@ class _AppRootState extends State<AppRoot> {
         oldWidget.manifestHash != widget.manifestHash) {
       _localManifestHash = null;
     }
+    if (oldWidget.academicCenterId != widget.academicCenterId) {
+      _localAcademicCenterId = null;
+      _disposeDemandsController();
+    }
     if (!identical(oldWidget.dependencies, widget.dependencies)) {
+      _disposeDemandsController();
       unawaited(_disposeDependencies(oldWidget.dependencies));
     }
   }
 
   String? _localManifestHash;
+  String? _localAcademicCenterId;
+  DemandsController? _demandsController;
+  String? _demandsControllerKey;
+
+  void _disposeDemandsController() {
+    _demandsController?.dispose();
+    _demandsController = null;
+    _demandsControllerKey = null;
+  }
+
+  Future<void> _enterAcademicCenterId(BuildContext context) async {
+    final input = TextEditingController(
+      text: _localAcademicCenterId ?? widget.academicCenterId,
+    );
+    final rawId = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Centro Acadêmico'),
+        content: TextField(
+          controller: input,
+          decoration: const InputDecoration(
+            labelText: 'Identificador UUID do Centro Acadêmico',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, input.text.trim()),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+    input.dispose();
+    if (!mounted || !context.mounted || rawId == null) return;
+    if (!Uuid.isValidUUIDFormat(fromString: rawId)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe um UUID válido para o CA.')),
+      );
+      return;
+    }
+    setState(() {
+      _localAcademicCenterId = rawId.toLowerCase();
+      _disposeDemandsController();
+    });
+  }
 
   Future<void> _enterManifestHash(BuildContext context) async {
     final reference = TextEditingController();
@@ -213,6 +282,78 @@ class _AppRootState extends State<AppRoot> {
     );
   }
 
+  Widget _buildDemandsHome(BuildContext context, SessionSignedIn state) {
+    final rawCenterId = _localAcademicCenterId ?? widget.academicCenterId;
+    if (rawCenterId.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Nenhum Centro Acadêmico ativo configurado.'),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: () => _enterAcademicCenterId(context),
+                child: const Text('Informar Centro Acadêmico'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (!Uuid.isValidUUIDFormat(fromString: rawCenterId)) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Centro Acadêmico não configurado.'),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: () => _enterAcademicCenterId(context),
+                child: const Text('Informar Centro Acadêmico'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final academicCenterId = UuidValue.withFormatValidation(
+      rawCenterId.toLowerCase(),
+    );
+    final affiliation = state.verification?.profile.affiliation;
+    final courseName = affiliation is StudentAffiliation
+        ? affiliation.courseName
+        : null;
+    final key =
+        '${state.firebaseUid}|${academicCenterId.uuid}|${state.user?.id.uuid}|'
+        '$courseName|${widget.isCaManager}';
+
+    if (_demandsController == null || _demandsControllerKey != key) {
+      _demandsController?.dispose();
+      _demandsControllerKey = key;
+      _demandsController = DemandsController(
+        gateway: widget.dependencies.demandsGateway,
+        academicCenterId: academicCenterId,
+        academicCenterName: widget.academicCenterName.isEmpty
+            ? null
+            : widget.academicCenterName,
+        currentUserId: state.user?.id,
+        userCourseName: courseName,
+        hasStudentMembership: affiliation is StudentAffiliation,
+        isCaManager: widget.isCaManager,
+      );
+    }
+
+    return DemandsHome(
+      controller: _demandsController!,
+      onChangeAcademicCenter: () => _enterAcademicCenterId(context),
+    );
+  }
+
   /// Monta a interface com os controladores da composição atual.
   ///
   /// A identidade da composição preserva a interface em reconstruções
@@ -226,6 +367,7 @@ class _AppRootState extends State<AppRoot> {
       controller: widget.dependencies.sessionController,
       child: CApp(
         electionHome: Builder(builder: _buildElectionHome),
+        demandsHomeBuilder: _buildDemandsHome,
         sessionController: widget.dependencies.sessionController,
         backendReadinessController:
             widget.dependencies.backendReadinessController,
@@ -244,6 +386,7 @@ class _AppRootState extends State<AppRoot> {
   /// operações correspondentes, sem depender deste método.
   @override
   void dispose() {
+    _disposeDemandsController();
     unawaited(_disposeDependencies(widget.dependencies));
 
     super.dispose();

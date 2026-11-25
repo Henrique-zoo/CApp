@@ -27,6 +27,7 @@ class MainPage extends StatefulWidget {
     required this.state,
     required this.onSignOut,
     this.electionHome,
+    this.demandsHome,
   });
 
   /// Fotografia do ramo pronto; a identidade da subárvore pertence ao gate.
@@ -34,6 +35,9 @@ class MainPage extends StatefulWidget {
 
   /// Eleição apresentada na aba Início da sessão atual.
   final Widget? electionHome;
+
+  /// Consulta e acompanhamento dos fóruns de demandas na aba Demandas.
+  final Widget? demandsHome;
 
   /// Executa o modo confirmado na Conta, com tratamento de falhas na composição.
   final Future<void> Function(AccountSignOutMode mode) onSignOut;
@@ -47,7 +51,13 @@ class _MainPageState extends State<MainPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(_selectedIndex == 0 ? 'CApp' : 'Conta')),
+    appBar: AppBar(
+      title: Text(switch (_selectedIndex) {
+        0 => 'CApp',
+        1 => 'Demandas',
+        _ => 'Conta',
+      }),
+    ),
     body: Column(
       children: [
         if (widget.state.verification!.profile.affiliation
@@ -60,9 +70,15 @@ class _MainPageState extends State<MainPage> {
             ),
           ),
         Expanded(
-          child: _selectedIndex == 0
-              ? (widget.electionHome ?? const SizedBox.expand())
-              : AccountPage(state: widget.state, onSignOut: widget.onSignOut),
+          child: switch (_selectedIndex) {
+            0 => widget.electionHome ?? const SizedBox.expand(),
+            1 =>
+              widget.demandsHome ??
+                  const Center(
+                    child: Text('Nenhum fórum de demandas disponível.'),
+                  ),
+            _ => AccountPage(state: widget.state, onSignOut: widget.onSignOut),
+          },
         ),
       ],
     ),
@@ -77,6 +93,11 @@ class _MainPageState extends State<MainPage> {
           icon: Icon(Icons.home_outlined),
           selectedIcon: Icon(Icons.home),
           label: 'Início',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.forum_outlined),
+          selectedIcon: Icon(Icons.forum),
+          label: 'Demandas',
         ),
         NavigationDestination(
           icon: Icon(Icons.person_outline),
