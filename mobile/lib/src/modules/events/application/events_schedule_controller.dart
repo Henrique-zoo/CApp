@@ -14,9 +14,9 @@ final class EventsScheduleController extends ChangeNotifier {
     required EventsGateway gateway,
     List<AcademicCenterContext> academicCenters = const [],
     AcademicCenterContext? initialAcademicCenter,
-  }) : // ignore: prefer_initializing_formals
+  }) : _academicCenters = List.unmodifiable(academicCenters),
+       // ignore: prefer_initializing_formals
        _gateway = gateway,
-       _academicCenters = List.unmodifiable(academicCenters),
        _activeAcademicCenter =
            initialAcademicCenter ??
            (academicCenters.isNotEmpty ? academicCenters.first : null);
@@ -69,8 +69,7 @@ final class EventsScheduleController extends ChangeNotifier {
 
       _events = List.unmodifiable(
         fetched.where(
-          (event) =>
-              event.isPublished && event.academicCenterId == activeCa.id,
+          (event) => event.isPublished && event.academicCenterId == activeCa.id,
         ),
       );
       _isLoading = false;
@@ -96,7 +95,9 @@ final class EventsScheduleController extends ChangeNotifier {
   }
 
   /// Altera o Centro Acadêmico ativo e recarrega imediatamente a lista de eventos publicados.
-  Future<void> selectAcademicCenter(AcademicCenterContext academicCenter) async {
+  Future<void> selectAcademicCenter(
+    AcademicCenterContext academicCenter,
+  ) async {
     if (!_academicCenters.contains(academicCenter)) {
       _academicCenters = List.unmodifiable([
         ..._academicCenters,
