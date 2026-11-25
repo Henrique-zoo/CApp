@@ -47,7 +47,7 @@ Iterable<File> _sources(String root) => Directory(root)
 /// Registra os limites fiscalizáveis pelas diretivas das bibliotecas.
 void main() {
   test('aplicação não depende de outras camadas ou módulos', () {
-    for (final module in ['identity', 'elections']) {
+    for (final module in ['identity', 'elections', 'events']) {
       final path = 'lib/src/modules/$module/application';
       final root = Directory(path).absolute.uri.toString();
       for (final source in _sources(path)) {
@@ -64,27 +64,29 @@ void main() {
   });
 
   test('apresentação preserva as fronteiras do módulo e dos adaptadores', () {
-    final identity = Directory('lib/src/modules/identity').absolute.uri
-        .toString();
     final sharedPresentation = File('lib/src/presentation/presentation.dart')
         .absolute
         .uri
         .toString();
-    for (final source in _sources('lib/src/modules/identity/presentation')) {
-      for (final uri in _directives(source)) {
-        if (_isExternalDependency(uri)) continue;
-        final target = _target(source, uri);
-        if (target == sharedPresentation) continue;
-        expect(
-          target.startsWith(identity),
-          isTrue,
-          reason: '${source.path} depende de $uri',
-        );
-        expect(
-          target.contains('/infrastructure/'),
-          isFalse,
-          reason: '${source.path} acessa uma implementação',
-        );
+    for (final module in ['identity', 'events']) {
+      final moduleRoot = Directory('lib/src/modules/$module').absolute.uri
+          .toString();
+      for (final source in _sources('lib/src/modules/$module/presentation')) {
+        for (final uri in _directives(source)) {
+          if (_isExternalDependency(uri)) continue;
+          final target = _target(source, uri);
+          if (target == sharedPresentation) continue;
+          expect(
+            target.startsWith(moduleRoot),
+            isTrue,
+            reason: '${source.path} depende de $uri',
+          );
+          expect(
+            target.contains('/infrastructure/'),
+            isFalse,
+            reason: '${source.path} acessa uma implementação',
+          );
+        }
       }
     }
   });
@@ -155,6 +157,8 @@ void main() {
       ('lib/src/modules/identity/identity.dart', 'application/'),
       ('lib/src/modules/identity/identity_widgets.dart', 'presentation/'),
       ('lib/src/modules/elections/elections.dart', 'application/'),
+      ('lib/src/modules/events/events.dart', 'application/'),
+      ('lib/src/modules/events/events_widgets.dart', 'presentation/'),
     ]) {
       for (final uri in _directives(File(api.$1))) {
         expect(uri.startsWith(api.$2), isTrue, reason: '${api.$1}: $uri');
