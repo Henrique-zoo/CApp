@@ -17,7 +17,7 @@ import 'ports/demands_gateway.dart';
 /// Controlador reativo para consulta e acompanhamento dos fóruns de demandas.
 final class DemandsController extends ChangeNotifier {
   DemandsController({
-    required DemandsGateway gateway,
+    required this._gateway,
     required this.academicCenterId,
     this.academicCenterName,
     this.currentUserId,
@@ -25,8 +25,7 @@ final class DemandsController extends ChangeNotifier {
     this.hasStudentMembership = true,
     this.isCaManager = false,
     DemandForum initialForum = DemandForum.institutional,
-  }) : _gateway = gateway,
-       _selectedForum = initialForum;
+  }) : _selectedForum = initialForum;
 
   final DemandsGateway _gateway;
 
