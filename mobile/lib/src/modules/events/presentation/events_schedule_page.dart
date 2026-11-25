@@ -186,9 +186,9 @@ class _EventsSchedulePageState extends State<EventsSchedulePage> {
                                   Icon(
                                     Icons.event_busy_outlined,
                                     size: 48,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
                                   ),
                                   const SizedBox(height: 16),
                                   Text(
@@ -207,9 +207,9 @@ class _EventsSchedulePageState extends State<EventsSchedulePage> {
                                         .textTheme
                                         .bodyMedium
                                         ?.copyWith(
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurfaceVariant,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant,
                                         ),
                                   ),
                                 ],
@@ -233,6 +233,9 @@ class _EventsSchedulePageState extends State<EventsSchedulePage> {
                                 return EventSummaryCard(
                                   key: ValueKey('event-card-${event.id.uuid}'),
                                   event: event,
+                                  isRegistered: controller.isRegisteredIn(
+                                    event.id,
+                                  ),
                                   onTap: () => _openEventDetail(event),
                                 );
                               },
@@ -255,15 +258,33 @@ class EventSummaryCard extends StatelessWidget {
     super.key,
     required this.event,
     required this.onTap,
+    this.isRegistered = false,
   });
 
   final PublishedEvent event;
   final VoidCallback onTap;
+  final bool isRegistered;
+
+  String? _buildSpotsLabel() {
+    if (!event.requiresRegistration) {
+      return null;
+    }
+    final maxCapacity = event.maxCapacity;
+    if (maxCapacity == null) {
+      return 'Vagas ilimitadas';
+    }
+    if (event.isFull) {
+      return 'Lotado';
+    }
+    final remaining = event.effectiveRemainingSpots ?? maxCapacity;
+    return '$remaining de $maxCapacity vagas disponíveis';
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final spotsLabel = _buildSpotsLabel();
 
     return Card(
       color: colors.surfaceContainer,
@@ -287,10 +308,7 @@ class EventSummaryCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Icon(
-                    Icons.chevron_right,
-                    color: colors.onSurfaceVariant,
-                  ),
+                  Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
                 ],
               ),
               const SizedBox(height: 12),
@@ -315,11 +333,7 @@ class EventSummaryCard extends StatelessWidget {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  Icon(
-                    Icons.place_outlined,
-                    size: 16,
-                    color: colors.primary,
-                  ),
+                  Icon(Icons.place_outlined, size: 16, color: colors.primary),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -331,18 +345,41 @@ class EventSummaryCard extends StatelessWidget {
                   ),
                 ],
               ),
-              if (event.maxCapacity != null) ...[
+              if (spotsLabel != null || isRegistered) ...[
                 const SizedBox(height: 10),
-                Text(
-                  event.hasAvailableSpots
-                      ? '${event.remainingSpots ?? event.maxCapacity} vagas disponíveis'
-                      : 'Evento lotado',
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: event.hasAvailableSpots
-                        ? colors.primary
-                        : colors.error,
-                    fontWeight: FontWeight.w600,
-                  ),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (spotsLabel != null)
+                      Text(
+                        spotsLabel,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: event.isFull ? colors.error : colors.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    if (isRegistered)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.check_circle_outline,
+                            size: 14,
+                            color: colors.primary,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Inscrito',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: colors.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
                 ),
               ],
             ],

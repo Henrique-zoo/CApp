@@ -1,4 +1,4 @@
-/// Cliente HTTP para os endpoints de listagem e detalhes de eventos do backend.
+/// Cliente HTTP para os endpoints de listagem, detalhes e inscrição em eventos do backend.
 library;
 
 import 'package:dio/dio.dart';
@@ -6,7 +6,7 @@ import 'package:uuid/uuid.dart';
 
 import 'event_dto.dart';
 
-/// Encapsula as chamadas HTTP de consulta da agenda pública de eventos.
+/// Encapsula as chamadas HTTP de consulta da agenda pública e participação em eventos.
 final class EventsApi {
   const EventsApi(this._dio);
 
@@ -64,5 +64,55 @@ final class EventsApi {
     }
 
     return EventDto.fromJson(data);
+  }
+
+  /// Inscreve o usuário autenticado em um evento publicado do Centro Acadêmico ativo.
+  ///
+  /// Consome `POST /api/v1/academic-centers/{ca_id}/events/{id}/registrations`.
+  Future<EventRegistrationDto> registerInEvent({
+    required UuidValue academicCenterId,
+    required UuidValue eventId,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/academic-centers/${academicCenterId.uuid}/events/${eventId.uuid}/registrations',
+      options: Options(
+        headers: {'X-Academic-Center-Id': academicCenterId.uuid},
+        extra: const {'firebaseAuth': true, 'firebaseAppCheck': true},
+        followRedirects: false,
+      ),
+    );
+
+    final data = response.data;
+    if (data == null) {
+      throw const FormatException('Resposta vazia ao inscrever-se no evento.');
+    }
+
+    return EventRegistrationDto.fromJson(data);
+  }
+
+  /// Cancela a inscrição ativa do usuário autenticado em um evento do Centro Acadêmico ativo.
+  ///
+  /// Consome `DELETE /api/v1/academic-centers/{ca_id}/events/{id}/registrations`.
+  Future<EventRegistrationDto> cancelRegistration({
+    required UuidValue academicCenterId,
+    required UuidValue eventId,
+  }) async {
+    final response = await _dio.delete<Map<String, dynamic>>(
+      '/api/v1/academic-centers/${academicCenterId.uuid}/events/${eventId.uuid}/registrations',
+      options: Options(
+        headers: {'X-Academic-Center-Id': academicCenterId.uuid},
+        extra: const {'firebaseAuth': true, 'firebaseAppCheck': true},
+        followRedirects: false,
+      ),
+    );
+
+    final data = response.data;
+    if (data == null) {
+      throw const FormatException(
+        'Resposta vazia ao cancelar inscrição no evento.',
+      );
+    }
+
+    return EventRegistrationDto.fromJson(data);
   }
 }

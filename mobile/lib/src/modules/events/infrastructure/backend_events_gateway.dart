@@ -68,6 +68,56 @@ final class BackendEventsGateway implements EventsGateway {
     }
   }
 
+  @override
+  Future<EventRegistrationRecord> registerInEvent({
+    required UuidValue academicCenterId,
+    required UuidValue eventId,
+  }) async {
+    try {
+      final dto = await _api.registerInEvent(
+        academicCenterId: academicCenterId,
+        eventId: eventId,
+      );
+      return _mapRegistrationDtoToDomain(dto);
+    } on DioException catch (error) {
+      throw _mapDioException(
+        error,
+        fallbackMessage: 'Não foi possível realizar a inscrição no evento.',
+      );
+    } on FormatException catch (error) {
+      throw EventQueryException(
+        kind: EventQueryFailureKind.unexpected,
+        message: 'Não foi possível realizar a inscrição no evento.',
+        cause: error,
+      );
+    }
+  }
+
+  @override
+  Future<EventRegistrationRecord> cancelRegistration({
+    required UuidValue academicCenterId,
+    required UuidValue eventId,
+  }) async {
+    try {
+      final dto = await _api.cancelRegistration(
+        academicCenterId: academicCenterId,
+        eventId: eventId,
+      );
+      return _mapRegistrationDtoToDomain(dto);
+    } on DioException catch (error) {
+      throw _mapDioException(
+        error,
+        fallbackMessage: 'Não foi possível cancelar a inscrição no evento.',
+      );
+    } on FormatException catch (error) {
+      throw EventQueryException(
+        kind: EventQueryFailureKind.unexpected,
+        message: 'Não foi possível cancelar a inscrição no evento.',
+        cause: error,
+      );
+    }
+  }
+
   PublishedEvent _mapDtoToDomain(EventDto dto) => PublishedEvent(
     id: dto.id,
     academicCenterId: dto.academicCenterId,
@@ -87,14 +137,59 @@ final class BackendEventsGateway implements EventsGateway {
     publishedAt: dto.publishedAt,
   );
 
+  EventRegistrationRecord _mapRegistrationDtoToDomain(
+    EventRegistrationDto dto,
+  ) => EventRegistrationRecord(
+    id: dto.id,
+    eventId: dto.eventId,
+    participantId: dto.participantId,
+    status: EventRegistrationStatus.fromWire(dto.status),
+    registeredAt: dto.registeredAt,
+    cancelledAt: dto.cancelledAt,
+    message: dto.message,
+  );
+
   EventQueryException _mapDioException(
     DioException error, {
     required String fallbackMessage,
   }) {
     final statusCode = error.response?.statusCode;
     final errorDto = EventErrorDto.tryFromDynamic(error.response?.data);
+    final code = errorDto?.code;
 
-    if (statusCode == 404 || errorDto?.code == 'not_found') {
+    if (code == 'event_full') {
+      return EventQueryException(
+        kind: EventQueryFailureKind.eventFull,
+        message: 'As vagas para este evento estão esgotadas.',
+        cause: error,
+      );
+    }
+
+    if (code == 'already_registered') {
+      return EventQueryException(
+        kind: EventQueryFailureKind.alreadyRegistered,
+        message: 'Você já está inscrito neste evento.',
+        cause: error,
+      );
+    }
+
+    if (code == 'no_active_registration') {
+      return EventQueryException(
+        kind: EventQueryFailureKind.noActiveRegistration,
+        message: 'Não há inscrição ativa para cancelar.',
+        cause: error,
+      );
+    }
+
+    if (code == 'event_not_available' || statusCode == 422) {
+      return EventQueryException(
+        kind: EventQueryFailureKind.eventNotAvailable,
+        message: 'Este evento não está disponível para inscrição.',
+        cause: error,
+      );
+    }
+
+    if (statusCode == 404 || code == 'not_found') {
       return EventQueryException(
         kind: EventQueryFailureKind.notFound,
         message: 'Os detalhes do evento não estão disponíveis.',
@@ -102,8 +197,7 @@ final class BackendEventsGateway implements EventsGateway {
       );
     }
 
-    if (statusCode == 400 ||
-        (errorDto != null && errorDto.code.startsWith('missing:'))) {
+    if (statusCode == 400 || (code != null && code.startsWith('missing:'))) {
       return EventQueryException(
         kind: EventQueryFailureKind.invalidRequest,
         message: errorDto?.message ?? fallbackMessage,

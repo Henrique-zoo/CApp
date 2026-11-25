@@ -1,7 +1,7 @@
-/// Contratos JSON de transporte para listagem e detalhes de eventos do backend.
+/// Contratos JSON de transporte para listagem, detalhes e inscrições em eventos do backend.
 ///
-/// Espelha exatamente `EventResponse` / `EventDetailResponse` e `EventErrorResponse`
-/// definidos no módulo `modules::events::api::dto` do servidor Rust.
+/// Espelha exatamente `EventResponse` / `EventDetailResponse`, `EventRegistrationResponse`
+/// e `EventErrorResponse` definidos no módulo `modules::events::api::dto` do servidor Rust.
 library;
 
 import 'package:uuid/uuid.dart';
@@ -141,6 +141,72 @@ final class EventDto {
     'published_at': publishedAt?.toUtc().toIso8601String(),
     'created_at': createdAt.toUtc().toIso8601String(),
     'updated_at': updatedAt.toUtc().toIso8601String(),
+  };
+}
+
+/// DTO de resposta da operação de inscrição ou cancelamento (`EventRegistrationResponse` no backend).
+final class EventRegistrationDto {
+  const EventRegistrationDto({
+    required this.id,
+    required this.eventId,
+    required this.participantId,
+    required this.status,
+    required this.registeredAt,
+    required this.cancelledAt,
+    required this.message,
+  });
+
+  final UuidValue id;
+  final UuidValue eventId;
+  final UuidValue participantId;
+  final String status;
+  final DateTime registeredAt;
+  final DateTime? cancelledAt;
+  final String message;
+
+  /// Desserializa um objeto JSON de participação/inscrição em evento.
+  factory EventRegistrationDto.fromJson(Map<String, dynamic> json) {
+    final idRaw = json['id'];
+    final eventIdRaw = json['event_id'];
+    final participantIdRaw = json['participant_id'];
+    final status = json['status'];
+    final registeredAtRaw = json['registered_at'];
+    final cancelledAtRaw = json['cancelled_at'];
+    final message = json['message'];
+
+    if (idRaw is! String ||
+        eventIdRaw is! String ||
+        participantIdRaw is! String ||
+        status is! String ||
+        registeredAtRaw is! String ||
+        (cancelledAtRaw != null && cancelledAtRaw is! String) ||
+        message is! String) {
+      throw const FormatException(
+        'Contrato JSON de inscrição em evento inválido.',
+      );
+    }
+
+    return EventRegistrationDto(
+      id: _uuidConverter.fromJson(idRaw),
+      eventId: _uuidConverter.fromJson(eventIdRaw),
+      participantId: _uuidConverter.fromJson(participantIdRaw),
+      status: status,
+      registeredAt: DateTime.parse(registeredAtRaw).toUtc(),
+      cancelledAt: cancelledAtRaw == null
+          ? null
+          : DateTime.parse(cancelledAtRaw as String).toUtc(),
+      message: message,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': _uuidConverter.toJson(id),
+    'event_id': _uuidConverter.toJson(eventId),
+    'participant_id': _uuidConverter.toJson(participantId),
+    'status': status,
+    'registered_at': registeredAt.toUtc().toIso8601String(),
+    'cancelled_at': cancelledAt?.toUtc().toIso8601String(),
+    'message': message,
   };
 }
 

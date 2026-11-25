@@ -1,4 +1,4 @@
-/// Modelos da camada de aplicação para visualização e detalhes de eventos publicados.
+/// Modelos da camada de aplicação para visualização, detalhes, vagas e inscrição em eventos.
 library;
 
 import 'package:uuid/uuid.dart';
@@ -41,6 +41,58 @@ enum EventPublicationStatus {
 
   /// Indica se o evento é visível na agenda pública do Centro Acadêmico.
   bool get isVisibleInSchedule => this == EventPublicationStatus.published;
+}
+
+/// Estado de uma inscrição de participante em um evento.
+enum EventRegistrationStatus {
+  confirmed,
+  cancelled,
+  waitlisted;
+
+  /// Interpreta a representação textual do backend (`confirmed`, `cancelled`, `waitlisted`).
+  static EventRegistrationStatus fromWire(String raw) {
+    switch (raw.trim().toLowerCase()) {
+      case 'confirmed':
+      case 'confirmada':
+        return EventRegistrationStatus.confirmed;
+      case 'cancelled':
+      case 'canceled':
+      case 'cancelada':
+        return EventRegistrationStatus.cancelled;
+      case 'waitlisted':
+      case 'fila_espera':
+        return EventRegistrationStatus.waitlisted;
+      default:
+        throw FormatException('Status de inscrição desconhecido: $raw');
+    }
+  }
+
+  /// Indica se a inscrição está ativa/confirmada para o participante.
+  bool get isActive => this == EventRegistrationStatus.confirmed;
+}
+
+/// Registro retornado ao realizar ou cancelar uma inscrição em evento.
+final class EventRegistrationRecord {
+  const EventRegistrationRecord({
+    required this.id,
+    required this.eventId,
+    required this.participantId,
+    required this.status,
+    required this.registeredAt,
+    required this.cancelledAt,
+    required this.message,
+  });
+
+  final UuidValue id;
+  final UuidValue eventId;
+  final UuidValue participantId;
+  final EventRegistrationStatus status;
+  final DateTime registeredAt;
+  final DateTime? cancelledAt;
+  final String message;
+
+  /// Indica se o registro representa uma inscrição ativa.
+  bool get isActive => status.isActive;
 }
 
 /// Identificação do Centro Acadêmico ativo na consulta da agenda de eventos.
@@ -116,4 +168,71 @@ final class PublishedEvent {
 
   /// Indica se o evento está efetivamente publicado.
   bool get isPublished => status.isVisibleInSchedule;
+
+  /// Calcula as vagas restantes efetivas quando o evento possui limite configurado.
+  int? get effectiveRemainingSpots {
+    final cap = maxCapacity;
+    if (cap == null) {
+      return null;
+    }
+    final remaining = remainingSpots ?? (cap - confirmedRegistrations);
+    return remaining.clamp(0, cap);
+  }
+
+  /// Indica se o evento atingiu a capacidade máxima de participantes.
+  bool get isFull {
+    if (maxCapacity == null) {
+      return false;
+    }
+    final remaining = effectiveRemainingSpots ?? 0;
+    return !hasAvailableSpots || remaining <= 0;
+  }
+
+  /// Verifica se o prazo de inscrição já expirou em relação a [referenceTime] (ou `DateTime.now().toUtc()`).
+  bool isRegistrationDeadlinePassed({DateTime? referenceTime}) {
+    final deadline = registrationDeadline;
+    if (deadline == null) {
+      return false;
+    }
+    final now = (referenceTime ?? DateTime.now()).toUtc();
+    return now.isAfter(deadline.toUtc());
+  }
+
+  /// Retorna uma cópia do evento com contadores de inscrição e vagas atualizados.
+  PublishedEvent copyWith({
+    int? confirmedRegistrations,
+    int? remainingSpots,
+    bool? hasAvailableSpots,
+  }) {
+    final nextConfirmed =
+        (confirmedRegistrations ?? this.confirmedRegistrations).clamp(
+          0,
+          1 << 30,
+        );
+    final cap = maxCapacity;
+    final nextRemaining = cap == null
+        ? null
+        : (remainingSpots ?? (cap - nextConfirmed)).clamp(0, cap);
+    final nextHasSpots =
+        hasAvailableSpots ?? (cap == null || (nextRemaining ?? 0) > 0);
+
+    return PublishedEvent(
+      id: id,
+      academicCenterId: academicCenterId,
+      authorId: authorId,
+      title: title,
+      description: description,
+      location: location,
+      startsAt: startsAt,
+      endsAt: endsAt,
+      status: status,
+      requiresRegistration: requiresRegistration,
+      maxCapacity: maxCapacity,
+      confirmedRegistrations: nextConfirmed,
+      remainingSpots: nextRemaining,
+      hasAvailableSpots: nextHasSpots,
+      registrationDeadline: registrationDeadline,
+      publishedAt: publishedAt,
+    );
+  }
 }
