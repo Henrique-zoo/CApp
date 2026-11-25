@@ -149,38 +149,39 @@ void main() {
   test(
     'listComments e createComment respeitam contrato de comentários',
     () async {
-    final commentJson = {
-      'id': commentId.uuid,
-      'demandId': demandId.uuid,
-      'authorId': authorId.uuid,
-      'authorRole': 'ca_management',
-      'content': 'Encaminhamos para manutenção.',
-      'createdAt': '2026-11-20T14:00:00Z',
-    };
-    final adapter = FakeHttpAdapter((options) {
-      if (options.method == 'GET') {
-        return jsonTestResponse([commentJson]);
-      }
-      return jsonTestResponse(commentJson, status: 201);
-    });
-    final api = DemandsApi(createTestDio(adapter));
+      final commentJson = {
+        'id': commentId.uuid,
+        'demandId': demandId.uuid,
+        'authorId': authorId.uuid,
+        'authorRole': 'ca_management',
+        'content': 'Encaminhamos para manutenção.',
+        'createdAt': '2026-11-20T14:00:00Z',
+      };
+      final adapter = FakeHttpAdapter((options) {
+        if (options.method == 'GET') {
+          return jsonTestResponse([commentJson]);
+        }
+        return jsonTestResponse(commentJson, status: 201);
+      });
+      final api = DemandsApi(createTestDio(adapter));
 
-    final comments = await api.listComments(
-      academicCenterId: caId,
-      demandId: demandId,
-    );
-    expect(comments.single.authorRole, 'ca_management');
+      final comments = await api.listComments(
+        academicCenterId: caId,
+        demandId: demandId,
+      );
+      expect(comments.single.authorRole, 'ca_management');
 
-    final posted = await api.createComment(
-      academicCenterId: caId,
-      demandId: demandId,
-      request: const CreateDemandCommentRequestDto(
-        content: 'Encaminhamos para manutenção.',
-      ),
-    );
-    expect(posted.id, commentId);
-    expect(adapter.requests.last.method, 'POST');
-  });
+      final posted = await api.createComment(
+        academicCenterId: caId,
+        demandId: demandId,
+        request: const CreateDemandCommentRequestDto(
+          content: 'Encaminhamos para manutenção.',
+        ),
+      );
+      expect(posted.id, commentId);
+      expect(adapter.requests.last.method, 'POST');
+    },
+  );
 
   test('rejeita resposta incompatível com FormatException', () async {
     final api = DemandsApi(
