@@ -148,9 +148,7 @@ void main() {
     );
     addTearDown(controller.dispose);
 
-    await tester.pumpWidget(
-      wrapWithTheme(DemandsHome(controller: controller)),
-    );
+    await tester.pumpWidget(wrapWithTheme(DemandsHome(controller: controller)));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Minhas demandas'));
@@ -180,6 +178,10 @@ void main() {
   testWidgets(
     'cria demanda e navega para detalhes com histórico, comentário e status',
     (tester) async {
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       final gateway = FakeDemandsGateway(actorIsManager: true);
       final controller = DemandsController(
         gateway: gateway,
@@ -236,10 +238,7 @@ void main() {
         'Adicionar comentário',
       );
       await tester.ensureVisible(commentField);
-      await tester.enterText(
-        commentField,
-        'Equipe vai verificar ainda hoje.',
-      );
+      await tester.enterText(commentField, 'Equipe vai verificar ainda hoje.');
       await tester.ensureVisible(find.text('Enviar comentário'));
       await tester.tap(find.text('Enviar comentário'));
       await tester.pumpAndSettle();
@@ -282,10 +281,7 @@ void main() {
     final gateway = FakeDemandsGateway(
       forbidComments: true,
       initialDemands: [
-        sampleDemand(
-          authorId: testOtherUserId,
-          title: 'Tomada quebrada',
-        ),
+        sampleDemand(authorId: testOtherUserId, title: 'Tomada quebrada'),
       ],
     );
     final controller = DemandsController(
