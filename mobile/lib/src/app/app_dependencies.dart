@@ -55,6 +55,8 @@ import '../modules/elections/infrastructure/backend/voter_registration_gateway.d
 import '../modules/elections/infrastructure/device_voter_keys.dart';
 import '../modules/elections/infrastructure/election_failure_adapter.dart';
 import '../modules/elections/infrastructure/secret_voting.dart';
+import '../modules/events/events.dart';
+import '../modules/events/infrastructure/backend_events_gateway.dart';
 import '../modules/identity/application/institutional_auth_service.dart';
 import '../modules/identity/identity.dart';
 import '../modules/identity/infrastructure/backend/backend_institutional_identity_gateway.dart';
@@ -114,6 +116,11 @@ final class AppDependencies {
     _voterRegistrationGateway,
     _currentAccount,
     _preferences,
+  );
+
+  /// Porta de consulta de eventos publicados e seus detalhes no backend.
+  late final EventsGateway eventsGateway = BackendEventsGateway(
+    _backendApi.events,
   );
 
   /// Coordenação exposta à interface pela API pública do módulo.

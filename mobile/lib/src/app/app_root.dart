@@ -33,6 +33,8 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../modules/elections/elections_widgets.dart';
+import '../modules/events/events.dart';
+import '../modules/events/events_widgets.dart';
 import 'app_dependencies.dart';
 import 'capp.dart';
 import 'session_lifecycle_observer.dart';
@@ -213,6 +215,16 @@ class _AppRootState extends State<AppRoot> {
     );
   }
 
+  Widget _buildEventsHome(BuildContext context) {
+    final controller = EventsScheduleController(
+      gateway: widget.dependencies.eventsGateway,
+    );
+    return EventsSchedulePage(
+      key: ObjectKey(widget.dependencies.eventsGateway),
+      controller: controller,
+    );
+  }
+
   /// Monta a interface com os controladores da composição atual.
   ///
   /// A identidade da composição preserva a interface em reconstruções
@@ -226,6 +238,7 @@ class _AppRootState extends State<AppRoot> {
       controller: widget.dependencies.sessionController,
       child: CApp(
         electionHome: Builder(builder: _buildElectionHome),
+        eventsHome: Builder(builder: _buildEventsHome),
         sessionController: widget.dependencies.sessionController,
         backendReadinessController:
             widget.dependencies.backendReadinessController,

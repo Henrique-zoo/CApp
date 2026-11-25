@@ -69,6 +69,7 @@ class CApp extends StatelessWidget {
     required this.sessionController,
     required this.backendReadinessController,
     this.electionHome,
+    this.eventsHome,
   });
 
   /// Fonte do estado e das operações de entrada.
@@ -79,6 +80,9 @@ class CApp extends StatelessWidget {
 
   /// Conteúdo eleitoral apresentado no Início após o login institucional.
   final Widget? electionHome;
+
+  /// Agenda de eventos publicados apresentada na aba Eventos.
+  final Widget? eventsHome;
 
   /// Solicita saída apenas para uma conta conhecida e sem outra operação.
   ///
@@ -155,6 +159,7 @@ class CApp extends StatelessWidget {
             child: MainPage(
               state: state,
               electionHome: electionHome,
+              eventsHome: eventsHome,
               onSignOut: (mode) => _signOut(mode: mode),
             ),
           ),
