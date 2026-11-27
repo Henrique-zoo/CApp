@@ -64,6 +64,9 @@ import '../modules/identity/infrastructure/preferences/preferences_account_profi
 import '../modules/identity/infrastructure/preferences/preferences_session_store.dart';
 import '../modules/identity/infrastructure/microsoft/msal_client.dart';
 import '../modules/identity/infrastructure/microsoft/msal_microsoft_token_provider.dart';
+import '../modules/materials/infrastructure/backend_materials_gateway.dart';
+import '../modules/materials/infrastructure/material_device.dart';
+import '../modules/materials/materials.dart';
 import 'backend_readiness_controller.dart';
 
 /// Proprietário do transporte e dos controladores compartilhados.
@@ -115,6 +118,15 @@ final class AppDependencies {
     _currentAccount,
     _preferences,
   );
+
+  final MaterialDevice materialDevice = const PlatformMaterialDevice();
+
+  MaterialsGateway materialsFor(UuidValue account) =>
+      BackendMaterialsGateway(_backendApi.materials, () {
+        if (_currentAccount() != account) {
+          throw const MaterialFailure('A conta ativa mudou.');
+        }
+      });
 
   /// Coordenação exposta à interface pela API pública do módulo.
   ///

@@ -35,7 +35,9 @@ services:
       BACKEND_TLS_CERT_FILE: /run/capp-tls/server.crt
       BACKEND_TLS_KEY_FILE: /run/capp-tls/server.key
       BACKEND_TLS_HEALTH_HOST: ${BACKEND_TLS_HEALTH_HOST:-localhost}
+      MATERIALS_STORAGE_DIR: /var/lib/capp/materials
     volumes:
+      - materials_data:/var/lib/capp/materials
       - type: bind
         source: ${BACKEND_TLS_CERT_FILE:-./.tls/backend.crt}
         target: /run/capp-tls/server.crt
@@ -74,3 +76,4 @@ services:
 
 volumes:
   postgres_data:
+  materials_data:

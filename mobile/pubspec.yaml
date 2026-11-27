@@ -36,6 +36,8 @@ dependencies:
 
   # HTTP
   dio: ^5.11.1
+  file_picker: ^13.4.1
+  url_launcher: ^6.3.3
   crypto: ^3.0.8
 
   # Navegação

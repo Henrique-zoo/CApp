@@ -19,7 +19,8 @@ FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && install -d -m 0700 -o 1000 -g 1000 /var/lib/capp/materials
 
 COPY --from=builder /usr/local/bin/backend /usr/local/bin/backend
 

@@ -14,6 +14,7 @@ use crate::{
         identity::infrastructure::{
             firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
         },
+        materials::application::ports::MaterialStorage,
     },
 };
 
@@ -70,6 +71,9 @@ pub struct AppState {
 
     /// Assinador fornecido pela instalação para as operações eleitorais que usam a chave do servidor.
     pub(crate) election_signer: Option<Arc<ServerSigner>>,
+
+    /// Armazenamento privado configurado para os PDFs de materiais.
+    pub(crate) material_storage: Option<Arc<dyn MaterialStorage>>,
 }
 
 impl AppState {
@@ -127,12 +131,19 @@ impl AppState {
             pg_database,
             clients,
             election_signer: None,
+            material_storage: None,
         }
     }
 
     /// Habilita as operações eleitorais que usam a chave de assinatura do servidor.
     pub fn with_election_signer(mut self, signer: Arc<ServerSigner>) -> Self {
         self.election_signer = Some(signer);
+        self
+    }
+
+    /// Habilita publicação e recuperação de PDFs.
+    pub fn with_material_storage(mut self, storage: Arc<dyn MaterialStorage>) -> Self {
+        self.material_storage = Some(storage);
         self
     }
 }

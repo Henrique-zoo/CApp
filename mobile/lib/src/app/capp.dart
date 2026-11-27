@@ -43,6 +43,7 @@ library;
 
 import 'package:capp/src/presentation/presentation.dart';
 import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 
 import '../modules/identity/identity.dart';
 import '../modules/identity/identity_widgets.dart';
@@ -69,6 +70,7 @@ class CApp extends StatelessWidget {
     required this.sessionController,
     required this.backendReadinessController,
     this.electionHome,
+    this.materialsBuilder,
   });
 
   /// Fonte do estado e das operações de entrada.
@@ -79,6 +81,9 @@ class CApp extends StatelessWidget {
 
   /// Conteúdo eleitoral apresentado no Início após o login institucional.
   final Widget? electionHome;
+
+  /// Entrada do módulo de materiais vinculada à conta da sessão.
+  final Widget Function(UuidValue)? materialsBuilder;
 
   /// Solicita saída apenas para uma conta conhecida e sem outra operação.
   ///
@@ -147,6 +152,9 @@ class CApp extends StatelessWidget {
                 state.failure == SessionFailure.signOutFailed
             ? cause
             : null;
+        final accountId = state.user?.id;
+        final student =
+            state.verification?.profile.affiliation is StudentAffiliation;
 
         return _buildApplication(
           TemporaryWarning(
@@ -155,6 +163,9 @@ class CApp extends StatelessWidget {
             child: MainPage(
               state: state,
               electionHome: electionHome,
+              materialsHome: student && accountId != null
+                  ? materialsBuilder?.call(accountId)
+                  : null,
               onSignOut: (mode) => _signOut(mode: mode),
             ),
           ),

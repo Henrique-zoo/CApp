@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: CApp API
-  version: 5.0.0
+  version: 5.1.0
   description: |
     Contrato das rotas atualmente implementadas no backend CApp.
     Os caminhos são servidos sem prefixo /v1.
@@ -36,7 +36,258 @@ tags:
   - name: Eleições
     description: Distribuição de evidências para verificação pelos eleitores e autoridades.
 
+  - name: Materiais
+    description: Publicação e consulta de materiais acadêmicos no contexto de um CA.
+
 paths:
+  /materials/contexts:
+    get:
+      operationId: listMaterialContexts
+      tags: [Materiais]
+      summary: Listar Centros Acadêmicos acessíveis à conta
+      description: |
+        Retorna CAs ativos da instituição da evidência estudantil vigente.
+        As capacidades são informativas e avaliadas novamente na publicação.
+        Uma conta autenticada sem contexto elegível recebe uma lista vazia.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      responses:
+        "200":
+          description: Contextos acessíveis.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MaterialContext"
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          $ref: "#/components/responses/MaterialAccessDenied"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/MaterialUnavailable"
+  /academic-centers/{caId}/materials:
+    parameters:
+      - $ref: "#/components/parameters/MaterialCenterId"
+    get:
+      operationId: listAcademicMaterials
+      tags: [Materiais]
+      summary: Listar materiais publicados de um Centro Acadêmico
+      description: A ordem é de publicação decrescente, com desempate por UUID.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: disciplineId
+          in: query
+          description: Disciplina do catálogo deste CA.
+          schema: {type: string, format: uuid}
+        - name: limit
+          in: query
+          description: Quantidade máxima de materiais na página.
+          schema: {type: integer, minimum: 1, maximum: 100, default: 30}
+        - name: offset
+          in: query
+          description: Posição inicial da página retornada em nextOffset.
+          schema: {type: integer, minimum: 0, maximum: 4294967295, default: 0}
+      responses:
+        "200":
+          description: Página de materiais publicados.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishedMaterialPage"
+        "400":
+          $ref: "#/components/responses/MaterialInvalid"
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          $ref: "#/components/responses/MaterialAccessDenied"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/MaterialUnavailable"
+    post:
+      operationId: publishAcademicMaterial
+      tags: [Materiais]
+      summary: Publicar um link externo ou PDF em um Centro Acadêmico
+      description: |
+        Exige a permissão Gerenciar materiais no CA da rota e vínculo estudantil vigente.
+        O servidor deriva a autoria da conta autenticada. A disciplina deve pertencer
+        ao catálogo desse CA. O mesmo Idempotency-Key e conteúdo recuperam a publicação
+        anterior. A chave é vinculada à conta e ao CA. Um PDF só é publicado após
+        concluir o armazenamento. O limite é de 10485760 bytes incluindo o tamanho exato.
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUID estável em repetição da mesma publicação.
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishMaterialLink"
+            example:
+              title: Referências de Cálculo I
+              description: Material de apoio para a primeira avaliação.
+              disciplineId: "9d152145-f841-4b7a-8abb-98ed5f0f4762"
+              content:
+                type: external_link
+                url: https://exemplo.edu.br/calculo
+          multipart/form-data:
+            schema:
+              type: object
+              required: [metadata, file]
+              additionalProperties: false
+              properties:
+                metadata:
+                  type: string
+                  description: JSON codificado como texto com title, description e disciplineId.
+                  contentMediaType: application/json
+                  contentSchema:
+                    $ref: "#/components/schemas/MaterialMetadata"
+                file:
+                  type: string
+                  format: binary
+                  description: PDF com até 10485760 bytes e nome com extensão .pdf.
+            encoding:
+              file:
+                contentType: application/pdf
+      responses:
+        "200":
+          $ref: "#/components/responses/MaterialPublished"
+        "201":
+          $ref: "#/components/responses/MaterialPublished"
+        "400":
+          $ref: "#/components/responses/MaterialInvalid"
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          $ref: "#/components/responses/MaterialAccessDenied"
+        "409":
+          description: Chave já usada com outro conteúdo (material_request_conflict).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: PDF acima do limite (material_pdf_too_large).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "415":
+          description: Tipo HTTP de publicação não aceito (unsupported_material_media_type).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/MaterialUnavailable"
+  /academic-centers/{caId}/materials/disciplines:
+    parameters:
+      - $ref: "#/components/parameters/MaterialCenterId"
+    get:
+      operationId: listMaterialDisciplines
+      tags: [Materiais]
+      summary: Listar disciplinas disponíveis para materiais do CA
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      responses:
+        "200":
+          description: Catálogo do CA, inclusive disciplinas sem materiais.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MaterialDiscipline"
+        "400":
+          $ref: "#/components/responses/MaterialInvalid"
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          $ref: "#/components/responses/MaterialAccessDenied"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/MaterialUnavailable"
+  /academic-centers/{caId}/materials/{materialId}:
+    parameters:
+      - $ref: "#/components/parameters/MaterialCenterId"
+      - $ref: "#/components/parameters/MaterialId"
+    get:
+      operationId: getPublishedMaterial
+      tags: [Materiais]
+      summary: Ler detalhes de um material publicado no CA
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      responses:
+        "200":
+          description: Material disponível para consulta.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishedMaterial"
+        "400":
+          $ref: "#/components/responses/MaterialInvalid"
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          $ref: "#/components/responses/MaterialAccessDenied"
+        "404":
+          $ref: "#/components/responses/PublishedMaterialNotFound"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/MaterialUnavailable"
+  /academic-centers/{caId}/materials/{materialId}/file:
+    parameters:
+      - $ref: "#/components/parameters/MaterialCenterId"
+      - $ref: "#/components/parameters/MaterialId"
+    get:
+      operationId: downloadMaterialPdf
+      tags: [Materiais]
+      summary: Baixar o PDF de um material publicado no CA
+      security:
+        - FirebaseIdToken: []
+          FirebaseAppCheck: []
+      responses:
+        "200":
+          description: PDF publicado entregue como anexo privado.
+          headers:
+            Content-Disposition:
+              description: Indica que o PDF é um anexo.
+              schema: {type: string}
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/MaterialInvalid"
+        "401":
+          $ref: "#/components/responses/InvalidAccountCredential"
+        "403":
+          $ref: "#/components/responses/MaterialAccessDenied"
+        "404":
+          $ref: "#/components/responses/PublishedMaterialNotFound"
+        "500":
+          $ref: "#/components/responses/AccountInternalError"
+        "503":
+          $ref: "#/components/responses/MaterialUnavailable"
   /elections/{id}/ballots:
     parameters:
       - $ref: "#/components/parameters/ElectionId"
@@ -789,6 +1040,18 @@ paths:
 
 components:
   parameters:
+    MaterialCenterId:
+      name: caId
+      in: path
+      required: true
+      description: UUID do CA selecionado.
+      schema: {type: string, format: uuid}
+    MaterialId:
+      name: materialId
+      in: path
+      required: true
+      description: UUID do material no CA.
+      schema: {type: string, format: uuid}
     ElectionId:
       in: path
       name: id
@@ -798,6 +1061,40 @@ components:
         type: string
         format: uuid
   responses:
+    MaterialPublished:
+      description: Retorna 201 ao publicar e 200 ao recuperar uma publicação idempotente.
+      headers:
+        Location:
+          description: Caminho absoluto do recurso no servidor.
+          schema: {type: string, format: uri-reference}
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PublishedMaterial"
+    MaterialInvalid:
+      description: Entrada inválida, chave ausente, URL, disciplina ou PDF rejeitado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    MaterialAccessDenied:
+      description: App Check, conta indisponível ou acesso ao contexto ou à publicação recusado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    PublishedMaterialNotFound:
+      description: Material publicado ou PDF não localizado no contexto solicitado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    MaterialUnavailable:
+      description: Indisponibilidade temporária da identidade, atestado, banco ou armazenamento.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
     ElectionAuthorityAssignment:
       description: Designação confirmada da própria conta.
       content:
@@ -867,6 +1164,87 @@ components:
         microsoft.com vinculada. Enviar um único Authorization: Bearer <ID_TOKEN>.
         O access token Microsoft é enviado separadamente no corpo da verificação.
   schemas:
+    MaterialContext:
+      type: object
+      required: [id, name, canPublish, canUploadPdf]
+      additionalProperties: false
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        canPublish: {type: boolean}
+        canUploadPdf: {type: boolean}
+    MaterialDiscipline:
+      type: object
+      required: [id, name]
+      additionalProperties: false
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+    MaterialMetadata:
+      type: object
+      required: [title, description, disciplineId]
+      additionalProperties: false
+      properties:
+        title: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 5000}
+        disciplineId: {type: string, format: uuid}
+    PublishMaterialLink:
+      type: object
+      required: [title, description, disciplineId, content]
+      additionalProperties: false
+      properties:
+        title: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 5000}
+        disciplineId: {type: string, format: uuid}
+        content:
+          $ref: "#/components/schemas/ExternalMaterialLink"
+    ExternalMaterialLink:
+      type: object
+      required: [type, url]
+      additionalProperties: false
+      properties:
+        type: {const: external_link}
+        url:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: Endereço HTTP ou HTTPS absoluto, sem credenciais.
+    MaterialPdf:
+      type: object
+      required: [type, fileName, sizeBytes]
+      additionalProperties: false
+      properties:
+        type: {const: file}
+        fileName: {type: string, minLength: 1, maxLength: 255}
+        sizeBytes: {type: integer, minimum: 1, maximum: 10485760}
+    PublishedMaterial:
+      type: object
+      required: [id, caId, disciplineId, title, description, createdAt, content]
+      additionalProperties: false
+      properties:
+        id: {type: string, format: uuid}
+        caId: {type: string, format: uuid}
+        disciplineId: {type: string, format: uuid}
+        title: {type: string}
+        description: {type: string}
+        createdAt: {type: string, format: date-time}
+        content:
+          oneOf:
+            - $ref: "#/components/schemas/ExternalMaterialLink"
+            - $ref: "#/components/schemas/MaterialPdf"
+    PublishedMaterialPage:
+      type: object
+      required: [items, nextOffset]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublishedMaterial"
+        nextOffset:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 4294967295
     RecordedBallot:
       $ref: "./elections/schemas.json#/$defs/RecordedBallot"
     ElectionRegistrationProof:

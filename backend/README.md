@@ -334,15 +334,56 @@ Relacionadas a problemas e necessidades de infraestrutura.
 
 ## materials
 
-Responsável pelos materiais acadêmicos.
+Estudantes com evidência institucional vigente podem consultar materiais e
+disciplinas nos CAs ativos da instituição. Para publicar um link externo ou
+um PDF, a conta precisa da concessão `Gerenciar materiais` no CA de destino.
+A publicação registra a autoria usando o ID interno da conta autenticada.
 
-Inclui:
+### Preparar um CA para publicar
 
-- publicação de materiais;
-- arquivos;
-- links;
-- organização por disciplinas;
-- acesso pelos estudantes.
+Cadastre disciplinas da grade atendida pelo CA e conceda a capacidade de
+publicação à conta da gestão. A instalação mantém esses dados no PostgreSQL
+enquanto os fluxos administrativos gerais das #52, #117 e #118 são integrados.
+No `psql`, use UUIDs de CAs, disciplinas e contas da instalação:
+
+```sql
+INSERT INTO academic_center_discipline (ca_id, id, name)
+VALUES (:'ca_id', :'discipline_id', 'Cálculo I')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO academic_center_material_publisher (ca_id, account_id)
+VALUES (:'ca_id', :'account_id')
+ON CONFLICT DO NOTHING;
+```
+
+A remoção da concessão revoga a publicação nesse CA e preserva a autoria do
+acervo. O app mostra o botão de publicação conforme a capacidade retornada
+para a conta e o CA.
+
+### Armazenar e recuperar PDFs
+
+O Compose usa o volume privado `materials_data`, com proprietário inicial
+`1000:1000`. Instalações com outro `BACKEND_UID` ou `BACKEND_GID` precisam
+atribuir ao usuário do processo acesso de escrita ao volume. Fora do Compose,
+configure `MATERIALS_STORAGE_DIR` com um diretório persistente e privado.
+Com a variável ausente, o servidor segue aceitando links. Instâncias que
+compartilham o PostgreSQL precisam usar o mesmo armazenamento de PDFs.
+
+O limite de 10 MiB é inclusivo. A validação confere o tipo enviado, a extensão
+e a estrutura básica do PDF. Os bytes são gravados antes dos metadados, e
+o download passa pela autorização da API. Reenvie a mesma chave
+`Idempotency-Key` quando repetir a mesma publicação. Para backup, preserve o
+volume e o PostgreSQL. Uma interrupção entre a gravação do PDF e a confirmação
+no banco pode deixar objetos sem referência. Uma manutenção de storage deve
+comparar os hashes do diretório de cada CA com `study_material.file_sha256`
+com as publicações suspensas.
+
+Os endpoints e erros estão no [OpenAPI](../packages/api-contracts/openapi.yaml).
+Para executar os cenários da #107 no backend:
+
+```bash
+FIREBASE_PROJECT_ID=capp-a331b cargo test --test bdd --locked -- --tags @material_publication
+```
 
 ---
 

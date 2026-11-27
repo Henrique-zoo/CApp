@@ -1,4 +1,4 @@
-//! Composição das rotas de saúde, prontidão e verificação institucional.
+//! Composição das rotas de saúde, prontidão e dos módulos de negócio.
 //!
 //! O chamador pode servir o router com Axum ou enviar requisições em memória.
 //! Construir o router não abre conexões. `/ready` consulta PostgreSQL; a rota de
@@ -15,10 +15,11 @@ use crate::{
     modules::{
         elections::api as elections_api,
         identity::{api as identity_api, infrastructure::firebase::AppCheckVerifier},
+        materials::api as materials_api,
     },
 };
 
-/// Monta as rotas globais e de identidade, ainda dependentes de [`AppState`].
+/// Monta as rotas globais e dos módulos a partir de [`AppState`].
 ///
 /// # Rotas
 ///
@@ -32,6 +33,8 @@ use crate::{
 /// | `PUT /elections/{id}/registration/me` | Cadastra a chave com uma prova assinada antes da votação. |
 /// | `POST /elections/{id}/ballots` | Confirma uma cédula cifrada e assinada ou recupera seu recibo. |
 /// | `GET /ready` | Executa `SELECT 1 AS ok` no pool; retorna HTTP 200 no sucesso e HTTP 503 em erro ou timeout. |
+/// | `GET /materials/contexts` | Lista os CAs disponíveis para a conta estudantil. |
+/// | `GET/POST /academic-centers/{ca_id}/materials` | Lista publicados ou publica no CA da rota. |
 ///
 /// A prontidão limita a espera pela aquisição da conexão e execução da consulta
 /// a dois segundos. Sua resposta não contém corpo; falhas são registradas em
@@ -94,6 +97,7 @@ pub fn create_router(state: AppState, app_check: AppCheckVerifier) -> Router {
     Router::new()
         .merge(identity_api::router())
         .merge(elections_api::protected_json_routes())
+        .merge(materials_api::router())
         .route("/health", get(|| async { "O servidor está saudável." }))
         .route(
             "/ready",
