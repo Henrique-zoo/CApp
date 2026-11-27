@@ -32,6 +32,8 @@ use super::{
 /// mutações. Os helpers HTTP não os atualizam automaticamente.
 #[derive(cucumber::World, Default)]
 pub(crate) struct AppWorld {
+    /// Dados exclusivos dos cenários de publicação de materiais.
+    pub(crate) materials: Option<super::materials::MaterialsScenario>,
     /// Banco associado pelo hook `before` e liberado pelo hook `after`.
     database: Option<TestDatabase>,
     /// Router real com o estado associado ao pool desse cenário.

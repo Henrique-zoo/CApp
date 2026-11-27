@@ -67,6 +67,15 @@ da rota e `accountId` da conta autenticada e reconstitui a cédula pública sem
 `version` nem `kind`, usando o domínio criptográfico específico da cédula. O registro público contém
 essa cédula completa, e a resposta distingue primeiro aceite e reenvio.
 
+## Contrato de materiais
+
+A versão 5.1.0 inclui seleção de CAs, catálogo de disciplinas, publicação de
+links e PDFs, consulta e download protegido. O backend associa a publicação à
+conta autenticada e ao CA da rota. `Idempotency-Key` é um UUID da tentativa de
+publicação. O Flutter usa o transporte de materiais em
+`mobile/lib/src/infrastructure/backend/materials/materials_api.dart`.
+As rotas são exercitadas em `backend/tests/integration/http/materials.rs`.
+
 ## Versionamento
 
 A versão do contrato segue Semantic Versioning (`MAJOR.MINOR.PATCH`).

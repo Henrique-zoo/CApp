@@ -33,6 +33,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../modules/elections/elections_widgets.dart';
+import '../modules/materials/materials_widgets.dart';
 import 'app_dependencies.dart';
 import 'capp.dart';
 import 'session_lifecycle_observer.dart';
@@ -226,6 +227,11 @@ class _AppRootState extends State<AppRoot> {
       controller: widget.dependencies.sessionController,
       child: CApp(
         electionHome: Builder(builder: _buildElectionHome),
+        materialsBuilder: (accountId) => MaterialsPage(
+          key: ValueKey(accountId),
+          gateway: widget.dependencies.materialsFor(accountId),
+          device: widget.dependencies.materialDevice,
+        ),
         sessionController: widget.dependencies.sessionController,
         backendReadinessController:
             widget.dependencies.backendReadinessController,

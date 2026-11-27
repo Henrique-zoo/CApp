@@ -5,5 +5,7 @@
 
 #[cfg(feature = "test-support")]
 mod http;
+#[path = "../fixtures/materials/mod.rs"]
+mod materials_fixtures;
 mod repositories;
 mod support;

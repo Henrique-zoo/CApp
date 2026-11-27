@@ -52,6 +52,8 @@ void main() {
           sessionController: h.controller,
           backendReadinessController: readiness,
           electionHome: const Text('Eleição do Centro Acadêmico'),
+          materialsBuilder: (_) =>
+              throw StateError('A sessão não é estudantil'),
         ),
       );
 
@@ -64,6 +66,7 @@ void main() {
       expect(find.text('Eleição do Centro Acadêmico'), findsOneWidget);
       expect(find.byType(AccountPage), findsNothing);
       expect(find.byType(NavigationBar), findsOneWidget);
+      expect(find.byIcon(Icons.school_outlined), findsNothing);
       expect(find.byType(LimitedStudentAccessNotice), findsOneWidget);
 
       await openAccount(tester);
@@ -87,6 +90,38 @@ void main() {
 
       expect(find.byType(AccountPage), findsNothing);
       expect(find.text('Dados da conta'), findsNothing);
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(h.dispose);
+    }
+  });
+
+  testWidgets('sessão estudantil abre Materiais vinculados à conta interna', (
+    tester,
+  ) async {
+    final h = IdentityHarness(uid: 'user-a');
+    h.store.results['user-a'] = SessionCacheFound(
+      testVerification(student: true),
+    );
+    try {
+      h.controller.start();
+      await tester.pumpWidget(
+        CApp(
+          sessionController: h.controller,
+          backendReadinessController: readiness,
+          materialsBuilder: (accountId) {
+            expect(accountId, testInternalUser().id);
+            return const Text('Acervo estudantil');
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Acervo estudantil'), findsNothing);
+      await tester.tap(find.byIcon(Icons.school_outlined));
+      await tester.pumpAndSettle();
+      expect(find.text('Acervo estudantil'), findsOneWidget);
+      await openAccount(tester);
+      expect(find.byType(AccountPage), findsOneWidget);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.runAsync(h.dispose);

@@ -33,6 +33,7 @@ import 'auth/firebase_app_check_interceptor.dart';
 import 'elections/ballot_api.dart';
 import 'elections/registration_api.dart';
 import 'identity/identity.dart';
+import 'materials/materials_api.dart';
 import 'monitoring/monitoring.dart';
 import 'tls/backend_trust_stub.dart'
     if (dart.library.io) 'tls/backend_trust_io.dart';
@@ -128,6 +129,8 @@ final class BackendApi {
 
   late final RegistrationApi voterRegistration = RegistrationApi(_dio);
   late final BallotApi ballots = BallotApi(_dio);
+
+  late final MaterialsApi materials = MaterialsApi(_dio);
 
   /// Verificações públicas de saúde e prontidão do backend.
   /// A composição consulta prontidão na abertura, sem bloquear login ou cache.

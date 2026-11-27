@@ -24,6 +24,7 @@
 //! ou panic fora do fluxo controlado, como na inicialização do ambiente.
 
 mod database;
+pub(crate) mod materials;
 pub(crate) mod results;
 mod scenario_filter;
 pub(crate) mod world;

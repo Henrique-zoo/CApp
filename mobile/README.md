@@ -586,6 +586,18 @@ A correção consta no [changelog do Dartdoc 9.0.8](https://github.com/dart-lang
 A validação pode utilizar uma instalação isolada dessa ferramenta em .dart_tool,
 sem alterar as dependências do aplicativo.
 
+## Materiais acadêmicos
+
+Após entrar com uma conta estudantil, abra a aba **Materiais** e escolha um CA.
+A lista pode ser filtrada por disciplina. Abra um material para consultar a
+descrição e acessar o link externo ou salvar o PDF pelo seletor do sistema.
+
+A conta autorizada no CA vê a opção **Publicar material**. Selecione a disciplina,
+informe o título e o link ou escolha um PDF de até 10 MiB. A opção PDF aparece
+quando o backend fornece armazenamento de arquivos. Após falha de envio, repetir
+a publicação com os mesmos dados no formulário reaproveita a chave da tentativa.
+O [guia do backend](../backend/README.md#materials) explica a configuração do CA.
+
 ## Testes Gherkin
 
 Os cenários compartilhados estão em `../features/`. Antes da análise estática

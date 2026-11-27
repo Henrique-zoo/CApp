@@ -130,6 +130,16 @@ async fn main() -> anyhow::Result<()> {
         PgDatabase::new(pool),
         Clients::new(firebase, MicrosoftGraphClient::new(http)),
     );
+    let state = match env::var_os("MATERIALS_STORAGE_DIR").filter(|path| !path.is_empty()) {
+        Some(path) => {
+            let storage =
+                backend::infrastructure::storage::DirectoryMaterialStorage::new(path.into())
+                    .await
+                    .context("Não foi possível abrir o armazenamento privado de materiais")?;
+            state.with_material_storage(Arc::new(storage))
+        }
+        None => state,
+    };
 
     let listener = TcpListener::bind(HTTPS_ADDRESS)
         .with_context(|| format!("Não foi possível abrir o socket HTTPS em {HTTPS_ADDRESS}"))?;

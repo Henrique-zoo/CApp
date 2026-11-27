@@ -1,8 +1,3 @@
-//! Camada de casos de uso prevista para o módulo de materiais acadêmicos.
-//!
-//! [`commands`] agrupará alterações de estado, [`queries`] consultas e
-//! [`services`] a coordenação dessas operações. Ainda não há implementações.
-
-pub mod commands;
-pub mod queries;
+//! Operações de publicação e consulta de materiais.
+pub mod ports;
 pub mod services;
