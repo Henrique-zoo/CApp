@@ -362,10 +362,10 @@ para a conta e o CA.
 
 ### Armazenar e recuperar PDFs
 
-O Compose usa o volume privado `materials_data`, com proprietário inicial
-`1000:1000`. Instalações com outro `BACKEND_UID` ou `BACKEND_GID` precisam
-atribuir ao usuário do processo acesso de escrita ao volume. Fora do Compose,
-configure `MATERIALS_STORAGE_DIR` com um diretório persistente e privado.
+O Compose inicializa o volume privado `materials_data` com o UID e o GID
+configurados para o backend. Ao mudar `BACKEND_UID` ou `BACKEND_GID` em uma
+instalação com volume existente, ajuste a propriedade dos arquivos desse volume.
+Fora do Compose, configure `MATERIALS_STORAGE_DIR` com um diretório persistente e privado.
 Com a variável ausente, o servidor segue aceitando links. Instâncias que
 compartilham o PostgreSQL precisam usar o mesmo armazenamento de PDFs.
 
@@ -692,7 +692,7 @@ precedência sobre esse arquivo.
 | `BACKEND_TLS_KEY_FILE` | `./.tls/backend.key` no Compose | PEM da chave privada que corresponde ao certificado. |
 | `BACKEND_TLS_HEALTH_HOST` | `localhost` | DNS do certificado usado pelo healthcheck. |
 | `BACKEND_TLS_HEALTH_CA_FILE` | Certificado do servidor no Compose | PEM da âncora para a sondagem, configurável para um certificado emitido por CA. |
-| `BACKEND_UID` / `BACKEND_GID` | `1000` / `1000` | Usuário e grupo do container com acesso aos PEMs. |
+| `BACKEND_UID` / `BACKEND_GID` | `1000` / `1000` | Usuário e grupo do container para ler os PEMs e inicializar o volume de materiais. |
 | `RUST_LOG` | `info` | Filtro dos eventos de diagnóstico do backend. |
 | `FIREBASE_PROJECT_NUMBER` | Obrigatória no servidor | Número público do projeto, usado no emissor e audiência do App Check; não é o project ID. |
 | `FIREBASE_APP_CHECK_APP_IDS` | Obrigatória no servidor | App IDs Firebase permitidos, separados por vírgula e pertencentes ao número do projeto. O exemplo contém o app Android deste checkout. |

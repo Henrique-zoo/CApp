@@ -25,6 +25,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        BACKEND_UID: "${BACKEND_UID:-1000}"
+        BACKEND_GID: "${BACKEND_GID:-1000}"
     user: "${BACKEND_UID:-1000}:${BACKEND_GID:-1000}"
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-capp}:${POSTGRES_PASSWORD:-capp}@postgres:5432/${POSTGRES_DB:-capp}

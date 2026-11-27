@@ -19,12 +19,16 @@ FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && install -d -m 0700 -o 1000 -g 1000 /var/lib/capp/materials
+    && rm -rf /var/lib/apt/lists/*
+
+ARG BACKEND_UID=10001
+ARG BACKEND_GID=10001
+
+RUN install -d -m 0700 -o "$BACKEND_UID" -g "$BACKEND_GID" /var/lib/capp/materials
 
 COPY --from=builder /usr/local/bin/backend /usr/local/bin/backend
 
-USER 10001:10001
+USER ${BACKEND_UID}:${BACKEND_GID}
 EXPOSE 3000
 
 CMD ["/usr/local/bin/backend"]
