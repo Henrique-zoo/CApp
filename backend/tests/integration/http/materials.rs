@@ -3,84 +3,36 @@
 use std::sync::Arc;
 
 use axum::{
-    Router,
     body::{Body, to_bytes},
     http::{Request, StatusCode, header},
 };
 use backend::{
-    api::{router::create_router, state::AppState},
-    infrastructure::{database::PgDatabase, storage::DirectoryMaterialStorage},
-    modules::{
-        identity::infrastructure::firebase::AppCheckVerifier,
-        materials::application::{ports::MaterialAccount, services::MAX_PDF_BYTES},
-    },
-    test_support::local_identity_clients,
+    infrastructure::storage::DirectoryMaterialStorage,
+    modules::materials::application::{ports::MaterialAccount, services::MAX_PDF_BYTES},
 };
-use chrono::Utc;
-use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use uuid::Uuid;
-use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
 
 use crate::{materials_fixtures as fixtures, support::TestDatabase};
 
+#[path = "../../fixtures/materials/auth.rs"]
+mod auth;
+use auth::LocalMaterialAuth;
+
 struct HttpFixture {
-    app: Router,
-    _jwks: MockServer,
-    attestation: String,
+    auth: LocalMaterialAuth,
     root: std::path::PathBuf,
 }
 
 impl HttpFixture {
     async fn new(db: &TestDatabase) -> Self {
-        let jwks = MockServer::start().await;
-        let endpoint = format!("{}/materials-jwks", jwks.uri());
-        Mock::given(path("/materials-jwks"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .insert_header("cache-control", "max-age=300")
-                    .set_body_raw(
-                        include_str!("../../fixtures/jwt/jwks.json"),
-                        "application/json",
-                    ),
-            )
-            .mount(&jwks)
-            .await;
-        let http = reqwest::Client::new();
-        let clients = local_identity_clients(
-            "materials-test".into(),
-            http.clone(),
-            endpoint.clone(),
-            jwks.uri(),
-        )
-        .unwrap();
-        let app_id = "1:1234567890:android:capp";
-        let app_check = AppCheckVerifier::new_with_endpoint(
-            "1234567890".into(),
-            vec![app_id.into()],
-            http,
-            endpoint,
-        )
-        .unwrap();
         let root = std::env::temp_dir().join(format!("capp-materials-{}", Uuid::new_v4()));
         let storage = DirectoryMaterialStorage::new(root.clone()).await.unwrap();
-        let app = create_router(
-            AppState::new(PgDatabase::new(db.pool.clone()), clients)
-                .with_material_storage(Arc::new(storage)),
-            app_check,
-        );
-        let now = Utc::now().timestamp();
-        let attestation = jwt(json!({
-            "sub":app_id, "iss":"https://firebaseappcheck.googleapis.com/1234567890",
-            "aud":["projects/1234567890"], "iat":now-60,"exp":now+3600
-        }));
-        Self {
-            app,
-            _jwks: jwks,
-            attestation,
-            root,
-        }
+        let auth =
+            LocalMaterialAuth::new(&db.pool, "materials-test".into(), Some(Arc::new(storage)))
+                .await;
+        Self { auth, root }
     }
 
     fn request(
@@ -89,21 +41,11 @@ impl HttpFixture {
         path: &str,
         account: MaterialAccount,
     ) -> axum::http::request::Builder {
-        let now = Utc::now().timestamp();
-        let token = jwt(json!({
-            "sub":account.id, "aud":"materials-test", "iss":"https://securetoken.google.com/materials-test",
-            "iat":now-60,"auth_time":now-120,"exp":now+3600,
-            "firebase":{"sign_in_provider":"password","identities":{"microsoft.com":[account.microsoft_object_id]}}
-        }));
-        Request::builder()
-            .method(method)
-            .uri(path)
-            .header(header::AUTHORIZATION, format!("Bearer {token}"))
-            .header("x-firebase-appcheck", &self.attestation)
+        self.auth.request(method, path, account)
     }
 
     async fn json(&self, request: Request<Body>, status: StatusCode) -> Value {
-        let response = self.app.clone().oneshot(request).await.unwrap();
+        let response = self.auth.app.clone().oneshot(request).await.unwrap();
         let actual = response.status();
         let body: Value =
             serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
@@ -164,16 +106,6 @@ impl Drop for HttpFixture {
     }
 }
 
-fn jwt(claims: Value) -> String {
-    let mut header = Header::new(Algorithm::RS256);
-    header.kid = Some("test-kid".into());
-    let key = EncodingKey::from_rsa_pem(include_bytes!(
-        "../../fixtures/jwt/test-only-rsa-private.pem"
-    ))
-    .unwrap();
-    encode(&header, &claims, &key).unwrap()
-}
-
 #[tokio::test]
 async fn materials_authorize_publish_and_read_by_ca() {
     let db = TestDatabase::new().await;
@@ -197,7 +129,7 @@ async fn materials_authorize_publish_and_read_by_ca() {
     );
     let request = Request::builder()
         .uri(&path)
-        .header("x-firebase-appcheck", &api.attestation)
+        .header("x-firebase-appcheck", &api.auth.attestation)
         .body(Body::empty())
         .unwrap();
     assert_eq!(
@@ -350,7 +282,7 @@ async fn materials_upload_and_download_pdf_at_exact_limit() {
         .request("GET", &format!("{path}/{id}/file"), data.students[0])
         .body(Body::empty())
         .unwrap();
-    let response = api.app.clone().oneshot(request).await.unwrap();
+    let response = api.auth.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()[header::CONTENT_TYPE], "application/pdf");
     assert_eq!(

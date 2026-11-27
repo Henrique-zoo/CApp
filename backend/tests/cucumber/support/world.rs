@@ -34,6 +34,8 @@ use super::{
 pub(crate) struct AppWorld {
     /// Dados exclusivos dos cenários de publicação de materiais.
     pub(crate) materials: Option<super::materials::MaterialsScenario>,
+    /// Router autenticado, dados e última resposta da consulta de materiais.
+    pub(crate) material_reads: Option<super::materials::MaterialReadScenario>,
     /// Banco associado pelo hook `before` e liberado pelo hook `after`.
     database: Option<TestDatabase>,
     /// Router real com o estado associado ao pool desse cenário.

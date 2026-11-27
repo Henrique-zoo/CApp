@@ -230,27 +230,35 @@ class _CenterMaterialsState extends State<_CenterMaterials> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                DropdownButtonFormField<String>(
-                  key: ValueKey(_disciplineId),
-                  initialValue: _disciplineId ?? '',
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Disciplina'),
-                  items: [
-                    const DropdownMenuItem(
-                      value: '',
-                      child: Text('Todas as disciplinas'),
-                    ),
-                    for (final item in disciplines)
-                      DropdownMenuItem(
-                        value: item.id,
-                        child: Text(item.name, overflow: TextOverflow.ellipsis),
+                if (disciplines.isEmpty)
+                  const Text(
+                    'Nenhuma disciplina disponível para organizar os materiais.',
+                  )
+                else
+                  DropdownButtonFormField<String>(
+                    key: ValueKey(_disciplineId),
+                    initialValue: _disciplineId ?? '',
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Disciplina'),
+                    items: [
+                      const DropdownMenuItem(
+                        value: '',
+                        child: Text('Todas as disciplinas'),
                       ),
-                  ],
-                  onChanged: (value) {
-                    _disciplineId = value == '' ? null : value;
-                    _load();
-                  },
-                ),
+                      for (final item in disciplines)
+                        DropdownMenuItem(
+                          value: item.id,
+                          child: Text(
+                            item.name,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      _disciplineId = value == '' ? null : value;
+                      _load();
+                    },
+                  ),
                 if (widget.center.canPublish) ...[
                   const SizedBox(height: 8),
                   FilledButton.icon(

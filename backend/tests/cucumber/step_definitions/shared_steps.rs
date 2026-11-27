@@ -20,10 +20,11 @@ fn given_estou_autenticado_como_valor(_world: &mut AppWorld, _value_1: String) {
     pending_step("estou autenticado como {string}");
 }
 
-/// Pendente: existe o material publicado {string} nesse CA.
+/// Prepara um material publicado no CA da consulta.
 #[given(regex = r#"^existe o material publicado "([^"]*)" nesse CA$"#)]
-fn given_existe_o_material_publicado_valor_nesse_ca(_world: &mut AppWorld, _value_1: String) {
-    pending_step("existe o material publicado {string} nesse CA");
+async fn given_existe_o_material_publicado_valor_nesse_ca(world: &mut AppWorld, title: String) {
+    let scenario = super::visualizacao_materiais::reads(world);
+    scenario.seed(scenario.active, title, false).await;
 }
 
 /// Pendente: não recebeu uma concessão separada de {string}.

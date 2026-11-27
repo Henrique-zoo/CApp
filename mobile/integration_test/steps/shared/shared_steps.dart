@@ -10,6 +10,7 @@
 /// cenários já automatizados.
 library;
 
+import '../../support/materials_scenario.dart';
 import '../../support/step_registry.dart';
 
 /// Steps reutilizados entre funcionalidades, consumidos pelo registro global.
@@ -26,7 +27,10 @@ final sharedSteps = <StepDefinition>[
   pendingStep(r'^a operação é recusada por falta de permissão$'),
   pendingStep(r'^altero o CA ativo para "([^"]*)"$'),
   pendingStep(r'^estou autenticado como "([^"]*)"$'),
-  pendingStep(r'^existe o material publicado "([^"]*)" nesse CA$'),
+  materialsStep(
+    r'^existe o material publicado "([^"]*)" nesse CA$',
+    (scenario, match) => scenario.seed(match[1]!),
+  ),
   pendingStep(r'^não recebeu uma concessão separada de "([^"]*)"$'),
   pendingStep(r'^não vejo "([^"]*)"$'),
   pendingStep(r'^o CA "([^"]*)" deixa de possuir o cargo "([^"]*)"$'),

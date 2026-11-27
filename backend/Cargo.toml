@@ -52,6 +52,8 @@ serde_jcs = "0.4"
 rand = "0.8"
 
 [dev-dependencies]
+# Disponibiliza os provedores locais quando o Cargo compila os alvos de teste.
+backend = { path = ".", features = ["test-support"] }
 tokio-test = "0.4"
 tower = "0.5"
 cucumber = "0.21"
@@ -77,6 +79,10 @@ path = "tests/cucumber/scenario_filters.rs"
 [[test]]
 name = "bdd_step_registry"
 path = "tests/cucumber/step_registry.rs"
+
+[[example]]
+name = "materials_mobile"
+path = "tests/cucumber/materials_mobile.rs"
 
 [lints.rust]
 missing_docs = "warn"

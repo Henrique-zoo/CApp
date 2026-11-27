@@ -15,7 +15,7 @@ Funcionalidade: Publicação de materiais acadêmicos
     E em cada um dos CAs "CA de Computação" e "CA de Matemática" há um estudante com acesso à consulta e sem permissão de publicação
 
   # I06 acompanha a publicação (#111), a validação de links (#112) e a consulta no CA (#114, #115).
-  @i06 @pending_mobile
+  @i06
   Regra: A gestão autorizada pode publicar links externos para os estudantes do CA
 
     Cenário: Publicar um link externo e disponibilizá-lo aos estudantes
@@ -57,7 +57,7 @@ Funcionalidade: Publicação de materiais acadêmicos
       E o material "Referências de Cálculo I" não aparece entre os materiais publicados do "CA de Computação"
 
   # I11 acompanha o envio (#111), a política de arquivos (#112) e o acesso ao conteúdo (#114, #115).
-  @i11 @pending_mobile
+  @i11
   Regra: A gestão autorizada pode publicar PDFs dentro do tamanho permitido
 
     Cenário: Publicar um PDF e disponibilizá-lo aos estudantes
