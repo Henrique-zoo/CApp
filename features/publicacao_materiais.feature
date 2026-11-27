@@ -1,7 +1,7 @@
 # language: pt
 
-# Referência: Relatório de Features do Projeto, seção 6.2.
-# O MVP contempla a publicação de links externos e arquivos PDF por integrantes autorizados.
+# Issue #107 e Relatório de Features do Projeto, seção 6.2.
+# A publicação respeita as permissões por CA da #52 e o vínculo com a disciplina da #118.
 @backend @mobile
 Funcionalidade: Publicação de materiais acadêmicos
 
@@ -9,93 +9,113 @@ Funcionalidade: Publicação de materiais acadêmicos
   Quero disponibilizar materiais acadêmicos
   Para compartilhar conteúdos de apoio aos estudantes
 
-  @pending_backend @pending_mobile
-  Regra: A gestão autorizada pode publicar materiais por meio de links externos
+  Contexto:
+    Dado que o CA ativo é "CA de Computação"
+    E a disciplina "Cálculo I" pertence à grade curricular do contexto acadêmico
+    E em cada um dos CAs "CA de Computação" e "CA de Matemática" há um estudante com acesso à consulta e sem permissão de publicação
 
-    Cenário: Publicar material com link externo válido
-      Dado que o CA ativo é "CA de Computação"
-      E que o integrante possui a permissão "Gerenciar materiais" no CA ativo
-      Quando o integrante publica o material "Referências de Cálculo I" com o link externo "https://exemplo.edu.br/calculo"
-      Então a publicação do material é concluída
-      E o endereço do link externo fica associado ao material publicado
+  # I06 acompanha a publicação (#111), a validação de links (#112) e a consulta no CA (#114, #115).
+  @i06 @pending_backend @pending_mobile
+  Regra: A gestão autorizada pode publicar links externos para os estudantes do CA
 
-    Cenário: Recusar publicação de material com link externo inválido
-      Dado que o CA ativo é "CA de Computação"
-      E que o integrante possui a permissão "Gerenciar materiais" no CA ativo
-      Quando o integrante tenta publicar o material "Referências de Cálculo I" com um link externo inválido
-      Então a publicação do material é recusada
-      E o material não fica disponível como publicado
+    Cenário: Publicar um link externo e disponibilizá-lo aos estudantes
+      Dado que o integrante possui a permissão "Gerenciar materiais" no CA ativo
+      Quando o integrante solicita a publicação de "Referências de Cálculo I" em "Cálculo I" com o link "https://exemplo.edu.br/calculo"
+      Então um estudante sem permissão de publicação encontra "Referências de Cálculo I" em "Cálculo I" no "CA de Computação"
+      E o estudante consegue acessar o endereço "https://exemplo.edu.br/calculo" a partir do material publicado
+      E o material "Referências de Cálculo I" não aparece entre os materiais publicados do "CA de Matemática"
 
-    Cenário: Impedir publicação de link externo por integrante sem permissão
-      Dado que o CA ativo é "CA de Computação"
-      E o integrante não possui a permissão "Gerenciar materiais" nesse CA
-      Quando o integrante tenta publicar o material "Referências de Cálculo I" com o link externo "https://exemplo.edu.br/calculo"
+    Esquema do Cenário: Recusar um endereço externo inválido
+      Dado que o integrante possui a permissão "Gerenciar materiais" no CA ativo
+      Quando o integrante solicita a publicação de "Referências de Cálculo I" em "Cálculo I" com o link "<endereco>"
+      Então a publicação do material é recusada por endereço externo inválido
+      E o material "Referências de Cálculo I" não aparece entre os materiais publicados do "CA de Computação"
+
+      Exemplos:
+        | endereco          |
+        |                   |
+        | calculo-sem-url   |
+
+    Cenário: Impedir a publicação de link por integrante sem permissão
+      Dado o integrante não possui a permissão "Gerenciar materiais" nesse CA
+      Quando o integrante solicita a publicação de "Referências de Cálculo I" em "Cálculo I" com o link "https://exemplo.edu.br/calculo"
       Então a publicação do material é recusada por falta de permissão
-      E o material não fica disponível como publicado
+      E o material "Referências de Cálculo I" não aparece entre os materiais publicados do "CA de Computação"
 
-    Cenário: Impedir publicação quando a permissão pertence a outro CA
-      Dado que o CA ativo é "CA de Computação"
-      E o integrante possui a permissão "Gerenciar materiais" somente em outro CA
-      Quando o integrante tenta publicar o material "Referências de Cálculo I" com o link externo "https://exemplo.edu.br/calculo"
+    Cenário: Impedir a publicação de link com permissão concedida somente em outro CA
+      Dado que a permissão "Gerenciar materiais" do integrante vale somente no "CA de Matemática"
+      Quando o integrante solicita a publicação de "Referências de Cálculo I" em "Cálculo I" com o link "https://exemplo.edu.br/calculo"
       Então a publicação do material é recusada por falta de permissão
-      E o material não fica disponível como publicado
+      E o material "Referências de Cálculo I" não aparece entre os materiais publicados do "CA de Computação"
+      E o material "Referências de Cálculo I" não aparece entre os materiais publicados do "CA de Matemática"
 
-  @pending_backend @pending_mobile
-  Regra: A gestão autorizada pode publicar materiais por meio de arquivos
+    Cenário: Recusar publicação em uma disciplina de outro contexto acadêmico
+      Dado que o integrante possui a permissão "Gerenciar materiais" no CA ativo
+      E existe a disciplina "Direito Constitucional" em outro contexto acadêmico
+      Quando o integrante solicita a publicação de "Referências de Cálculo I" em "Direito Constitucional" com o link "https://exemplo.edu.br/calculo"
+      Então a publicação do material é recusada por disciplina incompatível com o CA ativo
+      E o material "Referências de Cálculo I" não aparece entre os materiais publicados do "CA de Computação"
 
-    Cenário: Publicar material com arquivo PDF válido
-      Dado que o CA ativo é "CA de Computação"
-      E que o integrante possui a permissão "Gerenciar materiais" no CA ativo
-      Quando o integrante publica o material "Resumo de Estruturas de Dados" com um arquivo PDF válido
-      Então a publicação do material é concluída
-      E o arquivo PDF fica associado ao material publicado
+  # I11 acompanha o envio (#111), a política de arquivos (#112) e o acesso ao conteúdo (#114, #115).
+  @i11 @pending_backend @pending_mobile
+  Regra: A gestão autorizada pode publicar PDFs dentro do tamanho permitido
+
+    Cenário: Publicar um PDF e disponibilizá-lo aos estudantes
+      Dado que o integrante possui a permissão "Gerenciar materiais" no CA ativo
+      E o arquivo "resumo.pdf" é um PDF válido abaixo do limite de tamanho
+      Quando o integrante solicita a publicação de "Resumo de Cálculo I" em "Cálculo I" com o arquivo "resumo.pdf"
+      Então um estudante sem permissão de publicação encontra "Resumo de Cálculo I" em "Cálculo I" no "CA de Computação"
+      E o estudante consegue acessar o PDF "resumo.pdf" a partir do material publicado
+      E o material "Resumo de Cálculo I" não aparece entre os materiais publicados do "CA de Matemática"
 
     Cenário: Recusar arquivo em formato não aceito
-      Dado que o CA ativo é "CA de Computação"
-      E que o integrante possui a permissão "Gerenciar materiais" no CA ativo
-      Quando o integrante tenta publicar o material "Resumo de Estruturas de Dados" com um arquivo em formato não aceito
-      Então a publicação do material é recusada
-      E o material não fica disponível como publicado
+      Dado que o integrante possui a permissão "Gerenciar materiais" no CA ativo
+      E o arquivo "programa.exe" tem tamanho abaixo do limite e formato não aceito para materiais
+      Quando o integrante solicita a publicação de "Resumo de Cálculo I" em "Cálculo I" com o arquivo "programa.exe"
+      Então a publicação do material é recusada por formato de arquivo não aceito
+      E o material "Resumo de Cálculo I" não aparece entre os materiais publicados do "CA de Computação"
 
-    Cenário: Recusar arquivo acima do limite de tamanho permitido
-      Dado que o CA ativo é "CA de Computação"
-      E que o integrante possui a permissão "Gerenciar materiais" no CA ativo
-      Quando o integrante tenta publicar o material "Resumo de Estruturas de Dados" com um arquivo acima do limite de tamanho permitido
-      Então a publicação do material é recusada
-      E o material não fica disponível como publicado
+    Cenário: Recusar PDF que excede o limite de tamanho em um byte
+      Dado que o integrante possui a permissão "Gerenciar materiais" no CA ativo
+      E o arquivo "resumo.pdf" é um PDF válido 1 byte acima do limite de tamanho
+      Quando o integrante solicita a publicação de "Resumo de Cálculo I" em "Cálculo I" com o arquivo "resumo.pdf"
+      Então a publicação do material é recusada por tamanho de arquivo acima do limite
+      E o material "Resumo de Cálculo I" não aparece entre os materiais publicados do "CA de Computação"
 
-    Cenário: Aceitar arquivo no limite de tamanho permitido
-      Dado que o CA ativo é "CA de Computação"
-      E que o integrante possui a permissão "Gerenciar materiais" no CA ativo
-      Quando o integrante publica o material "Resumo de Estruturas de Dados" com um arquivo no limite de tamanho permitido
-      Então a publicação do material é concluída
-      E o arquivo fica associado ao material publicado
+    Cenário: Publicar PDF com tamanho exatamente no limite permitido
+      Dado que o integrante possui a permissão "Gerenciar materiais" no CA ativo
+      E o arquivo "resumo.pdf" é um PDF válido exatamente no limite de tamanho
+      Quando o integrante solicita a publicação de "Resumo de Cálculo I" em "Cálculo I" com o arquivo "resumo.pdf"
+      Então um estudante sem permissão de publicação encontra "Resumo de Cálculo I" em "Cálculo I" no "CA de Computação"
+      E o estudante consegue acessar o PDF "resumo.pdf" a partir do material publicado
 
-    Cenário: Não publicar material quando ocorre falha no envio do arquivo
-      Dado que o CA ativo é "CA de Computação"
-      E que o integrante possui a permissão "Gerenciar materiais" no CA ativo
-      Quando o integrante tenta publicar o material "Resumo de Estruturas de Dados" com um arquivo PDF válido, mas ocorre uma falha durante o envio
-      Então a publicação do material não é concluída
-      E o material não fica disponível como publicado
+    Cenário: Manter o material indisponível quando o envio falha
+      Dado que o integrante possui a permissão "Gerenciar materiais" no CA ativo
+      E o arquivo "resumo.pdf" é um PDF válido abaixo do limite de tamanho
+      E o envio do arquivo falhará nesta tentativa
+      Quando o integrante solicita a publicação de "Resumo de Cálculo I" em "Cálculo I" com o arquivo "resumo.pdf"
+      Então o integrante é informado de que o envio do arquivo falhou
+      E o material "Resumo de Cálculo I" não aparece entre os materiais publicados do "CA de Computação"
 
-    Cenário: Permitir nova tentativa após falha no envio do arquivo
-      Dado que o CA ativo é "CA de Computação"
-      E que o integrante possui a permissão "Gerenciar materiais" no CA ativo
-      E que uma tentativa anterior de envio do arquivo do material "Resumo de Estruturas de Dados" falhou
-      Quando o integrante realiza uma nova tentativa com um arquivo PDF válido
-      Então a publicação do material é concluída
-      E o arquivo PDF fica associado ao material publicado
+    Cenário: Publicar uma única vez ao repetir o envio que falhou
+      Dado que o integrante possui a permissão "Gerenciar materiais" no CA ativo
+      E o arquivo "resumo.pdf" é um PDF válido abaixo do limite de tamanho
+      E o envio anterior de "resumo.pdf" para publicar "Resumo de Cálculo I" no CA ativo falhou
+      Quando o integrante solicita a publicação de "Resumo de Cálculo I" em "Cálculo I" com o arquivo "resumo.pdf"
+      Então um estudante sem permissão de publicação encontra uma única publicação de "Resumo de Cálculo I" em "Cálculo I" no "CA de Computação"
+      E o estudante consegue acessar o PDF "resumo.pdf" a partir do material publicado
 
-    Cenário: Impedir publicação de arquivo por integrante sem permissão
-      Dado que o CA ativo é "CA de Computação"
-      E o integrante não possui a permissão "Gerenciar materiais" nesse CA
-      Quando o integrante tenta publicar o material "Resumo de Estruturas de Dados" com um arquivo PDF válido
+    Cenário: Impedir a publicação de PDF por integrante sem permissão
+      Dado o integrante não possui a permissão "Gerenciar materiais" nesse CA
+      E o arquivo "resumo.pdf" é um PDF válido abaixo do limite de tamanho
+      Quando o integrante solicita a publicação de "Resumo de Cálculo I" em "Cálculo I" com o arquivo "resumo.pdf"
       Então a publicação do material é recusada por falta de permissão
-      E o material não fica disponível como publicado
+      E o material "Resumo de Cálculo I" não aparece entre os materiais publicados do "CA de Computação"
 
-    Cenário: Impedir publicação de arquivo quando a permissão pertence a outro CA
-      Dado que o CA ativo é "CA de Computação"
-      E o integrante possui a permissão "Gerenciar materiais" somente em outro CA
-      Quando o integrante tenta publicar o material "Resumo de Estruturas de Dados" com um arquivo PDF válido
+    Cenário: Impedir a publicação de PDF com permissão concedida somente em outro CA
+      Dado que a permissão "Gerenciar materiais" do integrante vale somente no "CA de Matemática"
+      E o arquivo "resumo.pdf" é um PDF válido abaixo do limite de tamanho
+      Quando o integrante solicita a publicação de "Resumo de Cálculo I" em "Cálculo I" com o arquivo "resumo.pdf"
       Então a publicação do material é recusada por falta de permissão
-      E o material não fica disponível como publicado
+      E o material "Resumo de Cálculo I" não aparece entre os materiais publicados do "CA de Computação"
+      E o material "Resumo de Cálculo I" não aparece entre os materiais publicados do "CA de Matemática"

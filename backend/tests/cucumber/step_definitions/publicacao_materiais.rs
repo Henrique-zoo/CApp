@@ -1,169 +1,151 @@
-//! A publicação de materiais permite que integrantes autorizados disponibilizem
-//! links externos e arquivos acadêmicos nos Centros Acadêmicos.
+//! Registra os steps de I06 (links) e I11 (arquivos) da publicação de materiais.
 //!
-//! Estes registros ligam os cenários ao runner enquanto a automação real está
-//! pendente. Cada passo chama `pending_step` e falha explicitamente se executado.
-//! Não prepara estado nem simula resultados do produto. Expressões de contexto
-//! e autorização já registradas em outros módulos são reutilizadas.
+//! A automação funcional acompanha as entregas de publicação, conteúdo e consulta.
+//! Os steps de contexto acadêmico e autorização comuns usam os registros existentes.
 
 use cucumber::{given, then, when};
 
 use super::pending_step;
 use crate::support::AppWorld;
 
-/// Pendente: que uma tentativa anterior de envio do arquivo do material {string} falhou.
-#[given(regex = r#"^que uma tentativa anterior de envio do arquivo do material "([^"]*)" falhou$"#)]
-fn given_tentativa_anterior_envio_arquivo_falhou(_world: &mut AppWorld, _material: String) {
-    pending_step("que uma tentativa anterior de envio do arquivo do material {string} falhou");
-}
-
-/// Pendente: o integrante publica o material {string} com o link externo {string}.
-#[when(regex = r#"^o integrante publica o material "([^"]*)" com o link externo "([^"]*)"$"#)]
-fn when_integrante_publica_material_com_link(
-    _world: &mut AppWorld,
-    _material: String,
-    _link: String,
-) {
-    pending_step("o integrante publica o material {string} com o link externo {string}");
-}
-
-/// Pendente: o integrante tenta publicar o material {string} com um link externo inválido.
-#[when(
-    regex = r#"^o integrante tenta publicar o material "([^"]*)" com um link externo inválido$"#
+/// Prepara um estudante que pode consultar os materiais de cada CA indicado.
+#[given(
+    regex = r#"^em cada um dos CAs "([^"]*)" e "([^"]*)" há um estudante com acesso à consulta e sem permissão de publicação$"#
 )]
-fn when_integrante_tenta_publicar_material_com_link_invalido(
+fn given_estudantes_com_acesso_aos_materiais(
     _world: &mut AppWorld,
-    _material: String,
-) {
-    pending_step("o integrante tenta publicar o material {string} com um link externo inválido");
-}
-
-/// Pendente: o integrante tenta publicar o material {string} com o link externo {string}.
-#[when(
-    regex = r#"^o integrante tenta publicar o material "([^"]*)" com o link externo "([^"]*)"$"#
-)]
-fn when_integrante_tenta_publicar_material_com_link(
-    _world: &mut AppWorld,
-    _material: String,
-    _link: String,
-) {
-    pending_step("o integrante tenta publicar o material {string} com o link externo {string}");
-}
-
-/// Pendente: o integrante publica o material {string} com um arquivo PDF válido.
-#[when(regex = r#"^o integrante publica o material "([^"]*)" com um arquivo PDF válido$"#)]
-fn when_integrante_publica_material_com_pdf_valido(_world: &mut AppWorld, _material: String) {
-    pending_step("o integrante publica o material {string} com um arquivo PDF válido");
-}
-
-/// Pendente: o integrante tenta publicar o material {string} com um arquivo em formato não aceito.
-#[when(
-    regex = r#"^o integrante tenta publicar o material "([^"]*)" com um arquivo em formato não aceito$"#
-)]
-fn when_integrante_tenta_publicar_material_com_formato_nao_aceito(
-    _world: &mut AppWorld,
-    _material: String,
+    _primeiro_ca: String,
+    _segundo_ca: String,
 ) {
     pending_step(
-        "o integrante tenta publicar o material {string} com um arquivo em formato não aceito",
+        "em cada um dos CAs {string} e {string} há um estudante com acesso à consulta e sem permissão de publicação",
     );
 }
 
-/// Pendente: o integrante tenta publicar o material {string} com um arquivo acima do limite de tamanho permitido.
-#[when(
-    regex = r#"^o integrante tenta publicar o material "([^"]*)" com um arquivo acima do limite de tamanho permitido$"#
+/// Prepara uma permissão que vale apenas no CA indicado.
+#[given(regex = r#"^que a permissão "([^"]*)" do integrante vale somente no "([^"]*)"$"#)]
+fn given_permissao_somente_em_outro_ca(_world: &mut AppWorld, _permissao: String, _ca: String) {
+    pending_step("que a permissão {string} do integrante vale somente no {string}");
+}
+
+/// Prepara um PDF conforme a posição indicada em relação ao limite de tamanho.
+#[given(
+    regex = r#"^o arquivo "([^"]*)" é um PDF válido (abaixo do limite de tamanho|exatamente no limite de tamanho|1 byte acima do limite de tamanho)$"#
 )]
-fn when_integrante_tenta_publicar_material_com_arquivo_acima_limite(
-    _world: &mut AppWorld,
-    _material: String,
-) {
+fn given_pdf_com_tamanho(_world: &mut AppWorld, _arquivo: String, _tamanho: String) {
+    pending_step("o arquivo {string} é um PDF válido na faixa de tamanho informada");
+}
+
+/// Prepara um arquivo que só infringe a regra de formato.
+#[given(
+    regex = r#"^o arquivo "([^"]*)" tem tamanho abaixo do limite e formato não aceito para materiais$"#
+)]
+fn given_arquivo_com_formato_nao_aceito(_world: &mut AppWorld, _arquivo: String) {
     pending_step(
-        "o integrante tenta publicar o material {string} com um arquivo acima do limite de tamanho permitido",
+        "o arquivo {string} tem tamanho abaixo do limite e formato não aceito para materiais",
     );
 }
 
-/// Pendente: o integrante publica o material {string} com um arquivo no limite de tamanho permitido.
+/// Prepara uma falha de envio para a tentativa em curso.
+#[given(regex = r"^o envio do arquivo falhará nesta tentativa$")]
+fn given_envio_falhara(_world: &mut AppWorld) {
+    pending_step("o envio do arquivo falhará nesta tentativa");
+}
+
+/// Prepara uma tentativa anterior de envio malsucedida para o mesmo material.
+#[given(regex = r#"^o envio anterior de "([^"]*)" para publicar "([^"]*)" no CA ativo falhou$"#)]
+fn given_envio_anterior_falhou(_world: &mut AppWorld, _arquivo: String, _material: String) {
+    pending_step("o envio anterior de {string} para publicar {string} no CA ativo falhou");
+}
+
+/// Solicita a publicação de um link externo no contexto acadêmico ativo.
 #[when(
-    regex = r#"^o integrante publica o material "([^"]*)" com um arquivo no limite de tamanho permitido$"#
+    regex = r#"^o integrante solicita a publicação de "([^"]*)" em "([^"]*)" com o link "([^"]*)"$"#
 )]
-fn when_integrante_publica_material_com_arquivo_no_limite(
+fn when_solicita_publicacao_com_link(
     _world: &mut AppWorld,
     _material: String,
+    _disciplina: String,
+    _endereco: String,
+) {
+    pending_step("o integrante solicita a publicação de {string} em {string} com o link {string}");
+}
+
+/// Solicita a publicação de um arquivo no contexto acadêmico ativo.
+#[when(
+    regex = r#"^o integrante solicita a publicação de "([^"]*)" em "([^"]*)" com o arquivo "([^"]*)"$"#
+)]
+fn when_solicita_publicacao_com_arquivo(
+    _world: &mut AppWorld,
+    _material: String,
+    _disciplina: String,
+    _arquivo: String,
 ) {
     pending_step(
-        "o integrante publica o material {string} com um arquivo no limite de tamanho permitido",
+        "o integrante solicita a publicação de {string} em {string} com o arquivo {string}",
     );
 }
 
-/// Pendente: o integrante tenta publicar o material {string} com um arquivo PDF válido, mas ocorre uma falha durante o envio.
-#[when(
-    regex = r#"^o integrante tenta publicar o material "([^"]*)" com um arquivo PDF válido, mas ocorre uma falha durante o envio$"#
+/// Confere a visibilidade do material para um estudante sem poderes de gestão.
+#[then(
+    regex = r#"^um estudante sem permissão de publicação encontra "([^"]*)" em "([^"]*)" no "([^"]*)"$"#
 )]
-fn when_integrante_tenta_publicar_pdf_com_falha_no_envio(_world: &mut AppWorld, _material: String) {
+fn then_estudante_encontra_material(
+    _world: &mut AppWorld,
+    _material: String,
+    _disciplina: String,
+    _ca: String,
+) {
     pending_step(
-        "o integrante tenta publicar o material {string} com um arquivo PDF válido, mas ocorre uma falha durante o envio",
+        "um estudante sem permissão de publicação encontra {string} em {string} no {string}",
     );
 }
 
-/// Pendente: o integrante realiza uma nova tentativa com um arquivo PDF válido.
-#[when(regex = r#"^o integrante realiza uma nova tentativa com um arquivo PDF válido$"#)]
-fn when_integrante_realiza_nova_tentativa_com_pdf(_world: &mut AppWorld) {
-    pending_step("o integrante realiza uma nova tentativa com um arquivo PDF válido");
+/// Confere que o endereço publicado é recuperável.
+#[then(
+    regex = r#"^o estudante consegue acessar o endereço "([^"]*)" a partir do material publicado$"#
+)]
+fn then_estudante_acessa_link(_world: &mut AppWorld, _endereco: String) {
+    pending_step("o estudante consegue acessar o endereço {string} a partir do material publicado");
 }
 
-/// Pendente: o integrante tenta publicar o material {string} com um arquivo PDF válido.
-#[when(regex = r#"^o integrante tenta publicar o material "([^"]*)" com um arquivo PDF válido$"#)]
-fn when_integrante_tenta_publicar_material_com_pdf_valido(
+/// Confere que o PDF publicado é recuperável.
+#[then(regex = r#"^o estudante consegue acessar o PDF "([^"]*)" a partir do material publicado$"#)]
+fn then_estudante_acessa_pdf(_world: &mut AppWorld, _arquivo: String) {
+    pending_step("o estudante consegue acessar o PDF {string} a partir do material publicado");
+}
+
+/// Confere que o material não está disponível na consulta do CA indicado.
+#[then(regex = r#"^o material "([^"]*)" não aparece entre os materiais publicados do "([^"]*)"$"#)]
+fn then_material_ausente_da_consulta(_world: &mut AppWorld, _material: String, _ca: String) {
+    pending_step("o material {string} não aparece entre os materiais publicados do {string}");
+}
+
+/// Confere a razão da recusa comunicada ao solicitante.
+#[then(
+    regex = r"^a publicação do material é recusada por (endereço externo inválido|falta de permissão|disciplina incompatível com o CA ativo|formato de arquivo não aceito|tamanho de arquivo acima do limite)$"
+)]
+fn then_publicacao_recusada(_world: &mut AppWorld, _motivo: String) {
+    pending_step("a publicação do material é recusada pelo motivo informado");
+}
+
+/// Confere que a falha de envio é comunicada ao integrante.
+#[then(regex = r"^o integrante é informado de que o envio do arquivo falhou$")]
+fn then_integrante_informado_da_falha(_world: &mut AppWorld) {
+    pending_step("o integrante é informado de que o envio do arquivo falhou");
+}
+
+/// Confere que a nova tentativa produz uma única publicação para consulta.
+#[then(
+    regex = r#"^um estudante sem permissão de publicação encontra uma única publicação de "([^"]*)" em "([^"]*)" no "([^"]*)"$"#
+)]
+fn then_estudante_encontra_publicacao_unica(
     _world: &mut AppWorld,
     _material: String,
+    _disciplina: String,
+    _ca: String,
 ) {
-    pending_step("o integrante tenta publicar o material {string} com um arquivo PDF válido");
-}
-
-/// Pendente: a publicação do material é concluída.
-#[then(regex = r#"^a publicação do material é concluída$"#)]
-fn then_publicacao_material_concluida(_world: &mut AppWorld) {
-    pending_step("a publicação do material é concluída");
-}
-
-/// Pendente: o endereço do link externo fica associado ao material publicado.
-#[then(regex = r#"^o endereço do link externo fica associado ao material publicado$"#)]
-fn then_endereco_link_associado_material_publicado(_world: &mut AppWorld) {
-    pending_step("o endereço do link externo fica associado ao material publicado");
-}
-
-/// Pendente: a publicação do material é recusada.
-#[then(regex = r#"^a publicação do material é recusada$"#)]
-fn then_publicacao_material_recusada(_world: &mut AppWorld) {
-    pending_step("a publicação do material é recusada");
-}
-
-/// Pendente: o material não fica disponível como publicado.
-#[then(regex = r#"^o material não fica disponível como publicado$"#)]
-fn then_material_nao_fica_disponivel_como_publicado(_world: &mut AppWorld) {
-    pending_step("o material não fica disponível como publicado");
-}
-
-/// Pendente: a publicação do material é recusada por falta de permissão.
-#[then(regex = r#"^a publicação do material é recusada por falta de permissão$"#)]
-fn then_publicacao_material_recusada_por_falta_permissao(_world: &mut AppWorld) {
-    pending_step("a publicação do material é recusada por falta de permissão");
-}
-
-/// Pendente: o arquivo PDF fica associado ao material publicado.
-#[then(regex = r#"^o arquivo PDF fica associado ao material publicado$"#)]
-fn then_arquivo_pdf_associado_material_publicado(_world: &mut AppWorld) {
-    pending_step("o arquivo PDF fica associado ao material publicado");
-}
-
-/// Pendente: a publicação do material não é concluída.
-#[then(regex = r#"^a publicação do material não é concluída$"#)]
-fn then_publicacao_material_nao_concluida(_world: &mut AppWorld) {
-    pending_step("a publicação do material não é concluída");
-}
-
-/// Pendente: o arquivo fica associado ao material publicado.
-#[then(regex = r#"^o arquivo fica associado ao material publicado$"#)]
-fn then_arquivo_associado_material_publicado(_world: &mut AppWorld) {
-    pending_step("o arquivo fica associado ao material publicado");
+    pending_step(
+        "um estudante sem permissão de publicação encontra uma única publicação de {string} em {string} no {string}",
+    );
 }
