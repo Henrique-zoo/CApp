@@ -379,11 +379,22 @@ comparar os hashes do diretório de cada CA com `study_material.file_sha256`
 com as publicações suspensas.
 
 Os endpoints e erros estão no [OpenAPI](../packages/api-contracts/openapi.yaml).
-Para executar os cenários da #107 no backend:
+Para executar os cenários de materiais habilitados no backend:
 
 ```bash
-FIREBASE_PROJECT_ID=capp-a331b cargo test --test bdd --locked -- --tags @material_publication
+export FIREBASE_PROJECT_ID='capp-a331b'
+cargo test --test bdd --locked -- --tags '@material_publication'
+cargo test --test bdd --locked -- --tags '@material_viewing'
+cargo test --test bdd --locked -- --tags '@material_organization'
 ```
+
+A publicação executa 14 casos de links e PDFs. Visualização executa 8 casos, e
+organização executa 13. As consultas usam o router real, JWTs sintéticos e
+PostgreSQL isolado por cenário. O exemplo de outros formatos de arquivo e os
+três cenários de alteração de disciplina após publicação seguem pendentes.
+
+O [guia mobile](../mobile/README.md#testes-gherkin) descreve como iniciar a
+fixture local e executar as mesmas features pela interface.
 
 ---
 
@@ -997,18 +1008,18 @@ No diretório `backend`, execute os testes unitários sem PostgreSQL:
 cargo test --lib --locked
 ```
 
-Os testes de integração exigem Docker e criam seus próprios bancos descartáveis; não dependem do PostgreSQL do Compose. A feature `test-support` habilita os testes HTTP com provedores locais. Sem ela, o alvo executa somente os testes de repositórios:
+Os testes de integração exigem Docker e criam seus próprios bancos descartáveis. A dependência de desenvolvimento habilita `test-support` para executar os testes HTTP com provedores locais:
 
 ```bash
-cargo test --test integration --features test-support --locked
+cargo test --test integration --locked
 cargo test --test integration --locked repositories::
-cargo test --test integration --features test-support --locked http::
+cargo test --test integration --locked http::
 ```
 
 Para executar unitários e integração juntos:
 
 ```bash
-cargo test --lib --test integration --features test-support --locked
+cargo test --lib --test integration --locked
 ```
 
 Os detalhes de cobertura, fixtures e filtros por domínio pertencem aos Rustdocs dos módulos e das suítes. Consulte os [Rustdocs de identity](src/modules/identity/mod.rs) e a [entrada dos testes de integração](tests/integration/main.rs). A seção [Documentação Rust](#documentação-rust) explica como gerar a versão navegável.

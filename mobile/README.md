@@ -607,9 +607,6 @@ ou dos testes, gere o arquivo usado pelo runner de integração:
 dart run tool/generate_gherkin.dart
 ```
 
-As steps de domínio atuais ainda são pendentes. A existência do runner e uma
-suíte unitária aprovada não comprovam execução desses fluxos de ponta a ponta.
-
 O runner seleciona cenários `@mobile` e registra aqueles marcados com
 `@pending_mobile` como ignorados, sem executar suas steps. As tags da feature
 e da regra são herdadas pelos cenários gerados. `@pending_backend` não impede
@@ -619,6 +616,39 @@ continua registrando testes ignorados em vez de falhar por ausência de testes.
 A CI gera os cenários antes de `flutter analyze` e verifica os filtros com
 os testes de `test/`; executar os cenários de integração exige um dispositivo
 ou emulador Flutter disponível.
+
+### Cenários de materiais
+
+Com Docker disponível, inicie a fixture em um terminal no diretório `backend`:
+
+```bash
+FIREBASE_PROJECT_ID='capp-a331b' cargo run --locked --example materials_mobile
+```
+
+A fixture escuta em `127.0.0.1:38475`. Ela prepara um PostgreSQL descartável,
+clona um banco por cenário e serve o router real com tokens sintéticos e JWKS
+local. Use uma execução da suíte por fixture. Encerre com Ctrl+C para liberar
+o banco e o container.
+
+Em outro terminal, no diretório `mobile`:
+
+```bash
+flutter pub get --enforce-lockfile
+dart run tool/generate_gherkin.dart
+flutter test --no-pub -d linux integration_test/app_test.dart \
+  --name '(visualizacao|publicacao|organizacao)_materiais[.]feature'
+```
+
+No Android, encaminhe `adb reverse tcp:38475 tcp:38475` no dispositivo de teste
+e informe o ID do dispositivo em `-d`. A fixture pode usar outra porta com
+`MATERIALS_BDD_PORT` no backend e `--dart-define=MATERIALS_BDD_PORT=<porta>`
+no Flutter.
+
+O runner monta o `CApp` com uma sessão estudantil sintética e usa a aba real
+**Materiais**, o gateway e o transporte HTTP de materiais. O teste controla
+somente os efeitos do dispositivo, como seleção e salvamento do PDF e abertura
+do link. A suíte verifica 35 casos. Os 4 ignorados exigem outros formatos de
+arquivo ou edição da disciplina de um material já publicado.
 
 
 ## Firebase App Check

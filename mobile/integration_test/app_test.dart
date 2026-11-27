@@ -6,6 +6,7 @@ import 'package:integration_test/integration_test.dart';
 
 import 'generated/gherkin_cases.dart';
 import 'steps/steps.dart';
+import 'support/materials_scenario.dart';
 import 'support/scenario_filter.dart';
 import 'support/scenario_hooks.dart';
 import 'support/step_registry.dart';
@@ -28,28 +29,34 @@ void main() {
     final steps = scenario['steps'] as List;
 
     testWidgets('$uri: $name [${index + 1}]', (tester) async {
-      await app.main();
-      await tester.pumpAndSettle();
+      Future<void> runSteps() async {
+        for (final rawStep in steps) {
+          final step = rawStep as Map<String, dynamic>;
 
-      await beforeScenario(tester, tags);
+          final text = step['text'] as String;
 
-      for (final rawStep in steps) {
-        final step = rawStep as Map<String, dynamic>;
+          if (step['argument'] != null) {
+            throw UnsupportedError(
+              'Data Tables e Doc Strings ainda não são '
+              'suportados: "$text"',
+            );
+          }
 
-        final text = step['text'] as String;
-
-        if (step['argument'] != null) {
-          throw UnsupportedError(
-            'Data Tables e Doc Strings ainda não são '
-            'suportados: "$text"',
+          await executeStep(
+            tester: tester,
+            text: text,
+            stepDefinitions: stepDefinitions,
           );
         }
+      }
 
-        await executeStep(
-          tester: tester,
-          text: text,
-          stepDefinitions: stepDefinitions,
-        );
+      if (isMaterialsScenario(tags)) {
+        await runMaterialsScenario(tester, runSteps);
+      } else {
+        await app.main();
+        await tester.pumpAndSettle();
+        await beforeScenario(tester, tags);
+        await runSteps();
       }
     }, skip: isPendingMobileScenario(tags));
   }
