@@ -1,5 +1,7 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
+// ignore_for_file: unnecessary_cast
+
 part of 'api_error_details.dart';
 
 // **************************************************************************
@@ -66,7 +68,7 @@ class _$ApiErrorDetailsCWProxyImpl implements _$ApiErrorDetailsCWProxy {
       details: details == const $CopyWithPlaceholder()
           ? _value.details
           // ignore: cast_nullable_to_non_nullable
-          : details,
+          : details as Object?,
     );
   }
 }

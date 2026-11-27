@@ -287,3 +287,18 @@ fn session_is_closed(_world: &mut AppWorld) {
 fn protected_access_requires_new_login(_world: &mut AppWorld) {
     pending_step("o acesso a recursos restritos passa a exigir nova autenticação");
 }
+
+/// Pendente: resultado institucional sem um curso utilizável.
+#[given(expr = "o curso retornado pela instituição está {string}")]
+fn institutional_course_is_unavailable(_world: &mut AppWorld, _state: String) {
+    pending_step("o curso retornado pela instituição está {string}");
+}
+
+/// Pendente: entrada limitada não concede direitos de estudante, nem edição do curso.
+#[then("o acesso à plataforma é concedido com limitações")]
+#[then("o usuário não recebe direitos de estudante em nenhum CA")]
+#[then("o aplicativo apresenta um aviso explícito de acesso limitado")]
+#[then("o aplicativo não permite informar o curso manualmente")]
+fn limited_access_is_reported(_world: &mut AppWorld) {
+    pending_step("acesso limitado sem curso institucional confirmado");
+}

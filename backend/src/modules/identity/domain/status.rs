@@ -15,3 +15,16 @@ pub enum CatalogStatus {
     /// Indisponível para novos usos, preservando os registros históricos.
     Inactive,
 }
+
+/// Ciclo de vida interno: incompleta, habilitada ou desativada.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "user_status", rename_all = "lowercase")]
+pub enum UserStatus {
+    /// Identidade provisionada, aguardando os dados e a credencial interna.
+    #[default]
+    Incomplete,
+    /// Conta CApp habilitada.
+    Active,
+    /// Conta CApp desativada.
+    Inactive,
+}

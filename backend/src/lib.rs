@@ -9,7 +9,9 @@
 //! - [`api`]: estado, contrato de erros e composição HTTP.
 //! - [`modules::identity`]: verificação institucional e evidência de elegibilidade.
 //! - [`infrastructure::database`]: adaptador PostgreSQL e migrations compartilhadas.
-//! - [`config`] e [`shared`]: espaços reservados para configuração e tipos comuns.
+//! - [`domain`]: modelos e contratos de domínio consolidados da aplicação.
+//! - [`config`]: espaço reservado para centralizar configurações.
+//! - [`shared`]: espaço reservado para tipos comuns aos domínios.
 //!
 //! Estão registradas as rotas `/health`, `/ready` e
 //! `POST /auth/institutional/verify`. A infraestrutura de extração de identidade
@@ -27,6 +29,7 @@
 
 pub mod api;
 pub mod config;
+pub mod domain;
 pub mod infrastructure;
 pub mod modules;
 pub mod shared;

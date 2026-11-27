@@ -1,9 +1,12 @@
 import '../support/step_registry.dart';
 import 'academic_identity/academic_data_steps.dart';
+import 'authentication/account_session_steps.dart';
 import 'authentication/authentication_steps.dart';
 import 'demands/demand_creation_steps.dart';
 import 'demands/demand_tracking_steps.dart';
+import 'elections/tally_steps.dart';
 import 'elections/voting_steps.dart';
+import 'elections/election_management_steps.dart';
 import 'events/event_browsing_steps.dart';
 import 'events/event_capacity_steps.dart';
 import 'events/event_management_steps.dart';
@@ -30,6 +33,7 @@ import 'shared/session_steps.dart';
 import 'shared/shared_steps.dart';
 
 final stepDefinitions = <StepDefinition>[
+  ...accountSessionSteps,
   ...academicDataSteps,
   ...accessControlSteps,
   ...authenticationSteps,
@@ -58,5 +62,7 @@ final stepDefinitions = <StepDefinition>[
   ...sessionSteps,
   ...sharedSteps,
   ...userProvisioningSteps,
+  ...tallySteps,
   ...votingSteps,
+  ...electionManagementSteps,
 ];

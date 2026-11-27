@@ -60,6 +60,8 @@ A direção das dependências é diferente do fluxo de chamadas durante a execu�
 
 A inicialização da aplicação atua como ponto de composição: instancia os adaptadores de infraestrutura e os fornece aos casos de uso. Assim, os casos de uso recebem suas dependências sem precisar construir um repositório PostgreSQL ou um cliente de serviço externo.
 
+Os módulos que agrupam erros usam o nome `error`, inclusive quando definem vários tipos de erro.
+
 ---
 
 # Princípios arquiteturais
@@ -165,21 +167,51 @@ src/
 
 ## identity
 
-Responsável pela identidade dos usuários.
+Responsável pela identidade dos usuários e pela comprovação dos aplicativos clientes.
 
 Inclui:
 
 - autenticação institucional;
 - integração com Firebase Authentication;
+- comprovação do aplicativo por Firebase App Check;
 - integração com Microsoft;
 - provisionamento de usuários;
 - dados acadêmicos.
 
 O módulo de identidade representa a identidade institucional do usuário e suas informações acadêmicas.
+O pertencimento a Centros Acadêmicos pertence ao módulo `ca`.
 
-Ele não representa uma relação de pertencimento a um Centro Acadêmico.
+Os adaptadores Firebase Auth e App Check ficam em
+`src/modules/identity/infrastructure/firebase/`. O módulo privado `jwks.rs`
+concentra obtenção de chaves RSA, cache HTTP, rotação e controle de concorrência.
+Cada adaptador fixa seu endpoint e mantém uma instância de cache independente;
+clones do mesmo adaptador compartilham somente essa instância. O adaptador
+Firebase Auth só reutiliza chaves com prazo HTTP explícito; App Check usa fallback
+e teto de seis horas. Ambos rejeitam `kid` duplicado e adotam o menor max-age
+quando há diretivas repetidas. Claims e erros específicos continuam separados.
+O middleware que exige App Check pertence à API global e protege as rotas
+autenticadas. A comprovação do aplicativo não concede permissões de
+usuário nem cria uma entidade institucional adicional.
 
-A implementação atual cobre verificação institucional, registro da evidência e um extractor reutilizável para acesso protegido. Provisionamento e associação acadêmica permanecem fora desse recorte. Consulte os [Rustdocs do módulo](src/modules/identity/mod.rs) para fluxo, decisões e testes específicos, e o [OpenAPI](../packages/api-contracts/openapi.yaml) para o contrato HTTP.
+A implementação cobre verificação institucional com validade de 120 dias,
+provisionamento idempotente de contas incompletas, restauração com Firebase e
+conclusão do perfil com apelido, período atual do curso e semestre de ingresso.
+A verificação devolve usuário e evidência na mesma resposta; a restauração
+recupera a conta sem consultar o Graph ou renovar o prazo. O cliente consulta
+`GET /auth/session` antes de sincronizar, inclusive após autenticação Microsoft.
+Conta ausente retorna `404 account_not_provisioned`; conta existente sem evidência
+vigente retorna `200` com `verification: null`. Ambos exigem verificação, enquanto
+recusas e falhas de comunicação mantêm seus diagnósticos próprios.
+O e-mail interno é escolhido pelo usuário; senhas e sessões permanecem no Firebase.
+Um nome declarado pode completar uma ausência do Graph no perfil interno, sem
+substituir a evidência institucional. O e-mail do Graph é somente uma sugestão
+transitória no cadastro (`suggestedEmail`), sem persistência no backend. Restauração
+e sincronização de contas ativas não retornam essa sugestão nem alteram o e-mail
+escolhido para a credencial Firebase. O curso
+é exclusivamente institucional: grupo estudantil e curso não vazio são necessários
+para confirmar o vínculo. Curso ausente, nulo ou em branco permite entrada limitada,
+sem direitos estudantis em nenhum CA; não há preenchimento manual de curso.
+A associação ao catálogo de cursos permanece fora desse recorte. Consulte os [Rustdocs do módulo](src/modules/identity/mod.rs) para fluxo, decisões e testes específicos, e o [OpenAPI](../packages/api-contracts/openapi.yaml) para o contrato HTTP.
 
 ---
 
@@ -330,6 +362,112 @@ Inclui:
 
 Responsável pelo sistema eleitoral.
 
+As consultas do quadro, do checkpoint e do próprio recibo passam pelos serviços
+de aplicação e usam a porta `ElectionBoardReader`, implementada por `PgDatabase`.
+A exportação entrega o JSON em partes e usa uma única leitura consistente.
+As consultas JSON com resposta única e as rotas eleitorais protegidas têm
+prazo de 15 segundos no roteamento. Ao esgotar o prazo, a API retorna o
+envelope JSON `service_unavailable` com HTTP 503. A exportação em partes
+fica em uma rota separada.
+A tabela `election` concentra o CA, o período vigente, a política de cadastro
+e o estado da eleição. A publicação associa a ela um quadro com o manifesto
+imutável e a ordem das chapas derivada dele. A comissão, as chapas e o servidor
+têm uma única designação em `election_authority`. Cada contribuição referencia
+uma autoridade da mesma eleição, e o resultado definitivo fica imutável.
+
+O executável inicia o relógio eleitoral quando há uma chave de assinatura.
+A tarefa encerra pleitos vencidos e envia as contribuições pendentes do
+servidor usando o mesmo `PgDatabase` das requisições.
+
+O serviço de aceite valida a cédula e multiplica suas cifras pelo acumulador
+vigente na ordem do manifesto. Com a eleição bloqueada, a transação grava a
+cédula e o recibo em uma linha de `election_vote` e atualiza o acumulador, a
+contagem e o hash da última entrada em `election_board`. Um reenvio do mesmo
+voto recupera o recibo já gravado. Na apuração, as evidências públicas permitem
+recalcular o agregado para verificar o publicado.
+
+A configuração do CA contém os cursos que ele representa em
+`academic_center_course`, com os nomes da evidência do diretório. Cadastro e novo voto revalidam o vínculo com
+um desses cursos dentro da transação eleitoral.
+
+`GET /elections/{id}/registration/me` informa se a eleição exige cadastro e
+consulta a situação da própria conta. Quando exigido, `PUT` no mesmo endereço
+valida a prova de posse da chave antes da abertura. O primeiro voto deve usar
+essa chave. Nas demais eleições, a primeira cédula aceita vincula a chave à
+participação. O voto usa o UUID da conta autenticada, e a chave
+privada permanece no dispositivo.
+
+### Enviar e conferir um voto pelo Android
+
+O backend lê a chave de assinatura do servidor em `ELECTION_SIGNING_KEY_FILE`.
+Use um arquivo privado PEM PKCS#8 cuja chave pública corresponde à publicada
+no manifesto. Para executar o backend pelo Compose, defina essa variável com
+o caminho do arquivo no host e monte a chave usando o complemento eleitoral:
+
+```sh
+docker compose -f compose.yaml -f compose.elections.yaml --profile backend up -d --build --wait
+```
+
+Com a sessão Firebase ativa, configure o endereço HTTPS do backend no app.
+Obtenha da comissão o hash do manifesto oficial. Quando a eleição exige
+cadastro, a preparação do voto usa a chave cadastrada antes da abertura.
+Nas demais, o app cria a chave quando o eleitor confirma o primeiro voto.
+
+```dart
+final session = await dependencies.secretVoting.open(
+  electionId,
+  trustedManifestHash: manifestHash,
+);
+final vote = await session.savedVote() ?? await session.prepare(optionId);
+final accepted = await session.submit(vote);
+final included = await session.isIncluded(accepted);
+```
+
+`prepare` cifra a escolha no dispositivo e guarda a cédula assinada.
+`POST /elections/{id}/ballots` devolve o registro e o recibo com HTTP 201.
+O corpo leva o hash do manifesto, a chave pública, as cifras e a assinatura.
+O backend reconstrói a mensagem assinada com a eleição da rota e a conta
+autenticada. Reenviar uma cédula de mesmo hash recupera os documentos emitidos
+com HTTP 200. Uma cédula de hash diferente da mesma conta recebe HTTP 409.
+O cliente confere as assinaturas e consulta o quadro público para verificar a
+inclusão. Somente a cédula cifrada chega ao servidor.
+
+O quadro informa as datas registradas na eleição. Reagendamento e
+cancelamento são tratados na #132. A assinatura e a validação
+das cifras comprovam a autoria e a estrutura da mensagem. A validade de uma
+única escolha por cédula depende do cliente neste protocolo (ver #383).
+
+O banco confirma participação, registro, recibo e produto das cifras numa
+transação. Nova tentativa da mesma operação recupera o recibo já emitido.
+O índice começa em 1 e o primeiro registro aponta para o hash do manifesto.
+O aplicativo pode recuperar o recibo em `GET /elections/{id}/receipts/me`
+com os tokens Firebase e App Check da sessão, inclusive após o encerramento.
+Ao encerrar, o backend assina o termo com a contagem e a cabeça finais, além
+do agregado que as autoridades usarão na apuração.
+
+Cada eleitor ou autoridade pode guardar uma evidência em seu próprio dispositivo.
+Use a URL HTTPS da instalação e o UUID do manifesto na variável `BOARD`.
+No exemplo, `servidor.spki` contém a chave pública de confiança em DER/SPKI
+codificada em base64url, obtida da comissão por um canal independente.
+Na raiz do repositório, com OpenSSL e as dependências de
+`packages/api-contracts/requirements-ci.txt`, execute:
+
+```sh
+curl --fail "$BOARD/checkpoint" --output recibo-anterior.json
+# Em uma consulta posterior, baixe o quadro da mesma eleição.
+curl --fail "$BOARD" --output quadro.json
+python packages/api-contracts/scripts/audit_election_board.py \
+  --snapshot quadro.json --trusted-key servidor.spki \
+  --checkpoint observacao-local.json --receipt recibo-anterior.json
+```
+
+`BOARD` termina em `/elections/{id}/board`. O checkpoint público é o último
+recibo assinado, ou o manifesto antes do primeiro voto. Para comparar a inclusão
+de um voto, conserve seu recibo original. Um recibo no índice 5 permite conferir
+o histórico até 5. Comparar esse recibo com um quadro de oito entradas deixa as
+três últimas sem confirmação externa. A primeira execução do auditor sem
+observação anterior guarda uma referência local para as próximas comparações.
+
 Inclui:
 
 - comissão eleitoral;
@@ -397,20 +535,10 @@ Contém recursos utilizados por múltiplos módulos.
 
 Responsável pelo acesso ao PostgreSQL.
 
-O módulo `src/infrastructure/database/` contém `MIGRATOR` e `PgDatabase`. Este último encapsula o pool; as implementações dos repositórios ficam na infraestrutura de cada módulo de negócio. Criar ou clonar o adaptador não abre um novo pool, não inicia transação e não aplica migrations.
-
----
-
-## firebase
-
-O adaptador executável está em `src/modules/identity/infrastructure/firebase/`. O diretório global `src/infrastructure/firebase/` permanece reservado.
-
-Responsabilidades:
-
-- validação de tokens;
-- identificação de usuários autenticados.
-
-Não contém regras de autorização da aplicação.
+O módulo `src/infrastructure/database/` contém `MIGRATOR` e `PgDatabase`.
+O `AppState` guarda um único `PgDatabase`, que compartilha o pool entre os
+repositórios de identidade e eleições. As portas continuam separadas por
+operação e suas implementações ficam na infraestrutura de cada módulo.
 
 ---
 
@@ -478,11 +606,35 @@ Exemplos:
 
 ---
 
+# Firebase App Check
+
+As rotas autenticadas exigem `X-Firebase-AppCheck`, além de `Authorization: Bearer`.
+O adaptador está em `src/modules/identity/infrastructure/firebase/app_check.rs`,
+consumido pelo middleware global de `src/api/app_check.rs`.
+GET/HEAD `/health`, `/ready` e as duas leituras do quadro eleitoral são públicos.
+O middleware valida assinatura RS256,
+`typ=JWT`, emissor e audiência do número do projeto, expiração, emissão e App ID
+permitido. A lista de apps é obrigatória; não há modo de aceitação sem atestado.
+Tokens ausentes/recusados retornam 403 (`app_check_required`/`app_check_invalid`);
+indisponibilidade das chaves retorna 503 (`app_check_unavailable`). O cache de
+chaves é compartilhado, respeita o provedor e dura no máximo seis horas.
+
+A verificação Rust usa chaves públicas e não precisa de conta de serviço. Ela
+não autentica usuários, não concede permissões e não consome tokens de uso único.
+O Console é usado para cadastrar provedores e tokens de depuração. A fiscalização
+em Firebase Authentication e outros produtos Firebase é configurada separadamente:
+ela não substitui este middleware do backend personalizado. Veja a
+[configuração do app](../mobile/README.md#firebase-app-check) e a
+[validação oficial para backends personalizados](https://firebase.google.com/docs/app-check/custom-resource-backend).
+
 # Configuração
 
-Atualmente o executável lê `DATABASE_URL`, `FIREBASE_PROJECT_ID` e `RUST_LOG` diretamente do ambiente.
+O executável lê `DATABASE_URL`, `FIREBASE_PROJECT_ID`, `FIREBASE_PROJECT_NUMBER`,
+`FIREBASE_APP_CHECK_APP_IDS`, `BACKEND_TLS_CERT_FILE`, `BACKEND_TLS_KEY_FILE`
+e `RUST_LOG` do ambiente.
 O módulo `src/config/` está reservado para centralizar essa configuração no futuro.
-O backend não carrega arquivos `.env` automaticamente.
+O backend também procura um `.env` no diretório de execução e seus ancestrais
+por dotenvy, preservando variáveis já exportadas.
 
 O [Compose](../compose.yaml) utiliza os valores abaixo e permite personalizá-los
 no arquivo `.env` da raiz do monorepo. As variáveis já definidas no terminal têm
@@ -493,9 +645,16 @@ precedência sobre esse arquivo.
 | `POSTGRES_DB` | `capp` | Nome do banco criado na inicialização do PostgreSQL. |
 | `POSTGRES_USER` | `capp` | Usuário inicial do PostgreSQL. |
 | `POSTGRES_PASSWORD` | `capp` | Senha local do usuário inicial. |
-| `POSTGRES_PORT` | `5432` | Porta do PostgreSQL publicada no host. |
-| `BACKEND_PORT` | `3000` | Porta da API publicada no host pelo Compose. |
+| `BACKEND_PORT` | `8443` | Porta HTTPS publicada no host pelo Compose. |
+| `CAPP_HTTPS_BIND` | `127.0.0.1` | Interface do host em que o Compose publica a porta HTTPS. |
+| `BACKEND_TLS_CERT_FILE` | `./.tls/backend.crt` no Compose | PEM do certificado do servidor, seguido pelos intermediários quando houver. |
+| `BACKEND_TLS_KEY_FILE` | `./.tls/backend.key` no Compose | PEM da chave privada que corresponde ao certificado. |
+| `BACKEND_TLS_HEALTH_HOST` | `localhost` | DNS do certificado usado pelo healthcheck. |
+| `BACKEND_TLS_HEALTH_CA_FILE` | Certificado do servidor no Compose | PEM da âncora para a sondagem, configurável para um certificado emitido por CA. |
+| `BACKEND_UID` / `BACKEND_GID` | `1000` / `1000` | Usuário e grupo do container com acesso aos PEMs. |
 | `RUST_LOG` | `info` | Filtro dos eventos de diagnóstico do backend. |
+| `FIREBASE_PROJECT_NUMBER` | Obrigatória no servidor | Número público do projeto, usado no emissor e audiência do App Check; não é o project ID. |
+| `FIREBASE_APP_CHECK_APP_IDS` | Obrigatória no servidor | App IDs Firebase permitidos, separados por vírgula e pertencentes ao número do projeto. O exemplo contém o app Android deste checkout. |
 | `FIREBASE_PROJECT_ID` | Sem padrão válido | Obrigatória para o backend e os runners BDD; define audiência e emissor esperados nos ID tokens. O valor de `.env.example` é um placeholder. |
 
 Os valores de usuário e senha acima destinam-se ao ambiente local de desenvolvimento.
@@ -512,11 +671,13 @@ O Compose pode receber os valores pelo ambiente sem `.env`. Subir somente o Post
 
 Dentro da rede do Compose, o backend recebe uma `DATABASE_URL` construída com
 usuário, senha e banco configurados, usando o endereço `postgres:5432`.
-Ao executar com Cargo no host, forneça a URL explicitamente, usando
-`localhost` e a porta publicada em `POSTGRES_PORT`.
+Na execução com Cargo no host, forneça uma URL para uma instância PostgreSQL
+acessível ao processo. O PostgreSQL deste Compose fica na rede dos containers.
 
-`BACKEND_PORT` altera somente o mapeamento do Compose. O processo Rust escuta em
-`0.0.0.0:3000`, tanto no container quanto na execução direta com Cargo.
+`BACKEND_PORT` altera o mapeamento no host. O binário Rust serve HTTPS em
+`0.0.0.0:3000` nos dois modos de execução e exige os caminhos de ambos os PEMs.
+A configuração TLS fica em [`src/infrastructure/tls.rs`](src/infrastructure/tls.rs)
+e é carregada antes de abrir a porta, fora do estado e dos handlers da API.
 
 ---
 
@@ -572,10 +733,14 @@ sqlx migrate add descricao_da_alteracao
 
 Edite o arquivo gerado em `migrations/<timestamp>_<descricao>.sql` com a alteração
 necessária e versione-o junto da implementação correspondente. O projeto usa
-migrations simples, aplicadas em ordem de versão. Depois que uma migration for
-integrada e aplicada em um ambiente compartilhado, preserve seu nome e conteúdo;
-correções devem ser feitas em uma nova versão. O fluxo padrão evolui o esquema
-para a frente, sem exigir um script de reversão para toda alteração.
+migrations simples, aplicadas em ordem de versão. Preserve o nome e o conteúdo
+das migrations já integradas à `main` ou aplicadas em um banco compartilhado.
+Corrija essas versões com uma nova migration.
+
+Migrations exclusivas de uma branch podem ser consolidadas enquanto forem
+usadas apenas em bancos descartáveis. Para testar a consolidação, use um banco
+novo. O SQLx confere os checksums e as versões já registradas nas instalações
+locais.
 
 ### Aplicar e consultar versões
 
@@ -618,10 +783,10 @@ conforme a [seção BDD](#bdd).
 
 - Docker com daemon acessível, `docker compose` e Buildx/BuildKit disponíveis para construir a imagem com caches de compilação.
 - Acesso à internet na primeira execução para obter imagens e dependências.
-- Portas locais livres; os padrões são `5432` para o banco e `3000` para a API.
+- Porta local `8443` livre para o Compose ou `3000` para execução com Cargo.
 - Para executar o backend ou os testes fora do container, Rust e Cargo da
   toolchain `stable`, instalados via `rustup`.
-- `curl` para as verificações HTTP mostradas abaixo.
+- Python 3 e OpenSSL 3 para gerar os PEMs e `curl` para as verificações HTTPS.
 
 No Windows, execute os comandos do backend no WSL 2 com acesso ao Docker.
 No Linux, use o terminal do próprio sistema. Não é necessário instalar PostgreSQL
@@ -629,7 +794,8 @@ no host; para executar toda a aplicação pelo Compose, o Rust é fornecido pela
 
 ## PostgreSQL e backend pelo Compose
 
-Na raiz do monorepo, valide a configuração e inicie os serviços:
+Gere os PEMs e configure o ambiente seguindo o [roteiro HTTPS](../deploy/https/README.md).
+Na raiz do monorepo, valide a configuração e inicie os serviços.
 
 ```bash
 docker compose --profile backend config --quiet
@@ -638,7 +804,7 @@ docker compose --profile backend up -d --build --wait
 
 O perfil `backend` inclui a API, enquanto o PostgreSQL participa do ambiente por
 padrão. O Compose aguarda o healthcheck do banco antes de iniciar o backend e
-fornece sua `DATABASE_URL` automaticamente. Com `--wait`, o comando também aguarda o backend ficar saudável: seu healthcheck consulta `http://127.0.0.1:3000/ready` dentro do container, verificando a API e sua conexão com PostgreSQL.
+fornece sua `DATABASE_URL` automaticamente. Com `--wait`, o comando também aguarda o backend ficar saudável: seu healthcheck consulta `/ready` por HTTPS dentro do container. A sondagem valida a confiança e o nome do certificado e verifica a conexão com PostgreSQL.
 
 Acompanhe o estado dos serviços e os logs:
 
@@ -647,51 +813,40 @@ docker compose --profile backend ps
 docker compose logs -f backend
 ```
 
-O estágio de build executa `cargo build --release --locked --bin backend`. A primeira construção pode demorar; as seguintes reutilizam caches BuildKit de dependências e compilação. A imagem final contém o binário, certificados TLS e `curl` para a sondagem, sem o compilador ou os fontes. O processo executa diretamente o binário como usuário sem privilégios de root e aplica migrations antes de abrir a porta HTTP.
+O estágio de build executa `cargo build --release --locked --bin backend`. A primeira construção pode demorar; as seguintes reutilizam caches BuildKit de dependências e compilação. A imagem final contém o binário, as raízes públicas do sistema e `curl` para a sondagem. Os PEMs do servidor entram no container por montagens somente leitura. O processo executa o binário como usuário sem privilégios e aplica migrations antes de abrir a porta HTTPS.
 
 O healthcheck roda a cada dez segundos, limita a requisição a três segundos e permite cinco falhas consecutivas depois de uma tolerância inicial de vinte segundos. Ele não testa Firebase ou Microsoft Graph, nem exige uma instituição cadastrada. Marcar o container como `unhealthy` não o reinicia automaticamente.
 
 `Ctrl+C` encerra apenas o acompanhamento dos logs. Após alterar o código ou as migrations, execute novamente o comando com `--build --wait`, pois não há montagem dos fontes como volume nem recompilação na inicialização do container.
 
-## PostgreSQL pelo Compose e backend com Cargo
+## Backend com Cargo e PostgreSQL local
 
-Para desenvolver diretamente com o compilador local, suba somente o banco a
-partir da raiz e aguarde seu healthcheck:
+Gere os PEMs pelo [roteiro HTTPS](../deploy/https/README.md). Configure um
+PostgreSQL acessível no host e defina `DATABASE_URL` com o endereço dele. O
+binário procura o `.env` da raiz por dotenvy, preservando valores exportados.
+Confira nele o projeto Firebase, o número do projeto e a lista de App IDs.
 
-```bash
-docker compose config --quiet
-docker compose up -d --wait postgres
-```
-
-Caso a API já esteja rodando pelo Compose, pare esse serviço antes de usar a
-mesma porta com Cargo:
+Na raiz, informe os caminhos dos PEMs antes de entrar no diretório do backend.
 
 ```bash
-docker compose --profile backend stop backend
-```
-
-Depois, usando os valores locais padrão:
-
-```bash
+export BACKEND_TLS_CERT_FILE="$PWD/.tls/backend.crt"
+export BACKEND_TLS_KEY_FILE="$PWD/.tls/backend.key"
 cd backend
-DATABASE_URL='postgres://capp:capp@localhost:5432/capp' \
-FIREBASE_PROJECT_ID='seu-project-id' \
-RUST_LOG=info cargo run --locked
+cargo run --locked
 ```
 
-Substitua `seu-project-id` pelo projeto Firebase usado pelo aplicativo. Se personalizou usuário, senha, banco ou porta, ajuste a URL desse comando.
-O `.env` da raiz é lido pelo Compose; ele não exporta variáveis para o processo
-Cargo. Mantenha esse terminal aberto enquanto usar a API e utilize `Ctrl+C` para
-encerrar o backend.
+A API atende em `https://localhost:3000` usando o certificado da demonstração.
+Use `Ctrl+C` no terminal para encerrar o backend.
 
 ## Verificar a comunicação
 
 Com a API em execução, use outro terminal. Estes endereços consideram a porta
-padrão; ajuste-a se estiver usando outro `BACKEND_PORT` no Compose:
+padrão do Compose. Execute na raiz do repositório e ajuste a porta e
+o caminho do certificado conforme o ambiente.
 
 ```bash
-curl -i http://localhost:3000/health
-curl -i http://localhost:3000/ready
+curl -i --cacert .tls/backend.crt https://localhost:8443/health
+curl -i --cacert .tls/backend.crt https://localhost:8443/ready
 ```
 
 `/health` retorna HTTP 200 quando a API responde. `/ready` executa uma consulta
@@ -746,11 +901,11 @@ será validada conforme elas forem implementadas nas entregas seguintes.
    [execução pelo Compose](#postgresql-e-backend-pelo-compose). Use novamente
    `docker compose --profile backend up -d --build --wait` após alterações para
    reconstruir a imagem e iniciar a versão atualizada. Como alternativa, siga
-   a [execução com Cargo](#postgresql-pelo-compose-e-backend-com-cargo),
+   a [execução com Cargo](#backend-com-cargo-e-postgresql-local),
    encerrando o processo anterior antes de iniciar o novo.
 3. Aguarde a inicialização e [verifique a comunicação](#verificar-a-comunicação)
    com `/health` e `/ready`. As [migrations](#migrations) pendentes são aplicadas
-   pelo backend antes de abrir a porta HTTP.
+   pelo backend antes de abrir a porta HTTPS.
 4. Ao terminar, siga o [encerramento do ambiente](#encerrar-o-ambiente-e-executar-testes),
    que preserva o volume do banco para a próxima execução.
 

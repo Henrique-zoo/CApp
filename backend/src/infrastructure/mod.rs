@@ -1,15 +1,16 @@
 //! Infraestrutura técnica compartilhada entre os domínios.
 //!
 //! [`database`] fornece migrations e o adaptador PostgreSQL comum aos repositórios.
-//! Os diretórios globais [`firebase`] e [`microsoft`] permanecem reservados;
-//! os adaptadores executáveis de autenticação ficam em
+//! [`microsoft`] permanece reservado. Os adaptadores executáveis de identidade
+//! de usuários e de aplicativos (Firebase Auth e App Check) ficam em
 //! [`crate::modules::identity::infrastructure`]. [`storage`] e [`notifications`]
 //! também são espaços reservados.
 //!
-//! O executável constrói os recursos e os entrega em [`crate::api::state::AppState`].
+//! O executável entrega os recursos da aplicação em [`crate::api::state::AppState`]
+//! e usa [`tls`] para configurar a escuta HTTPS.
 
 pub mod database;
-pub mod firebase;
 pub mod microsoft;
 pub mod notifications;
 pub mod storage;
+pub mod tls;

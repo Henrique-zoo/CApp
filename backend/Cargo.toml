@@ -8,9 +8,13 @@ test-support = []
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
 async-trait = "0.1.89"
 axum = { version = "0.8", features = ["macros", "http2"] }
-tower = "0.5"
+axum-server = { version = "0.9.2", features = ["tls-rustls-ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+x509-parser = "0.18"
+tower = { version = "0.5", features = ["timeout"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "timeout"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -38,6 +42,13 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 validator = { version = "0.19", features = ["derive"] }
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+crypto-bigint = "0.7.11"
+getrandom = "0.4"
+base64 = "0.22"
+rsa = "0.9.10"
+sha2 = "0.10"
+serde_jcs = "0.4"
+rand = "0.8"
 
 [dev-dependencies]
 tokio-test = "0.4"

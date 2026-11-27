@@ -5,14 +5,19 @@
 //! Firebase; não contêm identidade ou tokens de uma requisição específica.
 //! Nos testes, o adaptador PostgreSQL usa o banco associado ao cenário.
 
+use std::sync::Arc;
+
 use crate::{
     infrastructure::database::PgDatabase,
-    modules::identity::infrastructure::{
-        firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
+    modules::{
+        elections::crypto_wire::ServerSigner,
+        identity::infrastructure::{
+            firebase::FirebaseTokenVerifier, microsoft::MicrosoftGraphClient,
+        },
     },
 };
 
-/// Clientes externos reutilizados pelos casos de uso de identidade.
+/// Clientes de identidade reutilizados pela API e pelos casos de uso.
 ///
 /// O verificador Firebase compartilha seu cache entre clones; o cliente Microsoft
 /// compartilha o pool HTTP e recebe o access token em cada operação. Os clientes
@@ -21,6 +26,7 @@ use crate::{
 pub struct Clients {
     /// Verificador de Firebase ID tokens para o projeto configurado.
     pub firebase: FirebaseTokenVerifier,
+
     /// Adaptador de perfil, tenant e participação em grupos do Microsoft Graph.
     pub microsoft: MicrosoftGraphClient,
 }
@@ -53,7 +59,7 @@ impl Clients {
 /// As identidades autenticadas pertencem às requisições, não a este estado.
 #[derive(Clone)]
 pub struct AppState {
-    /// Adaptador PostgreSQL que implementa os contratos de repositório.
+    /// Adaptador PostgreSQL compartilhado pelos repositórios de identidade e eleições.
     ///
     /// Serviços recebem referências às traits implementadas por esse adaptador.
     /// Construir o estado não verifica a conectividade nem aplica migrations.
@@ -61,6 +67,9 @@ pub struct AppState {
 
     /// Clientes externos compartilhados, sem credenciais de usuários armazenadas.
     pub clients: Clients,
+
+    /// Assinador fornecido pela instalação para as operações eleitorais que usam a chave do servidor.
+    pub(crate) election_signer: Option<Arc<ServerSigner>>,
 }
 
 impl AppState {
@@ -117,6 +126,13 @@ impl AppState {
         Self {
             pg_database,
             clients,
+            election_signer: None,
         }
+    }
+
+    /// Habilita as operações eleitorais que usam a chave de assinatura do servidor.
+    pub fn with_election_signer(mut self, signer: Arc<ServerSigner>) -> Self {
+        self.election_signer = Some(signer);
+        self
     }
 }

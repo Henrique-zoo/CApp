@@ -7,3 +7,4 @@
 
 pub mod institution;
 pub mod institutional_verification;
+pub mod user;

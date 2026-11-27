@@ -12,6 +12,7 @@ use axum::{
     http::{HeaderMap, request::Parts},
 };
 use reqwest::header::AUTHORIZATION;
+use uuid::Uuid;
 
 use crate::{
     api::{
@@ -20,6 +21,46 @@ use crate::{
     },
     modules::identity::application::services::{self, authentication::AuthenticatedIdentity},
 };
+
+/// Conta autenticada, disponível para operações que também podem ser exercidas
+/// após o vencimento da verificação institucional.
+pub(crate) struct AuthenticatedAccount {
+    pub account_id: Uuid,
+    pub microsoft_object_id: Option<Uuid>,
+}
+
+impl AuthenticatedAccount {
+    /// Valida a credencial e delega a resolução da conta ao módulo de identidade.
+    pub(crate) async fn authenticate(headers: &HeaderMap, state: &AppState) -> ApiResult<Self> {
+        let token = firebase_bearer_token(headers)?;
+        let (user, identity) = tokio::time::timeout(
+            Duration::from_secs(10),
+            services::accounts::authenticate_account(
+                &state.clients.firebase,
+                &state.pg_database,
+                token,
+            ),
+        )
+        .await
+        .map_err(|_| ApiError::service_unavailable())??;
+
+        Ok(Self {
+            account_id: user.id(),
+            microsoft_object_id: identity
+                .microsoft_object_id
+                .as_deref()
+                .and_then(|value| Uuid::parse_str(value).ok()),
+        })
+    }
+}
+
+impl FromRequestParts<AppState> for AuthenticatedAccount {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> ApiResult<Self> {
+        Self::authenticate(&parts.headers, state).await
+    }
+}
 
 /// Identidade autenticada com confirmação institucional ainda válida.
 ///
@@ -81,7 +122,7 @@ impl FromRequestParts<AppState> for AuthenticatedInstitutionalIdentity {
 /// esquema inválido ou token vazio ou contendo espaços em branco.
 /// O esquema é comparado sem diferenciar maiúsculas e minúsculas. Não decodifica
 /// o JWT, não o valida criptograficamente e devolve uma referência ao cabeçalho.
-pub(super) fn firebase_bearer_token(headers: &HeaderMap) -> ApiResult<&str> {
+pub(crate) fn firebase_bearer_token(headers: &HeaderMap) -> ApiResult<&str> {
     let mut values = headers.get_all(AUTHORIZATION).iter();
 
     let authorization = values

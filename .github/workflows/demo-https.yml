@@ -1,0 +1,101 @@
+name: Demo HTTPS
+
+on:
+  pull_request:
+    paths: &paths
+      - "compose.yaml"
+      - ".env.example"
+      - "deploy/https/**"
+      - "backend/Dockerfile"
+      - "backend/.dockerignore"
+      - "backend/Cargo.*"
+      - "backend/build.rs"
+      - "backend/src/**"
+      - "backend/migrations/**"
+      - "mobile/lib/src/infrastructure/backend/**"
+      - "mobile/pubspec.lock"
+      - "mobile/tool/backend_tls_test.dart"
+      - "mobile/tool/test_backend_tls.py"
+      - "mobile/integration_test/backend_tls_test.dart"
+      - ".github/workflows/demo-https.yml"
+  push:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  https:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: capp-demo-ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.4"
+          channel: stable
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Generate the demo certificate
+        run: |
+          python deploy/https/generate_certificate.py
+          echo "BACKEND_UID=$(id -u)" >> "$GITHUB_ENV"
+          echo "BACKEND_GID=$(id -g)" >> "$GITHUB_ENV"
+      - name: Start the HTTPS demo with test configuration
+        run: docker compose --env-file .env.example --profile backend up --build --wait --wait-timeout 150
+      - name: Verify TLS startup errors
+        run: |
+          compose=(docker compose --env-file .env.example)
+          check_startup_failure() {
+            local expected="$1" output
+            shift
+            if output=$("${compose[@]}" exec -T backend env "$@" /usr/local/bin/backend 2>&1); then
+              echo 'The backend started with invalid TLS material.' >&2
+              exit 1
+            fi
+            printf '%s\n' "$output"
+            [[ "$output" == *"$expected"* ]]
+          }
+          check_startup_failure 'Defina BACKEND_TLS_CERT_FILE' -u BACKEND_TLS_CERT_FILE
+          check_startup_failure 'Defina BACKEND_TLS_KEY_FILE' -u BACKEND_TLS_KEY_FILE
+          check_startup_failure 'não contém um certificado PEM' BACKEND_TLS_CERT_FILE=/etc/hostname
+          check_startup_failure 'Chave privada PEM' BACKEND_TLS_KEY_FILE=/etc/hostname
+          other_pair=$(mktemp -d)
+          trap 'rm -r "$other_pair"' EXIT
+          python deploy/https/generate_certificate.py --out-dir "$other_pair"
+          "${compose[@]}" cp "$other_pair/backend.crt" backend:/tmp/capp-other.crt
+          check_startup_failure 'incompatível com BACKEND_TLS_KEY_FILE' BACKEND_TLS_CERT_FILE=/tmp/capp-other.crt
+      - name: Verify the backend port and the TLS handshake
+        run: |
+          id=$(docker compose --env-file .env.example ps -q postgres)
+          test "$(docker inspect --format '{{len .HostConfig.PortBindings}}' "$id")" = 0
+          docker compose --env-file .env.example port backend 3000
+          curl --noproxy '*' --fail --cacert .tls/backend.crt --tlsv1.3 https://localhost:8443/ready
+          curl --noproxy '*' --fail --cacert .tls/backend.crt --tlsv1.2 --tls-max 1.2 https://localhost:8443/ready
+          if curl --noproxy '*' --silent --max-time 3 http://127.0.0.1:8443/ready; then
+            echo 'The backend accepted plaintext HTTP.' >&2
+            exit 1
+          fi
+          expect_certificate_rejection() {
+            local status=0
+            curl --noproxy '*' --silent --show-error --max-time 3 "$@" || status=$?
+            test "$status" = 60
+          }
+          expect_certificate_rejection https://localhost:8443/ready
+          expect_certificate_rejection --cacert .tls/backend.crt \
+            --resolve wrong.invalid:8443:127.0.0.1 https://wrong.invalid:8443/ready
+      - name: Test the Flutter transport and the live Rust endpoint
+        working-directory: mobile
+        run: |
+          python -m pip install cryptography
+          flutter pub get --enforce-lockfile
+          python tool/test_backend_tls.py --backend-cert ../.tls/backend.crt --backend-url https://localhost:8443
+      - name: Stop the CI demo
+        if: always()
+        run: docker compose --env-file .env.example --profile backend down --volumes

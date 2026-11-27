@@ -10,24 +10,6 @@ use cucumber::{given, then, when};
 use super::pending_step;
 use crate::support::AppWorld;
 
-/// Pendente: a chave pública de {string} foi cadastrada antes do início da votação.
-#[given(regex = r#"^a chave pública de "([^"]*)" foi cadastrada antes do início da votação$"#)]
-fn given_a_chave_publica_de_valor_foi_cadastrada_antes_do_inicio_da_votacao(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step("a chave pública de {string} foi cadastrada antes do início da votação");
-}
-
-/// Pendente: a chave pública eleitoral de {string} foi cadastrada antes da abertura.
-#[given(regex = r#"^a chave pública eleitoral de "([^"]*)" foi cadastrada antes da abertura$"#)]
-fn given_a_chave_publica_eleitoral_de_valor_foi_cadastrada_antes_da_abertura(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step("a chave pública eleitoral de {string} foi cadastrada antes da abertura");
-}
-
 /// Pendente: a eleição está no período de votação.
 #[given(regex = r#"^a eleição está no período de votação$"#)]
 fn given_a_eleicao_esta_no_periodo_de_votacao(_world: &mut AppWorld) {
@@ -73,17 +55,6 @@ fn given_o_estudante_valor_ainda_nao_votou_nessa_eleicao(_world: &mut AppWorld, 
     pending_step("o estudante {string} ainda não votou nessa eleição");
 }
 
-/// Pendente: o estudante {string} está cadastrado e atende aos critérios de elegibilidade.
-#[given(
-    regex = r#"^o estudante "([^"]*)" está cadastrado e atende aos critérios de elegibilidade$"#
-)]
-fn given_o_estudante_valor_esta_cadastrado_e_atende_aos_criterios_de_elegibilidade(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step("o estudante {string} está cadastrado e atende aos critérios de elegibilidade");
-}
-
 /// Pendente: o estudante {string} já participou dessa eleição.
 #[given(regex = r#"^o estudante "([^"]*)" já participou dessa eleição$"#)]
 fn given_o_estudante_valor_ja_participou_dessa_eleicao(_world: &mut AppWorld, _value_1: String) {
@@ -98,32 +69,6 @@ fn given_o_estudante_valor_ja_registrou_um_voto_na_chapa_valor(
     _value_2: String,
 ) {
     pending_step("o estudante {string} já registrou um voto na chapa {string}");
-}
-
-/// Pendente: o estudante {string} não atende a um critério de elegibilidade definido para a eleição.
-#[given(
-    regex = r#"^o estudante "([^"]*)" não atende a um critério de elegibilidade definido para a eleição$"#
-)]
-fn given_o_estudante_valor_nao_atende_a_um_criterio_de_elegibilidade_definido_para_a_eleicao(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step(
-        "o estudante {string} não atende a um critério de elegibilidade definido para a eleição",
-    );
-}
-
-/// Pendente: o estudante {string} não consta no cadastro de eleitores definido antes do início da eleição.
-#[given(
-    regex = r#"^o estudante "([^"]*)" não consta no cadastro de eleitores definido antes do início da eleição$"#
-)]
-fn given_o_estudante_valor_nao_consta_no_cadastro_de_eleitores_definido_antes_do_inicio_da_eleicao(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step(
-        "o estudante {string} não consta no cadastro de eleitores definido antes do início da eleição",
-    );
 }
 
 /// Pendente: o estudante {string} não possui vínculo acadêmico válido com o Centro Acadêmico {string}.
@@ -216,24 +161,6 @@ fn given_que_o_estudante_valor_possui_vinculo_academico_valido_com_o_centro_acad
     );
 }
 
-/// Pendente: {string} consta no cadastro de eleitores definido antes da abertura.
-#[given(regex = r#"^"([^"]*)" consta no cadastro de eleitores definido antes da abertura$"#)]
-fn given_valor_consta_no_cadastro_de_eleitores_definido_antes_da_abertura(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step("{string} consta no cadastro de eleitores definido antes da abertura");
-}
-
-/// Pendente: {string} está cadastrada e atende aos critérios de elegibilidade.
-#[given(regex = r#"^"([^"]*)" está cadastrada e atende aos critérios de elegibilidade$"#)]
-fn given_valor_esta_cadastrada_e_atende_aos_criterios_de_elegibilidade(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step("{string} está cadastrada e atende aos critérios de elegibilidade");
-}
-
 /// Pendente: {string} já registrou sua participação nessa eleição por votação secreta.
 #[given(regex = r#"^"([^"]*)" já registrou sua participação nessa eleição por votação secreta$"#)]
 fn given_valor_ja_registrou_sua_participacao_nessa_eleicao_por_votacao_secreta(
@@ -241,33 +168,6 @@ fn given_valor_ja_registrou_sua_participacao_nessa_eleicao_por_votacao_secreta(
     _value_1: String,
 ) {
     pending_step("{string} já registrou sua participação nessa eleição por votação secreta");
-}
-
-/// Pendente: {string} possui uma chave pública cadastrada para a eleição.
-#[given(regex = r#"^"([^"]*)" possui uma chave pública cadastrada para a eleição$"#)]
-fn given_valor_possui_uma_chave_publica_cadastrada_para_a_eleicao(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step("{string} possui uma chave pública cadastrada para a eleição");
-}
-
-/// Pendente: {string} só foi cadastrado como eleitor depois da abertura.
-#[given(regex = r#"^"([^"]*)" só foi cadastrado como eleitor depois da abertura$"#)]
-fn given_valor_so_foi_cadastrado_como_eleitor_depois_da_abertura(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step("{string} só foi cadastrado como eleitor depois da abertura");
-}
-
-/// Pendente: a assinatura digital é validada com a chave pública cadastrada de {string}.
-#[then(regex = r#"^a assinatura digital é validada com a chave pública cadastrada de "([^"]*)"$"#)]
-fn then_a_assinatura_digital_e_validada_com_a_chave_publica_cadastrada_de_valor(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step("a assinatura digital é validada com a chave pública cadastrada de {string}");
 }
 
 /// Pendente: a chapa inativa {string} não é apresentada como opção.
@@ -305,19 +205,6 @@ fn then_a_cedula_e_recusada(_world: &mut AppWorld) {
     pending_step("a cédula é recusada");
 }
 
-/// Pendente: a cédula é recusada porque a assinatura não corresponde à identidade eleitoral de {string}.
-#[then(
-    regex = r#"^a cédula é recusada porque a assinatura não corresponde à identidade eleitoral de "([^"]*)"$"#
-)]
-fn then_a_cedula_e_recusada_porque_a_assinatura_nao_corresponde_a_identidade_eleitoral_de_valor(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step(
-        "a cédula é recusada porque a assinatura não corresponde à identidade eleitoral de {string}",
-    );
-}
-
 /// Pendente: a outra tentativa é recusada por participação já realizada.
 #[then(regex = r#"^a outra tentativa é recusada por participação já realizada$"#)]
 fn then_a_outra_tentativa_e_recusada_por_participacao_ja_realizada(_world: &mut AppWorld) {
@@ -346,12 +233,6 @@ fn then_a_participacao_de_valor_e_marcada_como_realizada_nessa_eleicao(
 #[then(regex = r#"^a tentativa de voto é recusada$"#)]
 fn then_a_tentativa_de_voto_e_recusada(_world: &mut AppWorld) {
     pending_step("a tentativa de voto é recusada");
-}
-
-/// Pendente: a tentativa de voto é recusada por falta de cadastro eleitoral.
-#[then(regex = r#"^a tentativa de voto é recusada por falta de cadastro eleitoral$"#)]
-fn then_a_tentativa_de_voto_e_recusada_por_falta_de_cadastro_eleitoral(_world: &mut AppWorld) {
-    pending_step("a tentativa de voto é recusada por falta de cadastro eleitoral");
 }
 
 /// Pendente: a tentativa de voto é recusada por falta de elegibilidade.
@@ -405,31 +286,6 @@ fn then_nenhum_voto_e_registrado_para_valor(_world: &mut AppWorld, _value_1: Str
     pending_step("nenhum voto é registrado para {string}");
 }
 
-/// Pendente: não consegue determinar a escolha em texto claro de {string} a partir desses dados.
-#[then(
-    regex = r#"^não consegue determinar a escolha em texto claro de "([^"]*)" a partir desses dados$"#
-)]
-fn then_nao_consegue_determinar_a_escolha_em_texto_claro_de_valor_a_partir_desses_dados(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step(
-        "não consegue determinar a escolha em texto claro de {string} a partir desses dados",
-    );
-}
-
-/// Pendente: não consegue determinar a escolha individual de cada eleitor com base nessas informações.
-#[then(
-    regex = r#"^não consegue determinar a escolha individual de cada eleitor com base nessas informações$"#
-)]
-fn then_nao_consegue_determinar_a_escolha_individual_de_cada_eleitor_com_base_nessas_informacoes(
-    _world: &mut AppWorld,
-) {
-    pending_step(
-        "não consegue determinar a escolha individual de cada eleitor com base nessas informações",
-    );
-}
-
 /// Pendente: o registro identifica {string} como eleitora e {string} como sua escolha.
 #[then(regex = r#"^o registro identifica "([^"]*)" como eleitora e "([^"]*)" como sua escolha$"#)]
 fn then_o_registro_identifica_valor_como_eleitora_e_valor_como_sua_escolha(
@@ -440,15 +296,15 @@ fn then_o_registro_identifica_valor_como_eleitora_e_valor_como_sua_escolha(
     pending_step("o registro identifica {string} como eleitora e {string} como sua escolha");
 }
 
-/// Pendente: o registro público contém a identificação do eleitor, a cédula cifrada e a assinatura do eleitor.
+/// Pendente: o registro público contém o identificador da conta CApp do eleitor, a cédula cifrada e a assinatura do eleitor.
 #[then(
-    regex = r#"^o registro público contém a identificação do eleitor, a cédula cifrada e a assinatura do eleitor$"#
+    regex = r#"^o registro público contém o identificador da conta CApp do eleitor, a cédula cifrada e a assinatura do eleitor$"#
 )]
-fn then_o_registro_publico_contem_a_identificacao_do_eleitor_a_cedula_cifrada_e_a_assinatura_do_eleitor(
+fn then_o_registro_publico_contem_o_identificador_da_conta_e_a_cedula_assinada(
     _world: &mut AppWorld,
 ) {
     pending_step(
-        "o registro público contém a identificação do eleitor, a cédula cifrada e a assinatura do eleitor",
+        "o registro público contém o identificador da conta CApp do eleitor, a cédula cifrada e a assinatura do eleitor",
     );
 }
 
@@ -476,14 +332,6 @@ fn then_o_voto_original_na_chapa_valor_permanece_como_o_unico_voto_de_valor_ness
 #[then(regex = r#"^o voto é confirmado$"#)]
 fn then_o_voto_e_confirmado(_world: &mut AppWorld) {
     pending_step("o voto é confirmado");
-}
-
-/// Pendente: o voto é recusado por ausência no cadastro eleitoral anterior à abertura.
-#[then(regex = r#"^o voto é recusado por ausência no cadastro eleitoral anterior à abertura$"#)]
-fn then_o_voto_e_recusado_por_ausencia_no_cadastro_eleitoral_anterior_a_abertura(
-    _world: &mut AppWorld,
-) {
-    pending_step("o voto é recusado por ausência no cadastro eleitoral anterior à abertura");
 }
 
 /// Pendente: são apresentadas as chapas ativas {string} e {string}.
@@ -523,19 +371,6 @@ fn when_registra_um_voto_secreto(_world: &mut AppWorld) {
     pending_step("registra um voto secreto");
 }
 
-/// Pendente: submete uma cédula assinada com a chave privada correspondente à sua chave pública cadastrada, indicando a chapa {string}.
-#[when(
-    regex = r#"^submete uma cédula assinada com a chave privada correspondente à sua chave pública cadastrada, indicando a chapa "([^"]*)"$"#
-)]
-fn when_submete_uma_cedula_assinada_com_a_chave_privada_correspondente_a_sua_chave_publica_cadastrada_indica(
-    _world: &mut AppWorld,
-    _value_1: String,
-) {
-    pending_step(
-        "submete uma cédula assinada com a chave privada correspondente à sua chave pública cadastrada, indicando a chapa {string}",
-    );
-}
-
 /// Pendente: submete uma cédula sem assinatura digital válida.
 #[when(regex = r#"^submete uma cédula sem assinatura digital válida$"#)]
 fn when_submete_uma_cedula_sem_assinatura_digital_valida(_world: &mut AppWorld) {
@@ -562,12 +397,6 @@ fn when_tenta_registrar_outro_voto_na_chapa_valor(_world: &mut AppWorld, _value_
     pending_step("tenta registrar outro voto na chapa {string}");
 }
 
-/// Pendente: tenta registrar um voto com assinatura válida.
-#[when(regex = r#"^tenta registrar um voto com assinatura válida$"#)]
-fn when_tenta_registrar_um_voto_com_assinatura_valida(_world: &mut AppWorld) {
-    pending_step("tenta registrar um voto com assinatura válida");
-}
-
 /// Pendente: tenta registrar um voto na chapa {string}.
 #[when(regex = r#"^tenta registrar um voto na chapa "([^"]*)"$"#)]
 fn when_tenta_registrar_um_voto_na_chapa_valor(_world: &mut AppWorld, _value_1: String) {
@@ -586,16 +415,304 @@ fn when_uma_pessoa_observa_a_ordem_e_o_momento_de_submissao_das_cedulas(_world: 
     pending_step("uma pessoa observa a ordem e o momento de submissão das cédulas");
 }
 
-/// Pendente: {string} submete uma cédula assinada com a chave privada correspondente à chave pública de {string}.
-#[when(
-    regex = r#"^"([^"]*)" submete uma cédula assinada com a chave privada correspondente à chave pública de "([^"]*)"$"#
+/// Pendente: "{string}" está autenticada pela sua conta Firebase.
+#[given(regex = r#"^"([^"]*)" está autenticada pela sua conta Firebase$"#)]
+fn given_valor_esta_autenticada_pela_sua_conta_firebase(_world: &mut AppWorld, _value_1: String) {
+    pending_step("\"{string}\" está autenticada pela sua conta Firebase");
+}
+
+/// Pendente: a eleição exige ou dispensa cadastro antes da abertura.
+#[given(regex = r"^que a eleição (exige|dispensa) o cadastro prévio da chave$")]
+fn given_exigencia_de_cadastro_previo(_world: &mut AppWorld, _exigencia: String) {
+    pending_step("que a eleição exige ou dispensa o cadastro prévio da chave");
+}
+
+/// Pendente: "{string}" cadastrou sua chave pública antes da abertura.
+#[given(regex = r#"^"([^"]*)" cadastrou sua chave pública antes da abertura$"#)]
+fn given_chave_cadastrada_antes_da_abertura(_world: &mut AppWorld, _eleitor: String) {
+    pending_step("\"{string}\" cadastrou sua chave pública antes da abertura");
+}
+
+/// Pendente: "{string}" não possui inscrição ou chave prévia nessa eleição.
+#[given(regex = r#"^"([^"]*)" não possui inscrição ou chave prévia nessa eleição$"#)]
+fn given_valor_nao_possui_inscricao_ou_chave_previa_nessa_eleicao(
+    _world: &mut AppWorld,
+    _value_1: String,
+) {
+    pending_step("\"{string}\" não possui inscrição ou chave prévia nessa eleição");
+}
+
+/// Pendente: registra seu primeiro voto na chapa "{string}".
+#[when(regex = r#"^registra seu primeiro voto na chapa "([^"]*)"$"#)]
+fn when_registra_seu_primeiro_voto_na_chapa_valor(_world: &mut AppWorld, _value_1: String) {
+    pending_step("registra seu primeiro voto na chapa \"{string}\"");
+}
+
+/// Pendente: a chave pública da cédula é gravada no registro de participação de "{string}" nessa eleição.
+#[then(
+    regex = r#"^a chave pública da cédula é gravada no registro de participação de "([^"]*)" nessa eleição$"#
 )]
-fn when_valor_submete_uma_cedula_assinada_com_a_chave_privada_correspondente_a_chave_publica_de_valor(
+fn then_a_chave_publica_da_cedula_e_gravada_na_participacao_de_valor(
+    _world: &mut AppWorld,
+    _value_1: String,
+) {
+    pending_step(
+        "a chave pública da cédula é gravada no registro de participação de \"{string}\" nessa eleição",
+    );
+}
+
+/// Pendente: a chave privada permanece no dispositivo de "{string}".
+#[then(regex = r#"^a chave privada permanece no dispositivo de "([^"]*)"$"#)]
+fn then_a_chave_privada_permanece_no_dispositivo_de_valor(_world: &mut AppWorld, _value_1: String) {
+    pending_step("a chave privada permanece no dispositivo de \"{string}\"");
+}
+
+/// Pendente: uma nova verificação institucional de "{string}" informa outro curso.
+#[given(regex = r#"^uma nova verificação institucional de "([^"]*)" informa outro curso$"#)]
+fn given_uma_nova_verificacao_institucional_de_valor_informa_outro_curso(
+    _world: &mut AppWorld,
+    _value_1: String,
+) {
+    pending_step("uma nova verificação institucional de \"{string}\" informa outro curso");
+}
+
+/// Pendente: o estudante "{string}" está autenticado e atende aos critérios de elegibilidade.
+#[given(
+    regex = r#"^o estudante "([^"]*)" está autenticado e atende aos critérios de elegibilidade$"#
+)]
+fn given_o_estudante_valor_esta_autenticado_e_atende_aos_criterios_de_elegibilidade(
+    _world: &mut AppWorld,
+    _value_1: String,
+) {
+    pending_step(
+        "o estudante \"{string}\" está autenticado e atende aos critérios de elegibilidade",
+    );
+}
+
+/// Pendente: "{string}" está autenticada e atende aos critérios de elegibilidade.
+#[given(regex = r#"^"([^"]*)" está autenticada e atende aos critérios de elegibilidade$"#)]
+fn given_valor_esta_autenticada_e_atende_aos_criterios_de_elegibilidade(
+    _world: &mut AppWorld,
+    _value_1: String,
+) {
+    pending_step("\"{string}\" está autenticada e atende aos critérios de elegibilidade");
+}
+
+/// Pendente: "{string}" envia uma cédula com o identificador da conta CApp de "{string}".
+#[when(regex = r#"^"([^"]*)" envia uma cédula com o identificador da conta CApp de "([^"]*)"$"#)]
+fn when_valor_envia_uma_cedula_com_o_identificador_da_conta_de_valor(
     _world: &mut AppWorld,
     _value_1: String,
     _value_2: String,
 ) {
+    pending_step("\"{string}\" envia uma cédula com o identificador da conta CApp de \"{string}\"");
+}
+
+/// Pendente: a cédula é recusada porque o identificador da cédula diverge da conta autenticada.
+#[then(
+    regex = r#"^a cédula é recusada porque o identificador da cédula diverge da conta autenticada$"#
+)]
+fn then_a_cedula_e_recusada_porque_a_conta_diverge_da_autenticacao(_world: &mut AppWorld) {
     pending_step(
-        "{string} submete uma cédula assinada com a chave privada correspondente à chave pública de {string}",
+        "a cédula é recusada porque o identificador da cédula diverge da conta autenticada",
     );
+}
+
+/// Pendente: submete uma cédula assinada com sua chave local, indicando a chapa "{string}".
+#[when(regex = r#"^submete uma cédula assinada com sua chave local, indicando a chapa "([^"]*)"$"#)]
+fn when_submete_uma_cedula_assinada_com_sua_chave_local_indicando_a_chapa_valor(
+    _world: &mut AppWorld,
+    _value_1: String,
+) {
+    pending_step("submete uma cédula assinada com sua chave local, indicando a chapa \"{string}\"");
+}
+
+/// Pendente: a assinatura digital é validada com a chave pública enviada na cédula de "{string}".
+#[then(
+    regex = r#"^a assinatura digital é validada com a chave pública enviada na cédula de "([^"]*)"$"#
+)]
+fn then_a_assinatura_digital_e_validada_com_a_chave_publica_enviada_na_cedula_de_valor(
+    _world: &mut AppWorld,
+    _value_1: String,
+) {
+    pending_step(
+        "a assinatura digital é validada com a chave pública enviada na cédula de \"{string}\"",
+    );
+}
+
+/// Pendente: a publicação não expõe escolha em claro nem aleatoriedade da cifragem.
+#[then(regex = r#"^a publicação não expõe escolha em claro nem aleatoriedade da cifragem$"#)]
+fn then_a_publicacao_nao_expoe_escolha_em_claro_nem_aleatoriedade_da_cifragem(
+    _world: &mut AppWorld,
+) {
+    pending_step("a publicação não expõe escolha em claro nem aleatoriedade da cifragem");
+}
+
+/// Pendente: os dados não publicam a escolha em claro de "{string}".
+#[then(regex = r#"^os dados não publicam a escolha em claro de "([^"]*)"$"#)]
+fn then_os_dados_nao_publicam_a_escolha_em_claro_de_valor(_world: &mut AppWorld, _value_1: String) {
+    pending_step("os dados não publicam a escolha em claro de \"{string}\"");
+}
+
+/// Pendente: "{string}" já participou dessa eleição.
+#[given(regex = r#"^"([^"]*)" já participou dessa eleição$"#)]
+fn given_valor_ja_participou_dessa_eleicao(_world: &mut AppWorld, _value_1: String) {
+    pending_step("\"{string}\" já participou dessa eleição");
+}
+
+/// Pendente: "{string}" tenta votar em outro dispositivo com um novo par de chaves.
+#[when(regex = r#"^"([^"]*)" tenta votar em outro dispositivo com um novo par de chaves$"#)]
+fn when_valor_tenta_votar_em_outro_dispositivo_com_um_novo_par_de_chaves(
+    _world: &mut AppWorld,
+    _value_1: String,
+) {
+    pending_step("\"{string}\" tenta votar em outro dispositivo com um novo par de chaves");
+}
+
+/// Pendente: que "{string}" já participou dessa eleição.
+#[given(regex = r#"^que "([^"]*)" já participou dessa eleição$"#)]
+fn given_que_valor_ja_participou_dessa_eleicao(_world: &mut AppWorld, _value_1: String) {
+    pending_step("que \"{string}\" já participou dessa eleição");
+}
+
+/// Pendente: "{string}" está autenticada em outro dispositivo sem a chave privada anterior.
+#[given(
+    regex = r#"^"([^"]*)" está autenticada em outro dispositivo sem a chave privada anterior$"#
+)]
+fn given_valor_esta_autenticada_em_outro_dispositivo_sem_a_chave_privada_anterior(
+    _world: &mut AppWorld,
+    _value_1: String,
+) {
+    pending_step("\"{string}\" está autenticada em outro dispositivo sem a chave privada anterior");
+}
+
+/// Pendente: solicita seu recibo de participação.
+#[when(regex = r#"^solicita seu recibo de participação$"#)]
+fn when_solicita_seu_recibo_de_participacao(_world: &mut AppWorld) {
+    pending_step("solicita seu recibo de participação");
+}
+
+/// Pendente: recebe o recibo do voto já aceito.
+#[then(regex = r#"^recebe o recibo do voto já aceito$"#)]
+fn then_recebe_o_recibo_do_voto_ja_aceito(_world: &mut AppWorld) {
+    pending_step("recebe o recibo do voto já aceito");
+}
+
+/// Pendente: nenhum novo voto é registrado.
+#[then(regex = r#"^nenhum novo voto é registrado$"#)]
+fn then_nenhum_novo_voto_e_registrado(_world: &mut AppWorld) {
+    pending_step("nenhum novo voto é registrado");
+}
+
+/// Pendente: que o voto de "{string}" foi aceito mas a confirmação não chegou ao dispositivo.
+#[given(
+    regex = r#"^que o voto de "([^"]*)" foi aceito mas a confirmação não chegou ao dispositivo$"#
+)]
+fn given_que_o_voto_de_valor_foi_aceito_mas_a_confirmacao_nao_chegou_ao_dispositivo(
+    _world: &mut AppWorld,
+    _value_1: String,
+) {
+    pending_step(
+        "que o voto de \"{string}\" foi aceito mas a confirmação não chegou ao dispositivo",
+    );
+}
+
+/// Pendente: "{string}" retransmite o mesmo pacote assinado com o mesmo identificador de envio.
+#[when(
+    regex = r#"^"([^"]*)" retransmite o mesmo pacote assinado com o mesmo identificador de envio$"#
+)]
+fn when_valor_retransmite_o_mesmo_pacote_assinado_com_o_mesmo_identificador_de_envio(
+    _world: &mut AppWorld,
+    _value_1: String,
+) {
+    pending_step(
+        "\"{string}\" retransmite o mesmo pacote assinado com o mesmo identificador de envio",
+    );
+}
+
+/// Pendente: seleciona a opção "{string}" e confirma o voto.
+#[when(regex = r#"^seleciona a opção "([^"]*)" e confirma o voto$"#)]
+fn when_seleciona_a_opcao_valor_e_confirma_o_voto(_world: &mut AppWorld, _value_1: String) {
+    pending_step("seleciona a opção \"{string}\" e confirma o voto");
+}
+
+/// Pendente: a opção "{string}" não é oferecida.
+#[then(regex = r#"^a opção "([^"]*)" não é oferecida$"#)]
+fn then_a_opcao_valor_nao_e_oferecida(_world: &mut AppWorld, _value_1: String) {
+    pending_step("a opção \"{string}\" não é oferecida");
+}
+
+/// Pendente: que a votação foi encerrada com dois participantes.
+#[given(regex = r#"^que a votação foi encerrada com dois participantes$"#)]
+fn given_que_a_votacao_foi_encerrada_com_dois_participantes(_world: &mut AppWorld) {
+    pending_step("que a votação foi encerrada com dois participantes");
+}
+
+/// Pendente: todas as autoridades forneceram contribuições válidas.
+#[given(regex = r#"^todas as autoridades forneceram contribuições válidas$"#)]
+fn given_todas_as_autoridades_forneceram_contribuicoes_validas(_world: &mut AppWorld) {
+    pending_step("todas as autoridades forneceram contribuições válidas");
+}
+
+/// Pendente: a apuração produz um voto para "{string}" e um voto nulo.
+#[when(regex = r#"^a apuração produz um voto para "([^"]*)" e um voto nulo$"#)]
+fn when_a_apuracao_produz_um_voto_para_valor_e_um_voto_nulo(
+    _world: &mut AppWorld,
+    _value_1: String,
+) {
+    pending_step("a apuração produz um voto para \"{string}\" e um voto nulo");
+}
+
+/// Pendente: a contagem é consistente com os dois participantes.
+#[then(regex = r#"^a contagem é consistente com os dois participantes$"#)]
+fn then_a_contagem_e_consistente_com_os_dois_participantes(_world: &mut AppWorld) {
+    pending_step("a contagem é consistente com os dois participantes");
+}
+
+/// Pendente: a soma das opções incluindo Nulo resulta em três votos.
+#[when(regex = r#"^a soma das opções incluindo Nulo resulta em três votos$"#)]
+fn when_a_soma_das_opcoes_incluindo_nulo_resulta_em_tres_votos(_world: &mut AppWorld) {
+    pending_step("a soma das opções incluindo Nulo resulta em três votos");
+}
+
+/// Pendente: a eleição é anulada por inconsistência da contagem.
+#[then(regex = r#"^a eleição é anulada por inconsistência da contagem$"#)]
+fn then_a_eleicao_e_anulada_por_inconsistencia_da_contagem(_world: &mut AppWorld) {
+    pending_step("a eleição é anulada por inconsistência da contagem");
+}
+
+/// Pendente: os registros permanecem disponíveis para auditoria.
+#[then(regex = r#"^os registros permanecem disponíveis para auditoria$"#)]
+fn then_os_registros_permanecem_disponiveis_para_auditoria(_world: &mut AppWorld) {
+    pending_step("os registros permanecem disponíveis para auditoria");
+}
+
+/// Pendente: a soma das opções incluindo Nulo resulta em um voto.
+#[when(regex = r#"^a soma das opções incluindo Nulo resulta em um voto$"#)]
+fn when_a_soma_das_opcoes_incluindo_nulo_resulta_em_um_voto(_world: &mut AppWorld) {
+    pending_step("a soma das opções incluindo Nulo resulta em um voto");
+}
+
+/// Pendente: que o período de votação foi encerrado.
+#[given(regex = r#"^que o período de votação foi encerrado$"#)]
+fn given_que_o_periodo_de_votacao_foi_encerrado(_world: &mut AppWorld) {
+    pending_step("que o período de votação foi encerrado");
+}
+
+/// Pendente: falta uma contribuição válida de autoridade.
+#[given(regex = r#"^falta uma contribuição válida de autoridade$"#)]
+fn given_falta_uma_contribuicao_valida_de_autoridade(_world: &mut AppWorld) {
+    pending_step("falta uma contribuição válida de autoridade");
+}
+
+/// Pendente: a apuração é solicitada.
+#[when(regex = r#"^a apuração é solicitada$"#)]
+fn when_a_apuracao_e_solicitada(_world: &mut AppWorld) {
+    pending_step("a apuração é solicitada");
+}
+
+/// Pendente: a apuração permanece incompleta e sem totais definitivos.
+#[then(regex = r#"^a apuração permanece incompleta e sem totais definitivos$"#)]
+fn then_a_apuracao_permanece_incompleta_e_sem_totais_definitivos(_world: &mut AppWorld) {
+    pending_step("a apuração permanece incompleta e sem totais definitivos");
 }

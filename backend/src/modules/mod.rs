@@ -2,6 +2,8 @@
 //!
 //! Cada domínio possui camadas de API, aplicação, domínio e infraestrutura.
 //! [`identity`] implementa verificação institucional e persistência da evidência.
+//! [`ca`] contém o modelo de Centro Acadêmico; [`elections`] contém o domínio
+//! eleitoral, portas de aplicação e consulta, ainda sem API ou persistência própria.
 //! Os demais módulos estabelecem a organização prevista, sem casos de uso,
 //! endpoints de negócio ou persistência implementados.
 //!

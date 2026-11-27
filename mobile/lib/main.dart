@@ -7,8 +7,8 @@
 /// ## Ordem de inicialização
 ///
 /// 1. Prepara o binding Flutter, necessário aos plugins de plataforma.
-/// 2. Aguarda o bootstrap dos serviços externos.
-/// 3. Cria AppDependencies e inicia a sessão e a consulta de prontidão do backend.
+/// 2. Aguarda o bootstrap do Firebase e a ativação de App Check.
+/// 3. Aguarda AppDependencies, incluindo MSAL, e inicia sessão e consulta de prontidão.
 /// 4. Entrega a composição já iniciada a AppRoot por meio de runApp.
 ///
 /// Iniciar o acompanhamento não significa concluir a restauração. A árvore visual
@@ -18,8 +18,13 @@
 /// ## Configuração e propriedade
 ///
 /// BACKEND_BASE_URL é recebido por --dart-define. O padrão
-/// http://10.0.2.2:3000 atende ao emulador Android; outros ambientes precisam
+/// https://10.0.2.2:8443 atende ao emulador Android; outros ambientes precisam
 /// informar um endereço alcançável pelo dispositivo.
+/// BACKEND_TLS_TRUST_PEM_BASE64 acrescenta o certificado público do backend
+/// de demonstração às raízes confiáveis do transporte nativo.
+/// MSAL_CLIENT_ID e MSAL_ANDROID_REDIRECT_URI também são recebidos por --dart-define
+/// e são obrigatórios na composição Android atual. A URI precisa corresponder
+/// ao registro Microsoft e ao filtro de redirecionamento do AndroidManifest.xml.
 ///
 /// AppRoot assume o encerramento dos recursos da composição. Falhas anteriores
 /// à montagem propagam ao chamador de main. A consulta inicial a /ready acontece
@@ -34,7 +39,7 @@ import 'bootstrap.dart';
 
 /// Inicializa os serviços e transfere a composição para [AppRoot].
 ///
-/// Prepara o binding Flutter, aguarda a inicialização do Firebase, cria
+/// Prepara o binding Flutter, aguarda a inicialização do Firebase e MSAL, cria
 /// [AppDependencies] e inicia o acompanhamento da sessão e a consulta de prontidão
 /// antes de montar a interface, sem aguardar suas conclusões.
 ///
@@ -52,13 +57,25 @@ Future<void> main() async {
 
   await initializeServices();
 
-  final dependencies = AppDependencies.create(
-    backendBaseUrl: const String.fromEnvironment(
-      'BACKEND_BASE_URL',
-      defaultValue: 'http://10.0.2.2:3000',
-    ),
-  )..start();
+  final dependencies =
+      await AppDependencies.create(
+          backendBaseUrl: const String.fromEnvironment(
+            'BACKEND_BASE_URL',
+            defaultValue: 'https://10.0.2.2:8443',
+          ),
+          microsoftClientId: const String.fromEnvironment('MSAL_CLIENT_ID'),
+          microsoftAndroidRedirectUri: const String.fromEnvironment(
+            'MSAL_ANDROID_REDIRECT_URI',
+          ),
+        )
+        ..start();
 
   // Inicializa a interface Flutter.
-  runApp(AppRoot(dependencies: dependencies));
+  runApp(
+    AppRoot(
+      dependencies: dependencies,
+      electionId: const String.fromEnvironment('ELECTION_ID'),
+      manifestHash: const String.fromEnvironment('ELECTION_MANIFEST_SHA256'),
+    ),
+  );
 }

@@ -9,8 +9,8 @@
 # publicar esses rascunhos sem homologação e editar eventos vinculados ao CA.
 # O local especial "o ambiente físico do próprio CA" sempre exige homologação.
 # Editar um evento publicado o retira da agenda até nova homologação.
-# Título, descrição, início e local são obrigatórios; término é opcional e, quando
-# informado, deve ser estritamente posterior ao início.
+# Título, descrição, início, término e local são obrigatórios; o término deve ser
+# estritamente posterior ao início.
 # Os e-mails abaixo são exemplos fictícios de contas institucionais da UnB.
 # @backend e @mobile indicam onde o cenário deve ser verificado.
 @pending_backend @pending_mobile
@@ -60,7 +60,6 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       Quando o gestor "231012345@aluno.unb.br" publica diretamente o evento "Oficina de Redes Definidas por Software" em "CAER"
       Então o evento "Oficina de Redes Definidas por Software" passa a estar publicado em "CAER"
       E o evento passa a figurar na agenda de eventos publicados de "CAER"
-      E a data de publicação do evento fica registrada
 
     @happy @backend
     Cenário: Publicar evento em um CA não altera a agenda de outro CA
@@ -92,6 +91,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
         |                           | Palestra sobre segurança em redes      | 2026-11-20 14:00 | 2026-11-20 16:00 | Auditório FT     | título            |
         | Palestra de Cibersegurança|                                        | 2026-11-20 14:00 | 2026-11-20 16:00 | Auditório FT     | descrição         |
         | Palestra de Cibersegurança| Palestra sobre segurança em redes      |                  | 2026-11-20 16:00 | Auditório FT     | início            |
+        | Palestra de Cibersegurança| Palestra sobre segurança em redes      | 2026-11-20 14:00 |                  | Auditório FT     | término           |
         | Palestra de Cibersegurança| Palestra sobre segurança em redes      | 2026-11-20 14:00 | 2026-11-20 16:00 |                  | local             |
 
     @sad @backend @mobile
@@ -166,6 +166,7 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
         |                           | Palestra sobre segurança em redes | 2026-11-20 14:00 | 2026-11-20 16:00 | Auditório FT | título            |
         | Palestra de Cibersegurança|                                   | 2026-11-20 14:00 | 2026-11-20 16:00 | Auditório FT | descrição         |
         | Palestra de Cibersegurança| Palestra sobre segurança em redes |                  | 2026-11-20 16:00 | Auditório FT | início            |
+        | Palestra de Cibersegurança| Palestra sobre segurança em redes | 2026-11-20 14:00 |                  | Auditório FT | término           |
         | Palestra de Cibersegurança| Palestra sobre segurança em redes | 2026-11-20 14:00 | 2026-11-20 16:00 |              | local             |
 
     @sad @backend @mobile
@@ -241,13 +242,13 @@ Funcionalidade: Criação e gerenciamento de eventos pela gestão do Centro Acad
       Então a operação é recusada por falta de permissão
       E o evento "Maratona de Programação da UnB" permanece inalterado em "CACC"
 
-  Regra: O término é opcional e o período informado deve ser válido
+  Regra: O término é obrigatório e o período informado deve ser válido
 
-    @happy @backend @mobile
-    Cenário: Criar evento sem horário de término
-      Quando o gestor "231012345@aluno.unb.br" cria em "CAER" um evento com título, descrição, início e local válidos sem informar o término
-      Então o evento é registrado sem horário de término
-      E nenhum horário de término é inventado pelo sistema
+    @sad @backend @mobile
+    Cenário: Criação de evento sem horário de término é recusada
+      Quando o gestor "231012345@aluno.unb.br" tenta criar em "CAER" um evento com título, descrição, início e local válidos sem informar o término
+      Então a operação é recusada informando que "término" do evento é obrigatório
+      E nenhum novo evento é registrado em "CAER"
 
     @sad @backend @mobile
     Cenário: Término igual ao início não constitui um período válido

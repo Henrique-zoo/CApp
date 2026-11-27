@@ -1,4 +1,10 @@
-//! Espaço reservado para serviços de aplicação do módulo de eleições.
+//! Casos de uso eleitorais que coordenam o domínio e as portas de aplicação.
 //!
-//! Ainda não possui serviços. Sua responsabilidade prevista é coordenar
-//! regras de domínio, persistência e integrações durante os casos de uso.
+//! Consultas usadas pelo aplicativo também pertencem a este módulo, onde
+//! recebem as dependências de leitura e aplicam as regras de acesso do caso de uso.
+
+pub mod administration;
+pub mod board;
+pub mod preparation;
+pub mod tally;
+pub mod voter_registration;

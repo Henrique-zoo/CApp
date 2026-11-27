@@ -6,11 +6,17 @@
 
 use std::time::Duration;
 
-use axum::{Router, extract::State, routing::get};
+use axum::{Router, extract::State, middleware, routing::get};
 use reqwest::StatusCode;
 use tokio::time::timeout;
 
-use crate::api::state::AppState;
+use crate::{
+    api::{app_check::require_app_check, state::AppState},
+    modules::{
+        elections::api as elections_api,
+        identity::{api as identity_api, infrastructure::firebase::AppCheckVerifier},
+    },
+};
 
 /// Monta as rotas globais e de identidade, ainda dependentes de [`AppState`].
 ///
@@ -20,6 +26,11 @@ use crate::api::state::AppState;
 /// | --- | --- |
 /// | `POST /auth/institutional/verify` | Valida as credenciais, persiste a confirmação e retorna perfil e validade. |
 /// | `GET /health` | Retorna HTTP 200 e `O servidor está saudável.` sem consultar dependências. |
+/// | `GET /elections/{id}/board` | Exporta uma fotografia consistente do quadro público. |
+/// | `GET /elections/{id}/board/checkpoint` | Distribui a âncora assinada da posição atual do quadro. |
+/// | `GET /elections/{id}/registration/me` | Consulta chave e participação da conta autenticada. |
+/// | `PUT /elections/{id}/registration/me` | Cadastra a chave com uma prova assinada antes da votação. |
+/// | `POST /elections/{id}/ballots` | Confirma uma cédula cifrada e assinada ou recupera seu recibo. |
 /// | `GET /ready` | Executa `SELECT 1 AS ok` no pool; retorna HTTP 200 no sucesso e HTTP 503 em erro ou timeout. |
 ///
 /// A prontidão limita a espera pela aquisição da conexão e execução da consulta
@@ -28,13 +39,17 @@ use crate::api::state::AppState;
 /// A consulta verifica comunicação com o banco, não a existência das tabelas,
 /// a versão do esquema nem a disponibilidade das demais integrações.
 ///
+/// # Parâmetros
+///
+/// - `state`: recursos compartilhados pelos handlers e extratores de identidade.
+/// - `app_check`: verificador compartilhado pelo middleware de atestado do aplicativo.
+///
 /// # Retorno
 ///
-/// Um [`Router<AppState>`] que deve receber o estado por [`Router::with_state`]
-/// antes de atender requisições. Não inicia servidor, não aplica migrations e
-/// não instala proteção global. A rota de verificação interpreta suas próprias
-/// credenciais; o extractor de evidência persistida só protege handlers que o
-/// recebam explicitamente, e nenhuma rota atual o recebe.
+/// Router já associado a [AppState], com fiscalização App Check nas rotas de
+/// negócio. Saúde, prontidão e evidências do quadro são públicas. Construir não inicia servidor,
+/// aplica migrations ou consulta chaves remotas. Após a comprovação do aplicativo,
+/// cada rota continua verificando a identidade Firebase e suas regras de acesso.
 ///
 /// # Exemplos
 ///
@@ -61,10 +76,12 @@ use crate::api::state::AppState;
 ///     .build()?;
 /// let firebase = FirebaseTokenVerifier::new("capp-example".into(), http.clone())?;
 /// let microsoft = MicrosoftGraphClient::new(http);
+/// let app_check = backend::modules::identity::infrastructure::firebase::AppCheckVerifier::new(
+///     "1234567890".into(), vec!["1:1234567890:android:capp".into()], reqwest::Client::new())?;
 /// let state = AppState::new(
 ///     PgDatabase::new(pool.clone()), Clients::new(firebase, microsoft),
 /// );
-/// let app = create_router().with_state(state);
+/// let app = create_router(state, app_check);
 /// let response = app
 ///     .oneshot(Request::builder().uri("/health").body(Body::empty())?)
 ///     .await?;
@@ -73,9 +90,10 @@ use crate::api::state::AppState;
 /// # Ok(())
 /// # }
 /// ```
-pub fn create_router() -> Router<AppState> {
+pub fn create_router(state: AppState, app_check: AppCheckVerifier) -> Router {
     Router::new()
-        .merge(crate::modules::identity::api::router())
+        .merge(identity_api::router())
+        .merge(elections_api::protected_json_routes())
         .route("/health", get(|| async { "O servidor está saudável." }))
         .route(
             "/ready",
@@ -99,4 +117,7 @@ pub fn create_router() -> Router<AppState> {
                 }
             }),
         )
+        .route_layer(middleware::from_fn_with_state(app_check, require_app_check))
+        .merge(elections_api::public_board_routes())
+        .with_state(state)
 }
